@@ -7438,7 +7438,7 @@ fn run_with_log(
                 // and files seeds name the guest's scene files by
                 // $TMP/$PID token, and an unexpanded token is a literal
                 // path that exists nowhere.
-                let resolved = expand_path(arg);
+                let resolved = seed_argument(kind, arg);
                 if matches!(kind.as_str(), "image" | "files")
                     && !std::path::Path::new(&resolved).exists()
                 {
@@ -10673,9 +10673,24 @@ fn expand_path(path: &str) -> String {
     out
 }
 
+/// A seed's argument as the stage receives it: a PATH only for the kinds that
+/// name files, and every other kind's content untouched, since Windows' path
+/// rewrite turned an html seed's `</b>` into `<\b>` (the WinUI rich document
+/// arm, 2026-11-11).
+fn seed_argument(kind: &str, arg: &str) -> String {
+    if matches!(kind, "image" | "files") { expand_path(arg) } else { arg.to_owned() }
+}
+
 #[cfg(test)]
 mod expand_tests {
     use super::expand_path;
+
+    #[test]
+    fn only_file_seeds_are_paths() {
+        assert_eq!(super::seed_argument("html", "<b>$TMP</b>"), "<b>$TMP</b>");
+        assert_eq!(super::seed_argument("text", "a/b $PID"), "a/b $PID");
+        assert_ne!(super::seed_argument("files", "$PID"), "$PID");
+    }
 
     #[test]
     fn whole_names_only() {
@@ -10945,11 +10960,22 @@ fn poll_inner(
 /// siblings" is this family's exact failure face (docs/deferred.md's
 /// iOS-sheets WATCH entry) and the read that saw it is discarded
 /// everywhere else.
+/// How long a dialog verb waits for the panel a menu item asked for: WinUI
+/// presents it a dispatcher turn or more after the app's transaction, so a
+/// verb straight after `menu_activate` found none live (editor.steps' rich
+/// tab, the windows lane, 2026-11-11).
+const DIALOG_APPEARS_WITHIN: std::time::Duration = std::time::Duration::from_secs(5);
+
 fn traced_file_dialog_state(
     verb: &'static str,
     stage: &impl Stage,
 ) -> Option<(String, Vec<String>)> {
-    let state = stage.file_dialog_state();
+    let until = std::time::Instant::now() + DIALOG_APPEARS_WITHIN;
+    let mut state = stage.file_dialog_state();
+    while state.is_none() && std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        state = stage.file_dialog_state();
+    }
     match &state {
         Some((where_, rows)) => vtrace::note(
             verb,
@@ -10962,7 +10988,12 @@ fn traced_file_dialog_state(
 
 /// Its save-panel half.
 fn traced_save_dialog_state(verb: &'static str, stage: &impl Stage) -> Option<(String, String)> {
-    let state = stage.save_dialog_state();
+    let until = std::time::Instant::now() + DIALOG_APPEARS_WITHIN;
+    let mut state = stage.save_dialog_state();
+    while state.is_none() && std::time::Instant::now() < until {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        state = stage.save_dialog_state();
+    }
     match &state {
         Some((where_, name)) => vtrace::note(
             verb,

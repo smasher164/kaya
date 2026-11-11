@@ -881,6 +881,16 @@ def clip_press(udid):
         if not ok:
             return "pressed" if did else "none"
         did = True
+        # A PRESS AGAIN ONLY ONCE THE ALERT HAS HAD TIME TO GO: a second
+        # press while it animates away taps its old frame, which lands on
+        # the app under it (the richdoc leg's "red" button, measured
+        # 2026-11-11; docs/traps.md, the paste alert's second press).
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if not (xcuidrive(udid, "sb_find Allow Paste", timeout=20)[0]
+                    or xcuidrive(udid, "find Allow Paste", timeout=20)[0]):
+                return "pressed"
+            time.sleep(0.2)
     return None
 
 
@@ -1493,8 +1503,10 @@ BRIDGE_VERBS = frozenset((
     # The font picker is a remote view the driver reads and taps
     # (docs/font-picker-plan.md §7).
     "pick_font", "expect_font_dialog",
-    # The colour picker is a remote view too (docs/color-picker-plan.md §4.2).
-    "pick_color",
+    # The colour picker is a remote view too (docs/color-picker-plan.md §4.2),
+    # the text colour's as well; a checklist box is the driver's tap
+    # (docs/rich-document-plan.md §11).
+    "pick_color", "pick_text_color", "click_marker",
     # `press tab|space|up|down` is the driver's hardware key (kayaPressFocusKey),
     # and the menu bar read sends one (kayaAwaitMenuBuild).
     "press", "expect_menu_bar",

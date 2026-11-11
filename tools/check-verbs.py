@@ -2868,9 +2868,14 @@ POLISH_DRAWS = [
     ("winui/mod.rs", WINUI, "the code and quote grounds",
      r"fn rich_ground\(", r"\n}\n",
      [r"code_ground", r"quote_ground"]),
-    ("winui/mod.rs", WINUI, "the ground and indent written",
+    ("winui/mod.rs", WINUI, "the ground written",
      r"fn rich_write_format\(", r"\n}\n",
-     [r"SetBackgroundColor\(match rich_ground\(", r"SetIndents\(0\.0, indent, 0\.0\)"]),
+     [r"SetBackgroundColor\(match rich_ground\("]),
+    # The paragraph layer moved to winui/richdoc.rs with the rich document
+    # (docs/rich-document-plan.md §11): a quote's and a list's indent.
+    ("winui/richdoc.rs", "crates/kaya/src/winui/richdoc.rs", "the paragraph indent written",
+     r"fn paragraph_formats\(", r"\n}\n",
+     [r"SetIndents\(0\.0, paragraph_left\(", r"SetAlignment\(paragraph_alignment\("]),
     # The rich LABEL's ground on WinUI is a TextHighlighter per colour over
     # the block (Run/Span/Hyperlink carry no background); the restyle row
     # has the teeth, since a restyle that stopped calling the painter draws
@@ -2893,7 +2898,23 @@ POLISH_DRAWS = [
      [r"drawRect\(", r"getLineTop\(", r"getLineBottom\("]),
     ("KayaCompose.kt", KOTLIN, "the quote rule's call under the field",
      r"fun KayaHighlightLayer\(", r"\n}\n",
-     [r"kayaRichQuoteRule\("]),
+     [r"kayaRichQuoteRule\(", r"kayaRichMarkers\(", r"kayaRichPhantomLines\("]),
+    # The rich document on Compose (docs/rich-document-plan.md §11): the
+    # colour drawn through the core's dark map, the markers DRAWN (the
+    # record is written beside the draw, so a cut draw passes every leg),
+    # and the paragraph-style boundary's newline repair (docs/traps.md).
+    ("KayaCompose.kt", KOTLIN, "the document colour",
+     r"fun kayaRichSpanStyle\(", r"\n}\n",
+     [r"kayaDocumentInk\("]),
+    ("KayaCompose.kt", KOTLIN, "the dark map",
+     r"fun kayaDocumentInk\(", r"\n}\n",
+     [r"KayaPresent\.inkForDark\("]),
+    ("KayaCompose.kt", KOTLIN, "the list markers drawn",
+     r"fun (?:[\w.]+\.)?DrawScope\.kayaRichMarkers\(", r"\n}\n",
+     [r"drawText\(", r"kayaRichCheckBox\("]),
+    ("KayaCompose.kt", KOTLIN, "the boundary newline repair",
+     r"fun kayaRichTransformation\(", r"\n}\n",
+     [r"KAYA_RICH_BOUNDARY_NEWLINE"]),
 ]
 
 
@@ -2902,7 +2923,7 @@ def polish_clauses(gtk_src=None, winui_src=None, swift_src=None,
     bad = []
     srcs = {GTK: gtk_src, WINUI: winui_src, SWIFT: swift_src, KOTLIN: kotlin_src}
     for name, rel, what, anchor_re, end, apis in POLISH_DRAWS:
-        text = srcs[rel] if srcs[rel] is not None else real(rel)
+        text = srcs.get(rel) if srcs.get(rel) is not None else real(rel)
         m = re.search(anchor_re, text)
         if not m:
             bad.append(f"{name} has no site for {what} (wanted /{anchor_re}/)")
@@ -4053,7 +4074,7 @@ def ios_menu_build(swift_src=None, driver_src=None, runner_src=None):
                    "kayaAwaitMenuBuild() first")
     if 'KayaSimdrive.ask("key shift"' not in swift:
         bad.append("KayaSwiftUI.swift: kayaAwaitMenuBuild sends the driver no shift")
-    if '"shift": XCUIKeyboardKey.shift.rawValue' not in (driver_src or real(IOS_DRIVER)):
+    if '"shift": (XCUIKeyboardKey.shift.rawValue' not in (driver_src or real(IOS_DRIVER)):
         bad.append(f"{IOS_DRIVER}: the driver has no shift key for kayaAwaitMenuBuild")
     runner = runner_src or real(IOS_RUNNER)
     if '"press", "expect_menu_bar"' not in runner \
@@ -4075,7 +4096,7 @@ for label, kw, pattern, repl in (
         ("iOS titled read without its key", "swift_src",
          r"if aspect == \.title \{ kayaAwaitMenuBuild\(\) \}", ""),
         ("driver without shift", "driver_src",
-         r'"shift": XCUIKeyboardKey', '"shiftx": XCUIKeyboardKey'),
+         r'"shift": \(XCUIKeyboardKey', '"shiftx": (XCUIKeyboardKey'),
         ("runner not bridging the bar read", "runner_src",
          r'"press", "expect_menu_bar"', '"press"')):
     src = {"swift_src": SWIFT, "driver_src": IOS_DRIVER, "runner_src": IOS_RUNNER}[kw]

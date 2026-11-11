@@ -498,6 +498,12 @@ sealed class Document
 
     public IReadOnlyList<TextRun> Runs => Marks;
 
+    /// Value equality: the same text and the same runs in order (Rust's ==).
+    public override bool Equals(object? obj) =>
+        obj is Document other && Text == other.Text && Marks.SequenceEqual(other.Marks);
+
+    public override int GetHashCode() => HashCode.Combine(Text, Marks.Count);
+
     /// Paint one attribute over one range. Every chain method below is
     /// this one with a name and a value filled in.
     public Document Mark(TextRange range, string name, string value)

@@ -84,7 +84,7 @@ OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland editork
 # waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
 # `richtext`, `ownundo` and `richlabel` wait on the eight other bindings'
 # Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14, §15).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow stampbefore mountfocus tints icons badge emoji"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext richdoc ownundo richlabel notes richrows format flexshrink listrow stampbefore mountfocus tints icons badge emoji"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -2735,6 +2735,13 @@ for proto in x11 wayland; do
     # bus (§18), and check-steps holds that route.
     run "$proto" richtext-rust env KAYA_SELFTEST=richtext \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/richtext"
+    # THE RICH DOCUMENT (docs/rich-document-plan.md §9 step 4): rust alone at
+    # depth, light and dark (its colour is drawn through the core's map on a
+    # dark page, RD5); every read is the core's or the arm's own record.
+    run "$proto" richdoc-rust env KAYA_SELFTEST=richdoc \
+        "$CARGO_TARGET_DIR/debug/examples/richdoc"
+    run "$proto" richdocdark-rust env KAYA_APPEARANCE=dark KAYA_SELFTEST=richdoc \
+        "$CARGO_TARGET_DIR/debug/examples/richdoc"
     # THE RICH ROWS (docs/rich-text-plan.md §19): rust alone for richtext's
     # reason; every read is the core's document, so no a11y-leg.sh.
     run "$proto" richrows-rust env KAYA_SELFTEST=richrows \

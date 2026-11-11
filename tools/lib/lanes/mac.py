@@ -51,7 +51,7 @@ SCENES = [
     "commands", "a11y", "a11yrows", "filedialog", "clipboard", "undo",
     "dirty", "ranges", "save", "styling", "toolbar", "identity",
     "assets", "sizepolicy", "adaptive", "pickers", "sliders",
-    "tooltips", "search", "richtext", "ownundo", "richlabel", "sheet",
+    "tooltips", "search", "richtext", "ownundo", "richlabel", "richdoc", "sheet",
     "submit", "numberfield", "timecode", "colorpicker", "range",
     "secure", "autofill", "reveal", "segmented", "toast", "expander",
     "safearea", "netimage", "netimage_http",
@@ -67,8 +67,6 @@ SCENES = [
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                # The rich document (docs/rich-document-plan.md §9 step 2), the Mac at depth.
-                "richdoc",
                 "format", "flexshrink", "listrow", "stampbefore", "mountfocus", "tints", "icons", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
                 "capture",
@@ -406,7 +404,8 @@ ORDER = [
     ("richlabel", ("rust", "python", "js", "go", "csharp", "java", "swift",
                    "ocaml", "haskell")),
     ("notes", ("rust",)),
-    ("richdoc", ("rust",)),
+    ("richdoc", ("rust", "python", "js", "go", "csharp", "java", "swift",
+                 "ocaml", "haskell")),
     # THE RICH ROWS (docs/rich-text-plan.md §19): a rich textarea per stamped
     # row, its document a field. This lane carries every binding's template
     # sugar; the other four stay rust-only while richtext does.
@@ -1759,6 +1758,19 @@ def build_csharp(root, log=None):
     return subprocess.CompletedProcess([], rc)
 
 
+def build_js(root, log=None):
+    # The guests import "kaya-gui" through a gitignored workspace link that
+    # only npm writes; a fresh checkout or worktree has none, and every js
+    # leg would die at import (the richdoc guests slice, 2026-11-11).
+    got = _run(["npm", "install", "--offline", "--no-audit", "--no-fund",
+                "--no-package-lock", "--silent"], log, cwd=root / "guests/js")
+    if got.returncode == 0 and not (root / "guests/js/node_modules/kaya-gui/package.json").is_file():
+        print("mac: npm install left guests/js/node_modules/kaya-gui unresolved, "
+              "so every js guest would fail to import kaya-gui")
+        return subprocess.CompletedProcess([], 1)
+    return got
+
+
 def build_go(root, log=None):
     # ONE BINARY FOR EVERY SCENE: guests/go/cmd imports every scene
     # library and picks one from KAYA_SELFTEST. encodebench is
@@ -1894,7 +1906,8 @@ def build_java(root, log=None):
 # The COMPILED languages, in the order the lane starts them. rust is not
 # here: its example is built and staged per leg (validate-mac stages the
 # whole set up front, run-leg one stem every run). python and js run from
-# source, so their binding is always the tree's.
+# source, so their binding is always the tree's; js's build is the
+# workspace link its imports need.
 GUEST_BUILDS = {
     "ocaml": build_ocaml,
     "haskell": build_haskell,
@@ -1903,6 +1916,7 @@ GUEST_BUILDS = {
     "swift": build_swift,
     "java": build_java,
     "c": build_c,
+    "js": build_js,
 }
 
 # THE SPEC A STAGED GUEST WAS BUILT AGAINST. A compiled guest carries the

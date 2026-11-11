@@ -5825,6 +5825,16 @@ public final class KayaApp {
             this.stop = stop;
         }
 
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof TextRange r && r.start == start && r.stop == stop;
+        }
+
+        @Override
+        public int hashCode() {
+            return Long.hashCode(start * 31 + stop);
+        }
+
         /**
          * A range from offsets that are ALREADY UTF-8 byte offsets into
          * the widget's text. The endpoints are checked against each
@@ -6171,6 +6181,17 @@ public final class KayaApp {
 
         public List<TextRun> runs() {
             return java.util.Collections.unmodifiableList(marks);
+        }
+
+        /** Value equality: the same text and the same runs in order (Rust's ==). */
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Document d && content.equals(d.content) && marks.equals(d.marks);
+        }
+
+        @Override
+        public int hashCode() {
+            return content.hashCode() * 31 + marks.hashCode();
         }
 
         /** Paint one attribute over one range. Every chain method below

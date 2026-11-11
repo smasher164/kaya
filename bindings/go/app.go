@@ -2042,6 +2042,12 @@ func (d Document) Color(start, end int, rgb string) Document {
 	return d.Mark(start, end, "color", strings.ToUpper(rgb))
 }
 
+// Equal is value equality: the same text and the same runs in the same order
+// (Rust's ==; docs/rich-document-plan.md §11).
+func (d Document) Equal(o Document) bool {
+	return d.Text == o.Text && slices.Equal(d.Runs, o.Runs)
+}
+
 // AttrAt answers the attribute covering one byte offset, and whether
 // there was one.
 func (d Document) AttrAt(at int, name string) (string, bool) {

@@ -127,7 +127,7 @@ TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200, "codesurfacebig_
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext", "flexshrink",
                 "listrow", "stampbefore", "mountfocus", "tints", "icons", "badge", "emoji",
-                "ownundo", "richlabel", "notes", "richrows"]
+                "ownundo", "richlabel", "notes", "richrows", "richdoc"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
 # out of an installed MSIX instead of out of C:\kaya, because a kaya app is
@@ -661,6 +661,18 @@ ORDER = [
     # bindings' sugar is the parallel worktree — hence the DEPTH_SCENES row.
     [
      "richtext_rust",
+    ],
+    # richdoc_rust ALONE (docs/rich-document-plan.md §11): `press shift+tab`
+    # puts a REAL Shift on the system input queue, and the scene copies to
+    # and pastes from the one clipboard. RUST-ONLY while the eight bindings'
+    # guests are the breadth step — hence the DEPTH_SCENES row.
+    [
+     "richdoc_rust",
+    ],
+    # The same scene under KAYA_APPEARANCE=dark: a colour drawn through
+    # brand::ink_for_dark, and a dark pick stored through ink_from_dark.
+    [
+     "richdocdark_rust",
     ],
     # ownundo_rust ALONE, ranges' first reason: its `type` verb puts REAL
     # KEYSTROKES on the system input queue and foregrounds the guest to do it

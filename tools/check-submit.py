@@ -648,8 +648,10 @@ n9 = gate.doctor("the gtk Shift arm cut", REAL[GTK],
 watched("a GTK textarea whose Shift+Return is no newline", {**REAL, GTK: n9},
         "Shift+Return stopped being the newline")
 n10 = gate.doctor("the gtk key controller moved to the bubble phase", REAL[GTK],
-                  r"keys\.set_propagation_phase\(gtk4::PropagationPhase::Capture\);",
-                  "keys.set_propagation_phase(gtk4::PropagationPhase::Bubble);")
+                  r"keys\.set_propagation_phase\(gtk4::PropagationPhase::Capture\);"
+                  r"(\n\s*keys\.connect_key_pressed\(move \|_, key, _code, state\| \{"
+                  r"\n\s*let is_return)",
+                  r"keys.set_propagation_phase(gtk4::PropagationPhase::Bubble);\1")
 watched("a GTK textarea whose controller sees Return after the view", {**REAL, GTK: n10},
         "not in the capture phase")
 n11 = gate.doctor("an emit planted in the entry's changed handler", REAL[GTK],

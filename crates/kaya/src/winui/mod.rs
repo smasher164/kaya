@@ -17,6 +17,7 @@ mod skin;
 mod code_surface;
 mod doctabs;
 mod fontpick;
+mod richdoc;
 
 use order::{track_of, ChildOrder};
 
@@ -67,7 +68,7 @@ use bindings::Microsoft::UI::Xaml::Controls::{
 // clipboard verbs live on a document object, and the text ranges ride it
 // (docs/textarea-foundation-plan.md, the windows arm; docs/ranges-plan.md D1).
 use bindings::Microsoft::UI::Text::{
-    FormatEffect, ITextCharacterFormat, ITextParagraphFormat, PointOptions, TextConstants,
+    FormatEffect, ITextCharacterFormat, PointOptions, TextConstants,
     TextGetOptions, TextSetOptions, UnderlineType,
 };
 use bindings::Windows::Foundation::{Point, TypedEventHandler};
@@ -12695,22 +12696,23 @@ fn pin_plain_text(field: &RichEditBox, widget: u64) -> windows_core::Result<()> 
     field.SetClipboardCopyFormat(RichEditClipboardFormat::PlainText)?;
     field.SetDisabledFormattingAccelerators(DisabledFormattingAccelerators::All)?;
     let pasting = Editable::Textarea(field.clone());
+    let rich_field = field.clone();
     let paste_handler = TextControlPasteEventHandler::new(move |_, args| {
         // Cancel the control's own insertion FIRST — an unhandled
         // paste here is the RichEdit engine's, which takes RTF.
         if let Some(args) = args.as_ref() {
             args.SetHandled(true)?;
         }
-        // docs/rich-text-plan.md R4: what provoked the report that follows.
-        // One-shot, and armed BEFORE the insertion, since TextChanged is
-        // raised a runloop turn later.
+        // A RICH PASTE reads RTF, then HTML (docs/rich-document-plan.md §11),
+        // through the deferring door: Ctrl+V can arrive inside a borrow.
         if rich_is_on(widget) {
-            rich_scene("naming a paste", move |core| {
-                core.scene.set_text_edit_source(
-                    WidgetId(widget),
-                    crate::wire::EDIT_SOURCE_PASTE as u32,
-                );
+            let field = rich_field.clone();
+            rich_scene("pasting rich text", move |core| {
+                if let Err(e) = richdoc::paste(core, &field, widget) {
+                    eprintln!("kaya: winui rich paste failed: {}", e.message());
+                }
             });
+            return Ok(());
         }
         // Then paste what the entry would have pasted. INLINE, and through a
         // range rather than through the live selection — see `selection_range`.
@@ -13088,6 +13090,8 @@ struct RichPalette {
     /// every shipped template; where it does not, `AutoColor` is still the
     /// only spelling this format has.
     text: Option<bindings::Windows::UI::Color>,
+    /// A `color` run draws `brand::ink_for_dark` of its value on a dark page.
+    dark: bool,
 }
 
 /// The baseline the derived display is a multiple of: the document's own
@@ -13142,6 +13146,7 @@ fn rich_palette_of(dark: bool, text: Option<bindings::Windows::UI::Color>) -> Ri
             code_ground: RICH_CODE_GROUND_DARK,
             quote_ground: RICH_QUOTE_GROUND_DARK,
             text,
+            dark,
         }
     } else {
         RichPalette {
@@ -13149,6 +13154,7 @@ fn rich_palette_of(dark: bool, text: Option<bindings::Windows::UI::Color>) -> Ri
             code_ground: RICH_CODE_GROUND_LIGHT,
             quote_ground: RICH_QUOTE_GROUND_LIGHT,
             text,
+            dark,
         }
     }
 }
@@ -13334,8 +13340,7 @@ fn rich_paragraph_bounds(text: &str, start: usize, end: usize) -> (usize, usize)
 /// loses its drawing too; nothing else on the format moves — the highlight
 /// ground stays `set_background`'s.
 fn rich_write_format(
-    character: &ITextCharacterFormat, paragraph: Option<&ITextParagraphFormat>,
-    attrs: &BTreeMap<String, String>, base: &RichBase,
+    character: &ITextCharacterFormat, attrs: &BTreeMap<String, String>, base: &RichBase,
     palette: RichPalette,
 ) -> windows_core::Result<()> {
     let base_size = base.size;
@@ -13373,10 +13378,11 @@ fn rich_write_format(
     })?;
     character.SetSize(size)?;
     character.SetName(&HSTRING::from(if monospace { base.code_face.as_str() } else { base.face.as_str() }))?;
-    character.SetForegroundColor(match (linked, palette.text) {
-        (true, _) => palette.link,
-        (false, Some(text)) => text,
-        (false, None) => TextConstants::AutoColor()?,
+    character.SetForegroundColor(match (linked, richdoc::drawn_color(attrs, palette.dark), palette.text) {
+        (true, _, _) => palette.link,
+        (false, Some(ink), _) => ink,
+        (false, None, Some(text)) => text,
+        (false, None, None) => TextConstants::AutoColor()?,
     })?;
     // The ground, written on every call like every other property: a run that
     // LOST its `code` takes its ground back off.
@@ -13384,13 +13390,6 @@ fn rich_write_format(
         Some(ground) => ground,
         None => TextConstants::AutoColor()?,
     })?;
-    if let Some(paragraph) = paragraph {
-        // The block layer's only paragraph property: a heading is size plus
-        // weight and a code block a face, both character formats, and a
-        // quote's own rule is this indent (RICH_QUOTE_INDENT's note).
-        let indent = if block == "quote" { RICH_QUOTE_INDENT } else { 0.0 };
-        paragraph.SetIndents(0.0, indent, 0.0)?;
-    }
     Ok(())
 }
 
@@ -13400,7 +13399,7 @@ fn rich_write_format(
 fn rich_restyle(
     field: &RichEditBox, widget: u64, text: &str, runs: &[TextRun], from: usize, to: usize,
 ) -> windows_core::Result<()> {
-    if from >= to {
+    if from > to {
         return Ok(());
     }
     let base = rich_base(field)?;
@@ -13428,15 +13427,14 @@ fn rich_restyle(
             let range = doc.GetRange(start, stop)?;
             let attrs = rich_attrs_at(runs, a);
             let character = range.CharacterFormat()?;
-            let paragraph = range.ParagraphFormat()?;
-            rich_write_format(&character, Some(&paragraph), &attrs, &base, palette)?;
+            rich_write_format(&character, &attrs, &base, palette)?;
             // ASSIGNED BACK as `set_background` assigns: the probe measured the
             // object live (docs/measurements/richtext-windows-2026-09-11.md §4)
             // and this file's older comment calls it a snapshot, so the write
             // that cannot silently no-op under either reading is both.
             range.SetCharacterFormat(&character)?;
-            range.SetParagraphFormat(&paragraph)?;
         }
+        richdoc::paragraph_formats(field, text, runs, from, to)?;
         // The grounds above were written into the attribute find's highlight
         // owns, so the top claimant goes back on last (`rich_ground`).
         rich_repaint_highlights(field, widget)
@@ -13505,7 +13503,7 @@ fn rich_arm_typing(field: &RichEditBox, widget: u64, caret: usize) -> windows_co
     let palette = rich_palette(field);
     let selection = field.TextDocument()?.Selection()?;
     let character = selection.CharacterFormat()?;
-    rich_write_format(&character, None, &attrs, &base, palette)?;
+    rich_write_format(&character, &attrs, &base, palette)?;
     selection.SetCharacterFormat(&character)
 }
 
@@ -13725,21 +13723,37 @@ fn rich_scene(what: &'static str, f: impl FnOnce(&mut CoreState) + Send + 'stati
 
 /// A USER EDIT, ADDRESSED. The core diffs its own mirror (R4) and answers the
 /// one edit; the table takes the same splice independently and the display
-/// follows it, which is how a link stops at the byte it ended on.
-fn rich_note_edit(
-    widget: u64, field: &RichEditBox, text: &str,
-) -> Option<crate::scene::RichEdit> {
+/// follows it, which is how a link stops at the byte it ended on. THE APP
+/// HEARS THE EDIT FIRST: text_changed and text_edited, then the core's own
+/// acts (the repair, the canonical newlines) applied and their
+/// text_formatted sent (docs/rich-document-plan.md §11). False for a plain
+/// textarea, whose caller sends its text_changed itself.
+fn rich_note_edit(widget: u64, field: &RichEditBox, text: &str, sink: &OccSink, tag: &[u8]) -> bool {
     if !rich_is_on(widget) {
-        return None;
+        return false;
     }
-    let edit = CORE.with_borrow_mut(|core| {
-        let core = core.as_mut()?;
+    CORE.with_borrow_mut(|core| {
+        let Some(core) = core.as_mut() else { return };
         let edit = core.scene.note_rich_text(WidgetId(widget), text);
-        send_scene_asks(core);
-        edit
-    })?;
-    rich_take_edit(widget, field, text, &edit);
-    Some(edit)
+        if let Some(edit) = &edit {
+            rich_take_edit(widget, field, text, edit);
+        }
+        sink.send_text_tag(tag, text);
+        if let Some(edit) = edit {
+            sink.send(crate::wire::decode_text_edited_tag(tag, edit.source, edit.range, &edit.inserted, &edit.runs));
+        }
+        rich_after_edit(core, widget);
+    });
+    true
+}
+
+/// What follows every edit, key and act the core heard: its own ranged acts
+/// applied to the arm, its queued occurrences sent, the markers drawn again.
+fn rich_after_edit(core: &mut CoreState, widget: u64) {
+    let ops = core.scene.take_rich_ops();
+    deliver_rich_ops(core, ops);
+    send_scene_asks(core);
+    richdoc::markers_dirty(widget);
 }
 
 /// The table and the display, moved by one published edit — the half the
@@ -13824,9 +13838,12 @@ fn rich_format_selection(
         if name == "block" {
             (start, end) = rich_paragraph_bounds(&text, start, end);
         }
-        // `body` IS the removal: every paragraph has a kind and taking one off
-        // means this one (the mac arm's rule, docs/rich-text-plan.md §7).
-        let off = removed || (name == "block" && value == "body");
+        // ONE SPELLING PER VALUE (`richdoc::canonical_value`): `body`, `none`,
+        // `0` and `start` are the attribute's absence, so each is the removal,
+        // and the table keeps the spelling the core stores.
+        let canonical = crate::richdoc::canonical_value(name, value).ok().flatten();
+        let off = removed || canonical.is_none();
+        let value = canonical.as_deref().unwrap_or(value);
         if start == end {
             RICH_PENDING.with_borrow_mut(|pending| {
                 let slot = pending.entry(widget).or_insert((start, BTreeMap::new(), BTreeSet::new()));
@@ -13869,7 +13886,7 @@ fn rich_format_selection(
                 value.as_deref(),
             ));
         }
-        send_scene_asks(core);
+        rich_after_edit(core, widget);
         Ok(Ok(()))
     })();
     match acted {
@@ -13892,13 +13909,14 @@ fn rich_format_range(
     if !rich_is_on(widget) {
         return Some(format!("widget {widget} holds no rich document"));
     }
-    if !crate::wire::RICH_ATTRS.iter().any(|(_, word)| *word == name) {
+    if !crate::wire::RICH_ATTRS.iter().any(|(_, word)| *word == name) && !crate::richdoc::is_extension(name) {
         return Some(format!("{name:?} is not a kaya attribute"));
     }
     // `body` IS the removal, and the core's paragraph expansion for a `block`
     // act is already in this range (docs/rich-text-plan.md §7, §17).
     let off = removed || (name == "block" && value == "body");
     let want = (!off).then_some(value);
+    richdoc::markers_dirty(widget);
     let block = label_block(core, widget);
     let field = textarea_by_id(core, widget);
     let acted = (|| -> windows_core::Result<Result<(), String>> {
@@ -13972,6 +13990,7 @@ fn rich_set_document(
     RICH_PENDING.with_borrow_mut(|pending| {
         pending.remove(&widget);
     });
+    richdoc::markers_dirty(widget);
     rich_restyle(&field, widget, text, &table, 0, text.len())
 }
 
@@ -14041,6 +14060,7 @@ fn rich_apply_edit(
     RICH_RUNS.with_borrow_mut(|map| {
         map.insert(widget, table.clone());
     });
+    richdoc::markers_dirty(widget);
     rich_restyle(&field, widget, &after, &table, start, start + inserted.len())
 }
 
@@ -14606,6 +14626,9 @@ fn role_enabled(core: &CoreState, role: &str) -> bool {
             };
             let accepts = core.accepts.get(&id).cloned().unwrap_or_default();
             if accepts.is_empty() {
+                if rich_is_on(id) {
+                    return richdoc::paste_available();
+                }
                 return clip_available(CF_UNICODETEXT);
             }
             let (kinds, custom) = crate::wire::parse_accept_list(&accepts);
@@ -15172,6 +15195,19 @@ fn info_bar_withdraw(window: u64, id: u64) -> windows_core::Result<()> {
 fn perform_clipboard_role(core: &mut CoreState, role: &str) -> bool {
     match role {
         "cut" | "copy" => {
+            if let Some(id) = focused_editable_id(core).filter(|id| rich_is_on(*id)) {
+                if let Some(field) = textarea_by_id(core, id) {
+                    let done = if role == "cut" {
+                        richdoc::cut(core, &field, id)
+                    } else {
+                        richdoc::copy(core, &field, id).map(|_| ())
+                    };
+                    if let Err(e) = done {
+                        eprintln!("kaya: winui rich {role} failed: {}", e.message());
+                    }
+                    return true;
+                }
+            }
             if let Some(field) = focused_editable_id(core).and_then(|id| editable_by_id(core, id))
             {
                 let _ = if role == "cut" {
@@ -15188,6 +15224,12 @@ fn perform_clipboard_role(core: &mut CoreState, role: &str) -> bool {
             };
             let accepts = core.accepts.get(&id).cloned().unwrap_or_default();
             if accepts.is_empty() {
+                if let Some(field) = textarea_by_id(core, id).filter(|_| rich_is_on(id)) {
+                    if let Err(e) = richdoc::paste(core, &field, id) {
+                        eprintln!("kaya: winui rich paste failed: {}", e.message());
+                    }
+                    return true;
+                }
                 // The same one-shot the control's own Paste event arms
                 // (pin_plain_text): this route bypasses that event.
                 if rich_is_on(id) {
@@ -17293,16 +17335,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             // R4: this backend's events carry no range, so the
                             // core's diff IS the delta and the arm's own table
                             // takes the same splice.
-                            let edit = rich_note_edit(bank_id, &ranges_field, &text);
-                            sink.send_text_tag(&handler_tag, &text);
-                            if let Some(edit) = edit {
-                                sink.send(crate::wire::decode_text_edited_tag(
-                                    &handler_tag,
-                                    edit.source,
-                                    edit.range,
-                                    &edit.inserted,
-                                    &edit.runs,
-                                ));
+                            if !rich_note_edit(bank_id, &ranges_field, &text, &sink, &handler_tag) {
+                                sink.send_text_tag(&handler_tag, &text);
                             }
                         }
                         Ok(())
@@ -17389,6 +17423,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             let held =
                                 core.scene.set_text_composing(WidgetId(composing_id), false);
                             deliver_rich_ops(core, held);
+                            rich_after_edit(core, composing_id);
                         });
                         Ok(())
                     }))?;
@@ -17435,6 +17470,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                             Ok(())
                         },
                     ))?;
+                    // The rich document's doors (docs/rich-document-plan.md
+                    // §11), registered once here for the reason the link's
+                    // is; each answers nothing while the widget is plain.
+                    richdoc::watch_keys(&field, id.0)?;
+                    richdoc::watch_clipboard(&field, id.0)?;
+                    richdoc::watch_theme(&field, id.0)?;
+                    let marked_id = id.0;
+                    let loaded_field = field.clone();
+                    field.Loaded(&RoutedEventHandler::new(move |_, _| {
+                        richdoc::redraw_later(&loaded_field, marked_id);
+                        richdoc::markers_dirty(marked_id);
+                        Ok(())
+                    }))?;
                     // Same focus-handoff refresh as the entry (paste
                     // enablement follows the focused editable).
                     let focus_handler = RoutedEventHandler::new(move |_, _| {
@@ -17693,6 +17741,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             let widget = core.widgets.remove(&id).expect("scene validated the id");
             images::forget(core, id);
             skin::forget(core, id);
+            richdoc::forget(id.0);
             if matches!(widget, NativeWidget::Video { .. }) {
                 media::destroy_video(core, id.0);
             }
@@ -19014,6 +19063,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     RICH_PENDING.with_borrow_mut(|table| {
                         table.remove(&id.0);
                     });
+                    richdoc::markers_dirty(id.0);
                 }
                 // docs/rich-text-plan.md R1: the attributed surface exists only
                 // where the widget asked for it, and the table's own entry is
@@ -19134,13 +19184,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         RICH_RUNS.with_borrow_mut(|table| {
                             table.entry(id.0).or_default();
                         });
-
+                        richdoc::opaque_ink(&field)?;
                     } else {
                         RICH_RUNS.with_borrow_mut(|table| table.remove(&id.0));
                         RICH_PENDING.with_borrow_mut(|pending| pending.remove(&id.0));
                         let text = lf(Editable::Textarea(field.clone()).text()?);
                         rich_restyle(&field, id.0, &text, &[], 0, text.len())?;
                     }
+                    richdoc::markers_dirty(id.0);
                 }
                 // docs/rich-text-plan.md §15: a LABEL carries the inline
                 // vocabulary read-only, off the same table — an entry here is
@@ -20334,7 +20385,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // TryShow(Emoji) answered Ok(true) with the guest in the
                 // foreground and opened nothing for a WinUI TextBox, while it
                 // opened the panel for a Win32 edit (measured 2026-09-26).
-                CommandKind::TextColor => crate::depth_stub("richdoc"),
+                CommandKind::TextColor => richdoc::present_text_color(core, id.0)?,
                 CommandKind::EmojiPicker => {
                     let element = widget.identity_element()?;
                     let _ = element.Focus(FocusState::Programmatic)?;
@@ -25644,20 +25695,186 @@ impl crate::harness::Stage for WinUiStage {
     /// table read beside it, and a KAYA_DIAG naming both when they disagree.
     /// The two are kept by independent code, which is the only reason the
     /// comparison can fail.
-    fn select_text(&self, _: crate::harness::Target, _: crate::harness::TextRange) -> Result<(), String> {
-        crate::depth_stub("richdoc")
+    /// docs/rich-document-plan.md §11: the keyboard and that selection, as a
+    /// user's click and drag leave them, and the core told at once (the
+    /// SelectionChanged raise is asynchronous).
+    fn select_text(&self, t: crate::harness::Target, range: crate::harness::TextRange) -> Result<(), String> {
+        Self::on_ui_mut(move |core| {
+            let Some(widget) = rich_target_id(core, t) else {
+                return Ok(Err("no such target".to_owned()));
+            };
+            let Some(field) = textarea_by_id(core, widget) else {
+                return Ok(Err(format!("widget {widget} is not a textarea")));
+            };
+            let text = lf(Editable::Textarea(field.clone()).text()?);
+            let (Some(a), Some(b)) =
+                (utf16_offset(&text, range.start as usize), utf16_offset(&text, range.stop as usize))
+            else {
+                return Ok(Err(format!(
+                    "{}:{} is not on a character boundary of the {}-byte text",
+                    range.start,
+                    range.stop,
+                    text.len()
+                )));
+            };
+            if !field.Focus(FocusState::Programmatic)? {
+                return Ok(Err(format!(
+                    "the textarea would not take the keyboard (loaded {})",
+                    field.IsLoaded()?
+                )));
+            }
+            field.TextDocument()?.Selection()?.SetRange(a, b)?;
+            core.scene.set_text_selection(WidgetId(widget), range.start, range.stop);
+            send_scene_asks(core);
+            Ok(Ok(()))
+        })
     }
-    fn drawn_markers(&self, _: crate::harness::Target) -> Result<(String, String), String> {
-        crate::depth_stub("richdoc")
+
+    /// The overlay's own record beside the core's numbering
+    /// (docs/rich-document-plan.md §11, Markers).
+    fn drawn_markers(&self, t: crate::harness::Target) -> Result<(String, String), String> {
+        Self::on_ui_read(move |core| {
+            let Some(widget) = rich_target_id(core, t) else {
+                return Ok(Err("no such target".to_owned()));
+            };
+            let Some(numbered) = core.scene.rich_markers_string(WidgetId(widget)) else {
+                return Ok(Err(format!("widget {widget} holds no rich document")));
+            };
+            Ok(Ok((richdoc::drawn_spelling(widget), numbered)))
+        })
+        .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
     }
-    fn click_marker(&self, _: crate::harness::Target, _: u64) -> Result<(), String> {
-        crate::depth_stub("richdoc")
+
+    /// The drawn box's own toggle, through its automation peer — the door a
+    /// click and a screen reader share; its Checked is offered to the core.
+    /// on_ui_BARE: the toggle raises Checked synchronously and the offer
+    /// borrows the core.
+    fn click_marker(&self, t: crate::harness::Target, start: u64) -> Result<(), String> {
+        Self::on_ui_bare(move || {
+            use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+            use bindings::Microsoft::UI::Xaml::Automation::Provider::IToggleProvider;
+            let widget = CORE.with_borrow(|core| core.as_ref().and_then(|core| rich_target_id(core, t)));
+            let Some(widget) = widget else {
+                return Ok(Err("no such target".to_owned()));
+            };
+            let Some(check) = richdoc::drawn_box(widget, start) else {
+                let starts = richdoc::drawn_starts(widget);
+                return Ok(Err(if starts.contains(&start) {
+                    format!("the marker drawn at byte {start} is not a checklist box")
+                } else {
+                    format!("no marker is drawn at byte {start} (drawn at {starts:?})")
+                }));
+            };
+            let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&check.cast::<UIElement>()?)?;
+            peer.cast::<IToggleProvider>()?.Toggle()?;
+            Ok(Ok(()))
+        })
+        .unwrap_or_else(|e| Err(format!("the box would not toggle: {}", e.message())))
     }
-    fn pick_text_color(&self, _: crate::harness::Target, _: &str) -> Result<(), String> {
-        crate::depth_stub("richdoc")
+
+    /// The presented ColorPicker driven as a user's pick: its hex box
+    /// written with the colour this appearance names, then the flyout
+    /// closed, which is the commit (`richdoc::present_text_color`).
+    fn pick_text_color(&self, t: crate::harness::Target, want: &str) -> Result<(), String> {
+        let want = want.to_owned();
+        let found = Self::on_ui_read(move |core| {
+            let Some(widget) = rich_target_id(core, t) else {
+                return Ok(Err("no such target".to_owned()));
+            };
+            let Some(field) = textarea_by_id(core, widget) else {
+                return Ok(Err(format!("widget {widget} is not a textarea")));
+            };
+            let Some((flyout, _)) = richdoc::text_color_surface(widget).filter(|(f, _)| f.IsOpen().unwrap_or(false))
+            else {
+                return Ok(Err("no colour picker is presented (the text_color command shows one)".to_owned()));
+            };
+            let _ = flyout;
+            Ok(Ok((widget, richdoc::dark_now(&field))))
+        })
+        .unwrap_or_else(|e| Err(format!("unreadable: {e}")))?;
+        let (widget, dark) = found;
+        let mode = if dark { "dark" } else { "light" };
+        let words: Vec<&str> = want.split_whitespace().collect();
+        let hex = match words.as_slice() {
+            [one] => one.to_string(),
+            ["light", l, "dark", d] => (if dark { *d } else { *l }).to_string(),
+            _ => return Err(format!("{want:?} names no {mode} colour")),
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let wanted = hex.clone();
+            let wrote = Self::on_ui_read(move |_| {
+                let Some((_, picker)) = richdoc::text_color_surface(widget) else { return Ok(false) };
+                let Some(field) = named_descendant(&picker.cast()?, "HexTextBox")? else { return Ok(false) };
+                field.cast::<TextBox>()?.SetText(&HSTRING::from(&*wanted))?;
+                Ok(true)
+            })
+            .map_err(|e| format!("the hex box would not take the text: {e}"))?;
+            if wrote {
+                break;
+            }
+            if std::time::Instant::now() > deadline {
+                return Err("the flyout's ColorPicker never ran its template: no HexTextBox in 10 s".to_owned());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        Self::on_ui_bare(move || match richdoc::text_color_surface(widget) {
+            Some((flyout, _)) => flyout.Hide(),
+            None => Ok(()),
+        })
+        .map_err(|e| format!("the flyout would not hide: {e}"))
     }
-    fn text_ink(&self, _: crate::harness::Target, _: crate::harness::TextRange) -> Result<String, String> {
-        crate::depth_stub("richdoc")
+
+    /// A run's glyphs off the window's print (`PrintWindow`, the canvas
+    /// ink's camera): inside the run's own TOM rectangles, the pixel
+    /// farthest from their commonest colour, which is the ground.
+    fn text_ink(&self, t: crate::harness::Target, range: crate::harness::TextRange) -> Result<String, String> {
+        Self::on_ui_read(move |core| {
+            let Some(widget) = rich_target_id(core, t) else {
+                return Ok(Err("no such target".to_owned()));
+            };
+            let Some(field) = textarea_by_id(core, widget) else {
+                return Ok(Err(format!("widget {widget} is not a textarea")));
+            };
+            let mode = if richdoc::dark_now(&field) { "dark" } else { "light" };
+            let text = lf(Editable::Textarea(field.clone()).text()?);
+            let (Some(a), Some(b)) =
+                (utf16_offset(&text, range.start as usize), utf16_offset(&text, range.stop as usize))
+            else {
+                return Ok(Err(format!("{}:{} is not on a character boundary", range.start, range.stop)));
+            };
+            let at = element_placement(core, &field.cast::<FrameworkElement>()?)?;
+            let grab = match grab_canvas(&at) {
+                Ok(grab) => grab,
+                Err(why) => return Ok(Err(format!("no picture of the window: {why}"))),
+            };
+            let mut pixels: Vec<[u8; 3]> = Vec::new();
+            for i in a..b {
+                let Some((x, y, w, h)) = richdoc::char_rect(&field, widget, i, 1)? else {
+                    return Ok(Err("the textarea's template has not run".to_owned()));
+                };
+                let (x0, y0) = ((x * at.scale).ceil() as i32, (y * at.scale).ceil() as i32);
+                let (x1, y1) = (((x + w) * at.scale).floor() as i32, ((y + h) * at.scale).floor() as i32);
+                for py in y0.max(0)..y1.min(grab.height) {
+                    for px in x0.max(0)..x1.min(grab.width) {
+                        let o = ((py * grab.width + px) * 4) as usize;
+                        pixels.push([grab.pixels[o + 2], grab.pixels[o + 1], grab.pixels[o]]);
+                    }
+                }
+            }
+            if pixels.is_empty() {
+                return Ok(Err(format!("the run {}:{} has no pixels inside the textarea", range.start, range.stop)));
+            }
+            let mut counts: HashMap<[u8; 3], usize> = HashMap::new();
+            for p in &pixels {
+                *counts.entry(*p).or_default() += 1;
+            }
+            let ground = counts.into_iter().max_by_key(|(_, n)| *n).map(|(p, _)| p).unwrap_or([0, 0, 0]);
+            let far = |p: &[u8; 3]| -> i32 { (0..3).map(|c| (i32::from(p[c]) - i32::from(ground[c])).abs()).sum() };
+            let ink = pixels.iter().max_by_key(|p| far(p)).copied().unwrap_or(ground);
+            Ok(Ok(format!("{mode} {:02X}{:02X}{:02X}", ink[0], ink[1], ink[2])))
+        })
+        .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
     }
     fn rich_runs(&self, t: crate::harness::Target) -> String {
         let (answer, held) = Self::on_ui_read(move |core| {
@@ -25703,6 +25920,19 @@ impl crate::harness::Stage for WinUiStage {
             "return" => self.type_text("\n"),
             // Focus keys move no caret (docs/reveal-plan.md V10).
             "tab" => Self::post_keys("press tab", &[Key::Vk(0x09)]),
+            "backspace" => Self::post_keys("press backspace", &[Key::Vk(0x08)]),
+            // A REAL SHIFT, on the system input queue: a posted key carries no
+            // modifier state, and the arm reads Shift where a user's is.
+            "shift+tab" => {
+                Self::foreground_guest("press shift+tab");
+                const KEYEVENTF_KEYUP: u32 = 0x2;
+                unsafe {
+                    keybd_event(0x10, 0, 0, 0);
+                    keybd_event(0x09, 0, 0, 0);
+                    keybd_event(0x09, 0, KEYEVENTF_KEYUP, 0);
+                    keybd_event(0x10, 0, KEYEVENTF_KEYUP, 0);
+                }
+            }
             "space" => Self::post_keys("press space", &[Key::Vk(0x20)]),
             "up" => Self::post_keys("press up", &[Key::Vk(0x26)]),
             "down" => Self::post_keys("press down", &[Key::Vk(0x28)]),
@@ -27334,6 +27564,7 @@ impl crate::harness::Stage for WinUiStage {
             .chars()
             .map(|ch| if ch == '\n' { Key::Vk(0x0d) } else { Key::Char(ch) })
             .collect();
+        let taken_before = Self::on_ui_read(|_| Ok(richdoc::KEYS_TAKEN.with(|n| n.get()))).unwrap_or(0);
         Self::post_keys("type", &keys);
         if let Some((i, was)) = secure_before {
             if text.contains('\n') {
@@ -27411,6 +27642,13 @@ impl crate::harness::Stage for WinUiStage {
             let seen = Self::on_ui_read(move |core| Ok(core.banked_text.get(&id).cloned()))
                 .unwrap_or(None);
             if seen.as_deref() == Some(want.as_str()) {
+                return;
+            }
+            // A RETURN THE CORE TOOK inserts nothing (docs/rich-document-plan.md
+            // §11, Keys): its act is the next step's observable.
+            if text == "\n"
+                && Self::on_ui_read(|_| Ok(richdoc::KEYS_TAKEN.with(|n| n.get()))).unwrap_or(0) > taken_before
+            {
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
@@ -27522,7 +27760,7 @@ impl crate::harness::Stage for WinUiStage {
                         ));
                     }
                 }
-                send_scene_asks(core);
+                rich_after_edit(core, id);
             }
             Ok(())
         });

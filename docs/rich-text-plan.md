@@ -459,7 +459,7 @@ Built the same day on all five arms, each watched failing first on the
 scene's Return step (`18:31 block=heading2 — but the widget holds 18:33`):
 macOS and iOS record the Return in `shouldChangeTextIn` and strip the block
 from the inserted newline and the typing attributes in `textDidChange`
-(one shared `kayaReturnStrip`); GTK's `inherit_rich_tags` gives the block
+(one shared `kayaReturnStrip`, R10's first form; since 2026-11-11 both Apple arms make the inserted range hold the core's typed runs, `kayaTypedRuns`, docs/rich-document-plan.md §11); GTK's `inherit_rich_tags` gives the block
 tag its own stop at the insertion's first newline; Compose's
 `kayaRichTypedRuns` takes the pre-edit text and the insertion and cuts the
 block run the core's way; WinUI's table already agreed and the drawn text

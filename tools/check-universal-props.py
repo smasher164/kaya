@@ -926,8 +926,8 @@ def composers(swiftui_text, compose_text, gtk_text, winui_text):
             "return Modifier.background(MaterialTheme.colorScheme.surfaceVariant, "
             "KAYA_COMPOSER_SHAPE)",
             "LocalKayaInComposer provides true,",
-            "colors = if (inComposer) {\n                    TextFieldDefaults.colors(\n"
-            "                        focusedContainerColor = Color.Transparent,",
+            "colors = if (inComposer) {",
+            "focusedContainerColor = Color.Transparent,",
             "FilledIconButton(",
             "val lifted = Modifier.padding(bottom = lift)",
             "touchPadded.getOrElse(i) { false } || touchPadded.getOrElse(i + 1) { false }")),

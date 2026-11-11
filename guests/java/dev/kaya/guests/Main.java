@@ -202,6 +202,9 @@ public final class Main {
             case "richtext":
                 app = RichText::app;
                 break;
+            case "richdoc":
+                app = Richdoc::app;
+                break;
             case "richlabel":
                 app = Richlabel::app;
                 break;

@@ -1,0 +1,97 @@
+﻿04:50:11.162 == B1 consecutive U+2022 items: same level; alternating ListLevelIndex; alternating ListTab ==
+04:50:11.193   b1 para 0 start=0 firstchar="A" ListType=UnicodeSequence(8) ListStart=8226 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=0.0 range.IncludeNumbering="\u2022\tApples"
+04:50:11.193   b1 para 1 start=7 firstchar="G" ListType=UnicodeSequence(8) ListStart=8226 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=13.0 rect.Y=19.0 range.IncludeNumbering="\u2023\tGreen ones"
+04:50:11.193   b1 para 2 start=18 firstchar="B" ListType=UnicodeSequence(8) ListStart=8226 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=13.0 rect.Y=37.0 range.IncludeNumbering="\u2024\tBread"
+04:50:11.194   b1 para 3 start=24 firstchar="W" ListType=UnicodeSequence(8) ListStart=8226 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=13.0 rect.Y=56.0 range.IncludeNumbering="\u2025\tWash"
+04:50:11.194   b1 para 4 start=29 firstchar="S" ListType=UnicodeSequence(8) ListStart=8226 ListLevelIndex=2 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=74.0 range.IncludeNumbering="\u2022\tSlice"
+04:50:11.194   b1 para 5 start=35 firstchar="M" ListType=UnicodeSequence(8) ListStart=8226 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=14.0 rect.Y=93.0 range.IncludeNumbering="\u2026\tMilk"
+04:50:11.194   b1 para 6 start=40 firstchar="E" ListType=UnicodeSequence(8) ListStart=8226 ListLevelIndex=2 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=112.0 range.IncludeNumbering="\u2022\tEggs"
+04:50:11.195   b1 para 7 start=45 firstchar="T" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=130.0 range.IncludeNumbering="Tail"
+04:50:11.195 == B2 alternating ListTab 0 / 0.5 on four U+2022 items ==
+04:50:11.196   b2 para 0 start=0 firstchar="A" ListType=UnicodeSequence(8) ListStart=8226 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=0.0 range.IncludeNumbering="\u2022\tApples"
+04:50:11.197   b2 para 1 start=7 firstchar="G" ListType=UnicodeSequence(8) ListStart=8226 ListLevelIndex=1 ListStyle=Plain ListTab=0.5 Left=0 First=-0 rect.X=13.0 rect.Y=19.0 range.IncludeNumbering="\u2023\tGreen ones"
+04:50:11.197   b2 para 2 start=18 firstchar="B" ListType=UnicodeSequence(8) ListStart=8226 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=13.0 rect.Y=37.0 range.IncludeNumbering="\u2024\tBread"
+04:50:11.197   b2 para 3 start=24 firstchar="W" ListType=UnicodeSequence(8) ListStart=8226 ListLevelIndex=1 ListStyle=Plain ListTab=0.5 Left=0 First=-0 rect.X=13.0 rect.Y=56.0 range.IncludeNumbering="\u2025\tWash"
+04:50:11.197   b2 para 4 start=29 firstchar="S" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=74.0 range.IncludeNumbering="Slice"
+04:50:11.197   b2 para 5 start=35 firstchar="M" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=93.0 range.IncludeNumbering="Milk"
+04:50:11.197   b2 para 6 start=40 firstchar="E" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=112.0 range.IncludeNumbering="Eggs"
+04:50:11.197   b2 para 7 start=45 firstchar="T" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=130.0 range.IncludeNumbering="Tail"
+04:50:11.197 == B3 raw MarkerStyle values 7, 8, 0x8000 and raw ListType 0x10008 ==
+04:50:11.200   b3 style 7 THREW Value does not fall within the expected range.
+04:50:11.201   b3 style 8 THREW Value does not fall within the expected range.
+04:50:11.201   b3 style 32768 THREW Value does not fall within the expected range.
+04:50:11.202   b3 style 65536 THREW Value does not fall within the expected range.
+04:50:11.202 == B4 adjacent same-type same-start numbers at levels 1 and 4: Arabic 1 L1, Arabic 1 L4 ==
+04:50:11.203   b4 para 0 start=0 firstchar="A" ListType=Arabic(3) ListStart=1 ListLevelIndex=1 ListStyle=Period ListTab=0 Left=0 First=-0 rect.X=13.0 rect.Y=0.0 range.IncludeNumbering="1.\tApples"
+04:50:11.203   b4 para 1 start=7 firstchar="G" ListType=Arabic(3) ListStart=1 ListLevelIndex=4 ListStyle=Period ListTab=0 Left=0 First=-0 rect.X=13.0 rect.Y=19.0 range.IncludeNumbering="1.\tGreen ones"
+04:50:11.203   b4 para 2 start=18 firstchar="B" ListType=Arabic(3) ListStart=2 ListLevelIndex=1 ListStyle=Period ListTab=0 Left=0 First=-0 rect.X=15.0 rect.Y=37.0 range.IncludeNumbering="2.\tBread"
+04:50:11.203   b4 para 3 start=24 firstchar="W" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=56.0 range.IncludeNumbering="Wash"
+04:50:11.203   b4 para 4 start=29 firstchar="S" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=74.0 range.IncludeNumbering="Slice"
+04:50:11.204   b4 para 5 start=35 firstchar="M" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=93.0 range.IncludeNumbering="Milk"
+04:50:11.204   b4 para 6 start=40 firstchar="E" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=112.0 range.IncludeNumbering="Eggs"
+04:50:11.204   b4 para 7 start=45 firstchar="T" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=130.0 range.IncludeNumbering="Tail"
+04:50:11.204 == F marker font: U+2610 with the paragraph's runs in Segoe UI Symbol; and with only the first char ==
+04:50:11.209   f para 0 start=0 firstchar="A" ListType=UnicodeSequence(8) ListStart=9744 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=13.0 rect.Y=0.0 range.IncludeNumbering="\u2610\tApples"
+04:50:11.210   f para 1 start=7 firstchar="G" ListType=UnicodeSequence(8) ListStart=9745 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=13.0 rect.Y=19.0 range.IncludeNumbering="\u2611\tGreen ones"
+04:50:11.210   f para 2 start=18 firstchar="B" ListType=UnicodeSequence(8) ListStart=9744 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=16.0 rect.Y=37.0 range.IncludeNumbering="\u2610\tBread"
+04:50:11.210   f para 3 start=24 firstchar="W" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=56.0 range.IncludeNumbering="Wash"
+04:50:11.210   f para 4 start=29 firstchar="S" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=74.0 range.IncludeNumbering="Slice"
+04:50:11.210   f para 5 start=35 firstchar="M" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=93.0 range.IncludeNumbering="Milk"
+04:50:11.210   f para 6 start=40 firstchar="E" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=112.0 range.IncludeNumbering="Eggs"
+04:50:11.210   f para 7 start=45 firstchar="T" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=130.0 range.IncludeNumbering="Tail"
+04:50:11.210 == I indents on list items: SetIndents(first, left, right) with a bullet ==
+04:50:11.212   i para 0 start=0 firstchar="A" ListType=UnicodeSequence(8) ListStart=9744 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=13.0 rect.Y=0.0 range.IncludeNumbering="\u2610\tApples"
+04:50:11.212   i para 1 start=7 firstchar="G" ListType=UnicodeSequence(8) ListStart=9745 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=13.0 rect.Y=19.0 range.IncludeNumbering="\u2611\tGreen ones"
+04:50:11.212   i para 2 start=18 firstchar="B" ListType=UnicodeSequence(8) ListStart=9744 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=0 First=-0 rect.X=16.0 rect.Y=37.0 range.IncludeNumbering="\u2610\tBread"
+04:50:11.212   i para 3 start=24 firstchar="W" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=56.0 range.IncludeNumbering="Wash"
+04:50:11.212   i para 4 start=29 firstchar="S" ListType=UnicodeSequence(8) ListStart=8226 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=24 First=-18 rect.X=32.0 rect.Y=74.0 range.IncludeNumbering="\u2022\tSlice"
+04:50:11.213   i para 5 start=35 firstchar="M" ListType=UnicodeSequence(8) ListStart=9702 ListLevelIndex=1 ListStyle=Plain ListTab=0 Left=48 First=-18 rect.X=64.0 rect.Y=93.0 range.IncludeNumbering="\u25e6\tMilk"
+04:50:11.213   i para 6 start=40 firstchar="E" ListType=Arabic(3) ListStart=12 ListLevelIndex=1 ListStyle=Period ListTab=18 Left=48 First=-18 rect.X=64.0 rect.Y=112.0 range.IncludeNumbering="12.\tEggs"
+04:50:11.213   i para 7 start=45 firstchar="T" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=24 First=-0 rect.X=32.0 rect.Y=130.0 range.IncludeNumbering="Tail"
+04:50:11.708   shot C:\kaya\doc-probe\f.bmp 520x420
+04:50:11.708 == A alignment readback ==
+04:50:11.709   align Center
+04:50:11.709   final StoryLength=50 AdjustCrlf|NoHidden="Apples\rGreen ones\rBread\rWash\rSlice\rMilk\rEggs\rTail" AdjustCrlf|NoHidden|IncludeNumbering="\u2610\tApples\r\u2611\tGreen ones\r\u2610\tBread\rWash\r\u2022\tSlice\r\u25e6\tMilk\r12.\tEggs\rTail"
+04:50:11.710 == K keys on a plain paragraph and on a list item (real keybd_event) ==
+04:50:12.021   key SetRange(1) -> Start=1 End=1 char-at="b"
+04:50:12.136   PreviewKeyDown Tab handled=False
+04:50:12.525   after Tab in plain StoryLength=8 AdjustCrlf|NoHidden="abc\rdef" AdjustCrlf|NoHidden|IncludeNumbering="abc\r\u2981\tdef"
+04:50:12.526   focus after Tab: Keyboard
+04:50:12.526   key SetRange(4) -> Start=4 End=4 char-at="d"
+04:50:12.641   PreviewKeyDown Tab handled=False
+04:50:13.060   after Tab at list start StoryLength=8 AdjustCrlf|NoHidden="abc\rdef" AdjustCrlf|NoHidden|IncludeNumbering="abc\r\u2981\tdef"
+04:50:13.061   after Tab at list start para 0 start=0 firstchar="a" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=0.0 range.IncludeNumbering="abc"
+04:50:13.061   after Tab at list start para 1 start=4 firstchar="d" ListType=Bullet(2) ListStart=0 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=19.0 range.IncludeNumbering="\u2981\tdef"
+04:50:13.179   PreviewKeyDown Shift handled=False
+04:50:13.181   PreviewKeyDown Tab handled=False
+04:50:13.586   after Shift+Tab StoryLength=8 AdjustCrlf|NoHidden="abc\rdef" AdjustCrlf|NoHidden|IncludeNumbering="abc\r\u2981\tdef"
+04:50:13.587   after Shift+Tab para 0 start=0 firstchar="a" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=0.0 range.IncludeNumbering="abc"
+04:50:13.588   after Shift+Tab para 1 start=4 firstchar="d" ListType=Bullet(2) ListStart=0 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=19.0 range.IncludeNumbering="\u2981\tdef"
+04:50:13.694   PreviewKeyDown Back handled=False
+04:50:14.093   after Back at list start StoryLength=8 AdjustCrlf|NoHidden="abc\rdef" AdjustCrlf|NoHidden|IncludeNumbering="abc\rdef"
+04:50:14.094   after Back at list start para 0 start=0 firstchar="a" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=0.0 range.IncludeNumbering="abc"
+04:50:14.094   after Back at list start para 1 start=4 firstchar="d" ListType=None(1) ListStart=0 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=19.0 range.IncludeNumbering="def"
+04:50:14.095   key SetRange(7) -> Start=7 End=7 char-at="\r"
+04:50:14.204   PreviewKeyDown Enter handled=False
+04:50:14.611   after Return at end StoryLength=9 AdjustCrlf|NoHidden="abc\rdef\r" AdjustCrlf|NoHidden|IncludeNumbering="abc\rdef\r"
+04:50:14.612   after Return at end para 0 start=0 firstchar="a" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=0.0 range.IncludeNumbering="abc"
+04:50:14.612   after Return at end para 1 start=4 firstchar="d" ListType=None(1) ListStart=0 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=19.0 range.IncludeNumbering="def"
+04:50:14.612   after Return at end para 2 start=8 firstchar="\r" ListType=None(1) ListStart=0 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=37.0 range.IncludeNumbering=""
+04:50:14.612 == C copy ==
+04:50:14.619   CopyingToClipboard raised
+04:50:14.625   after ITextSelection.Copy
+04:50:14.626   after ITextRange.Copy
+04:50:14.751   PreviewKeyDown Control handled=False
+04:50:14.753   PreviewKeyDown C handled=False
+04:50:14.753   CopyingToClipboard raised
+04:50:15.169   after Ctrl+C
+04:50:15.170 == T a run's colour across a theme switch ==
+04:50:15.786   light: run=#FF016FEF other=#FF000000
+04:50:15.840   shot C:\kaya\doc-probe\t-light.bmp 520x420
+04:50:15.849   ActualThemeChanged -> Dark
+04:50:17.052   dark: run=#FFFFFFFF other=#FFFFFFFF
+04:50:17.081   shot C:\kaya\doc-probe\t-dark.bmp 520x420
+04:50:17.082   ActualThemeChanged -> Light
+04:50:18.297   light again: run=#FF000000 other=#FF000000
+04:50:18.341   shot C:\kaya\doc-probe\t-light2.bmp 520x420
+04:50:18.341 PROBEDONE

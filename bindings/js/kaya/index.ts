@@ -3340,6 +3340,15 @@ export class Document {
     this.runs = runs.map((r) => ({ ...r }));
   }
 
+  /** Value equality: the same text and the same runs in order (Rust's ==). */
+  equals(other: Document): boolean {
+    return this.text === other.text && this.runs.length === other.runs.length &&
+      this.runs.every((r, i) => {
+        const o = other.runs[i];
+        return o !== undefined && r.range[0] === o.range[0] && r.range[1] === o.range[1] && r.name === o.name && r.value === o.value;
+      });
+  }
+
   /** One attribute over one range. Returns the document. */
   mark(span: Span, name: string, value: string | boolean): this {
     this.runs.push(makeRun(textRange("Document.mark", span), String(name), markValue("a run's value", value)));

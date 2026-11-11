@@ -6,7 +6,7 @@
 expect_title "untitled"
 expect_focused textarea#0
 expect_keyboard on
-expect_keyboard_bar "Bold|Italic|Underline|Strikethrough|Code|-|Paragraph Style>"
+expect_keyboard_bar "Bold|Italic|Underline|Strikethrough|Code|-|Paragraph Style>|List>|Indent|Outdent|Text Colour>|-|Make Rich Text|Make Plain Text"
 # The row runs past a phone's edge, and a trailing fade says so until it is
 # scrolled to its end (docs/phone-format-plan.md §2).
 expect_keyboard_bar_fade on
@@ -14,6 +14,10 @@ scroll_keyboard_bar end
 expect_keyboard_bar_fade off
 scroll_keyboard_bar start
 expect_keyboard_bar_fade on
+# A new document is plain, and the bar's formatting acts wait for a rich one
+# (docs/rich-document-plan.md RD11): Make Rich Text is on the bar too.
+keyboard_bar_press "Make Rich Text"
+expect_menu "Format>Make Rich Text" disabled
 type "Walk"
 expect textarea#0 "Walk"
 # The caret shows against the buffer in either appearance (docs/editor-plan.md E7).
@@ -27,15 +31,15 @@ expect_runs textarea#0 "0:4 bold"
 # DRAWN bold, real face or synthesized: a monospaced face may have no bold
 # (docs/phone-format-plan.md §6).
 expect_weight textarea#0 0:4 bold
-expect_keyboard_bar "Bold on|Italic|Underline|Strikethrough|Code|-|Paragraph Style>"
+expect_keyboard_bar "Bold on|Italic|Underline|Strikethrough|Code|-|Paragraph Style>|List>|Indent|Outdent|Text Colour>|-|Make Rich Text|Make Plain Text"
 expect_menu "Format>Bold" checked
 # BOLD ON BOLD TEXT TAKES IT OFF.
 keyboard_bar_press "Bold"
 expect_runs textarea#0 ""
 expect_weight textarea#0 0:4 regular
-expect_keyboard_bar "Bold|Italic|Underline|Strikethrough|Code|-|Paragraph Style>"
+expect_keyboard_bar "Bold|Italic|Underline|Strikethrough|Code|-|Paragraph Style>|List>|Indent|Outdent|Text Colour>|-|Make Rich Text|Make Plain Text"
 keyboard_bar_press "Italic"
-expect_keyboard_bar "Bold|Italic on|Underline|Strikethrough|Code|-|Paragraph Style>"
+expect_keyboard_bar "Bold|Italic on|Underline|Strikethrough|Code|-|Paragraph Style>|List>|Indent|Outdent|Text Colour>|-|Make Rich Text|Make Plain Text"
 # The nested menu's items, through its button.
 keyboard_bar_press "Paragraph Style>Heading 1"
 expect_runs textarea#0 "0:4 block=heading1|0:4 italic"

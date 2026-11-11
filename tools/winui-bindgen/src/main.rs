@@ -198,6 +198,13 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.DisabledFormattingAccelerators".to_string(),
         "Microsoft.UI.Xaml.Controls.TextControlPasteEventHandler".to_string(),
         "Microsoft.UI.Xaml.Controls.TextControlPasteEventArgs".to_string(),
+        // THE RICH DOCUMENT (docs/rich-document-plan.md §11): a paragraph's
+        // alignment, and the control's own copy and cut doors, which the arm
+        // takes so the clipboard carries kaya's RTF and HTML
+        // (docs/measurements/richdoc-winui-2026-11-11.md §4).
+        "Microsoft.UI.Text.ParagraphAlignment".to_string(),
+        "Microsoft.UI.Xaml.Controls.TextControlCopyingToClipboardEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.TextControlCuttingToClipboardEventArgs".to_string(),
         "Microsoft.UI.Xaml.Controls.XamlControlsResources".to_string(),
         "Microsoft.UI.Xaml.ResourceDictionary".to_string(),
         "Microsoft.UI.Xaml.Controls.TextChangedEventHandler".to_string(),

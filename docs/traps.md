@@ -20442,3 +20442,54 @@ layout measured and allocated the popover as a cell of the row; GtkBox's own
 layout leaves a popover to its surface. `is_cell` in crates/kaya/src/gtk.rs
 now leaves popovers out of every placement loop, as `children_of` already
 did. Read by music_context.steps on the wayland leg.
+
+
+## The rich document's platform findings (measured 2026-11-11)
+
+Found while building the rich document's five arms (docs/rich-document-plan.md
+§11); each is guarded where it says.
+
+- A GtkTextBuffer collapses its selection when a GtkColorChooserDialog's hex
+  entry takes PRIMARY (x11). The GTK arm holds the selection in marks across
+  the dialog, so the pick formats what the user had selected.
+- A GtkTextTag's `left-margin` REPLACES the view's left margin, never adds to
+  it, so a list item sat at the wrong x under Writing Mode's margin. The arm
+  derives one tag per paragraph from the view's margin plus the level.
+- The find's blanket `remove_all_tags` (ranges D2) wiped a rich document's
+  formatting on the first keystroke after a find; the GTK arm removes only
+  the highlight tag now. Read by editor.steps on both linux displays.
+- GTK's typing verb resent a Return the core had swallowed as a paragraph act
+  (`RICH_KEYS_TAKEN`); read by richdoc.steps' Return in an empty item.
+- Compose foundation 1.11.4 draws an empty line after a newline that ends or
+  precedes a ParagraphStyle range, so every list item came out double-spaced;
+  a 0.01em font on that newline does not shrink the line (19 px both ways).
+  The arm draws such a newline as U+200B (the same length); the text's last
+  newline is kept. `expect_markers` refuses a drawn line that holds no
+  character. TalkBack reads the drawn text, so it loses those paragraph
+  breaks (RD18).
+- Compose's BasicTextField copies the DRAWN text and collapses the selection
+  before Clipboard.setClipEntry runs, so kaya's copy reads the selection and
+  the core's flavours before it.
+- UIColorPickerViewController's hex field takes the colour space of the colour
+  it starts from: started from `UIColor.label` resolved, its field was Display
+  P3 and a typed 8D4DE0 committed sRGB 9749E8. The iOS arm starts it from an
+  sRGB UIColor.
+- On iOS a keystroke reaches the text view's delegate (`shouldChangeTextIn`)
+  BEFORE `insertText`/`deleteBackward`, and a programmatic `insertText` reaches
+  no delegate at all; XCUITest's `typeKey(delete)` reaches no `deleteBackward`
+  on a UITextView, `typeText` of the delete key does. The iOS arm offers its
+  keys from the delegate.
+- A paste prompt answered while the app's main thread is parked in the
+  pasteboard read: the host's tap reached the app under the alert (a click on
+  richdoc's Red button, 2 runs in 5). The iOS arm reads foreign content off the
+  main thread, and run-sim's clip_press waits for the alert to go before it
+  presses again.
+- The core's occurrence door for foreign guests (`send_occurrences` in capi.rs)
+  had text_formatted in its unreachable arm: a Rust guest takes the in-process
+  sink and never reached it, and the first Go guest to hear a core-made
+  paragraph act aborted. Read by editor.steps' list section in Go.
+- A dotnet incremental build judges by modification time: a negative restored
+  with a copy that keeps the old mtime kept the perturbed build, and the next
+  green run failed with the negative's sentence. The lanes' build_csharp
+  judges by content (content_fresh); a hand build wants `--no-incremental` or
+  a restore that writes fresh bytes.

@@ -3292,6 +3292,27 @@ pub mod Microsoft {
                 windows_core::IInspectable
             );
             impl ITextParagraphFormat {
+                pub fn Alignment(&self) -> windows_core::Result<ParagraphAlignment> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Alignment)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetAlignment(&self, value: ParagraphAlignment) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetAlignment)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn FirstLineIndent(&self) -> windows_core::Result<f32> {
                     let this = self;
                     unsafe {
@@ -3668,6 +3689,8 @@ pub mod Microsoft {
                 const NAME: &'static str = "Microsoft.UI.Text.ITextParagraphFormat";
             }
             pub trait ITextParagraphFormat_Impl: windows_core::IUnknownImpl {
+                fn Alignment(&self) -> windows_core::Result<ParagraphAlignment>;
+                fn SetAlignment(&self, value: ParagraphAlignment) -> windows_core::Result<()>;
                 fn FirstLineIndent(&self) -> windows_core::Result<f32>;
                 fn KeepTogether(&self) -> windows_core::Result<FormatEffect>;
                 fn SetKeepTogether(&self, value: FormatEffect) -> windows_core::Result<()>;
@@ -3713,6 +3736,38 @@ pub mod Microsoft {
             impl ITextParagraphFormat_Vtbl {
                 pub const fn new<Identity: ITextParagraphFormat_Impl, const OFFSET: isize>() -> Self
                 {
+                    unsafe extern "system" fn Alignment<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut ParagraphAlignment,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextParagraphFormat_Impl::Alignment(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetAlignment<
+                        Identity: ITextParagraphFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: ParagraphAlignment,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextParagraphFormat_Impl::SetAlignment(this, value).into()
+                        }
+                    }
                     unsafe extern "system" fn FirstLineIndent<
                         Identity: ITextParagraphFormat_Impl,
                         const OFFSET: isize,
@@ -4279,8 +4334,8 @@ pub mod Microsoft {
                             ITextParagraphFormat,
                             OFFSET,
                         >(),
-                        Alignment: 0,
-                        SetAlignment: 0,
+                        Alignment: Alignment::<Identity, OFFSET>,
+                        SetAlignment: SetAlignment::<Identity, OFFSET>,
                         FirstLineIndent: FirstLineIndent::<Identity, OFFSET>,
                         KeepTogether: KeepTogether::<Identity, OFFSET>,
                         SetKeepTogether: SetKeepTogether::<Identity, OFFSET>,
@@ -4337,8 +4392,15 @@ pub mod Microsoft {
             #[doc(hidden)]
             pub struct ITextParagraphFormat_Vtbl {
                 pub base__: windows_core::IInspectable_Vtbl,
-                Alignment: usize,
-                SetAlignment: usize,
+                pub Alignment: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut ParagraphAlignment,
+                ) -> windows_core::HRESULT,
+                pub SetAlignment: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    ParagraphAlignment,
+                )
+                    -> windows_core::HRESULT,
                 pub FirstLineIndent: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut f32,
@@ -7298,6 +7360,25 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     *mut core::ffi::c_void,
                 ) -> windows_core::HRESULT,
+            }
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct ParagraphAlignment(pub i32);
+            impl ParagraphAlignment {
+                pub const Undefined: Self = Self(0i32);
+                pub const Left: Self = Self(1i32);
+                pub const Center: Self = Self(2i32);
+                pub const Right: Self = Self(3i32);
+                pub const Justify: Self = Self(4i32);
+            }
+            impl windows_core::TypeKind for ParagraphAlignment {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for ParagraphAlignment {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Microsoft.UI.Text.ParagraphAlignment;i4)",
+                    );
             }
             #[repr(transparent)]
             #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -116231,13 +116312,23 @@ pub mod Microsoft {
                             *mut core::ffi::c_void,
                             i64,
                         ) -> windows_core::HRESULT,
-                    CopyingToClipboard: usize,
+                    pub CopyingToClipboard: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
                     pub RemoveCopyingToClipboard:
                         unsafe extern "system" fn(
                             *mut core::ffi::c_void,
                             i64,
                         ) -> windows_core::HRESULT,
-                    CuttingToClipboard: usize,
+                    pub CuttingToClipboard: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
                     pub RemoveCuttingToClipboard:
                         unsafe extern "system" fn(
                             *mut core::ffi::c_void,
@@ -119146,13 +119237,23 @@ pub mod Microsoft {
                             *mut core::ffi::c_void,
                             i64,
                         ) -> windows_core::HRESULT,
-                    CopyingToClipboard: usize,
+                    pub CopyingToClipboard: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
                     pub RemoveCopyingToClipboard:
                         unsafe extern "system" fn(
                             *mut core::ffi::c_void,
                             i64,
                         ) -> windows_core::HRESULT,
-                    CuttingToClipboard: usize,
+                    pub CuttingToClipboard: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
                     pub RemoveCuttingToClipboard:
                         unsafe extern "system" fn(
                             *mut core::ffi::c_void,
@@ -119340,6 +119441,54 @@ pub mod Microsoft {
                     pub Length: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut i32,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    ITextControlCopyingToClipboardEventArgs,
+                    ITextControlCopyingToClipboardEventArgs_Vtbl,
+                    0x1daac6d5_8db5_5d9f_9382_1e644f9aa437
+                );
+                impl windows_core::RuntimeType for ITextControlCopyingToClipboardEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct ITextControlCopyingToClipboardEventArgs_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Handled: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetHandled: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        bool,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    ITextControlCuttingToClipboardEventArgs,
+                    ITextControlCuttingToClipboardEventArgs_Vtbl,
+                    0x9d73671f_ea30_555d_8129_5a96aec73a14
+                );
+                impl windows_core::RuntimeType for ITextControlCuttingToClipboardEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct ITextControlCuttingToClipboardEventArgs_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub Handled: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut bool,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetHandled: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        bool,
                     )
                         -> windows_core::HRESULT,
                 }
@@ -218485,6 +218634,26 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn CopyingToClipboard<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::super::Windows::Foundation::TypedEventHandler<
+                                RichEditBox,
+                                TextControlCopyingToClipboardEventArgs,
+                            >,
+                        >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CopyingToClipboard)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveCopyingToClipboard(&self, token: i64) -> windows_core::Result<()> {
                         let this = self;
                         unsafe {
@@ -218493,6 +218662,26 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn CuttingToClipboard<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::super::Windows::Foundation::TypedEventHandler<
+                                RichEditBox,
+                                TextControlCuttingToClipboardEventArgs,
+                            >,
+                        >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CuttingToClipboard)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveCuttingToClipboard(&self, token: i64) -> windows_core::Result<()> {
@@ -261663,6 +261852,26 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn CopyingToClipboard<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::super::Windows::Foundation::TypedEventHandler<
+                                TextBox,
+                                TextControlCopyingToClipboardEventArgs,
+                            >,
+                        >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CopyingToClipboard)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
                     pub fn RemoveCopyingToClipboard(&self, token: i64) -> windows_core::Result<()> {
                         let this = self;
                         unsafe {
@@ -261671,6 +261880,26 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn CuttingToClipboard<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::super::Windows::Foundation::TypedEventHandler<
+                                TextBox,
+                                TextControlCuttingToClipboardEventArgs,
+                            >,
+                        >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CuttingToClipboard)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveCuttingToClipboard(&self, token: i64) -> windows_core::Result<()> {
@@ -264121,6 +264350,104 @@ pub mod Microsoft {
                 }
                 unsafe impl Send for TextCompositionStartedEventArgs {}
                 unsafe impl Sync for TextCompositionStartedEventArgs {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct TextControlCopyingToClipboardEventArgs(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    TextControlCopyingToClipboardEventArgs,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl TextControlCopyingToClipboardEventArgs {
+                    pub fn Handled(&self) -> windows_core::Result<bool> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Handled)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHandled(&self, value: bool) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHandled)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                }
+                impl windows_core::RuntimeType for TextControlCopyingToClipboardEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<
+                            Self,
+                            ITextControlCopyingToClipboardEventArgs,
+                        >();
+                }
+                unsafe impl windows_core::Interface for TextControlCopyingToClipboardEventArgs {
+                    type Vtable = < ITextControlCopyingToClipboardEventArgs as windows_core::Interface >::Vtable ;
+                    const IID: windows_core::GUID =
+                        <ITextControlCopyingToClipboardEventArgs as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for TextControlCopyingToClipboardEventArgs {
+                    const NAME: &'static str =
+                        "Microsoft.UI.Xaml.Controls.TextControlCopyingToClipboardEventArgs";
+                }
+                unsafe impl Send for TextControlCopyingToClipboardEventArgs {}
+                unsafe impl Sync for TextControlCopyingToClipboardEventArgs {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct TextControlCuttingToClipboardEventArgs(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    TextControlCuttingToClipboardEventArgs,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl TextControlCuttingToClipboardEventArgs {
+                    pub fn Handled(&self) -> windows_core::Result<bool> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).Handled)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetHandled(&self, value: bool) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetHandled)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                }
+                impl windows_core::RuntimeType for TextControlCuttingToClipboardEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<
+                            Self,
+                            ITextControlCuttingToClipboardEventArgs,
+                        >();
+                }
+                unsafe impl windows_core::Interface for TextControlCuttingToClipboardEventArgs {
+                    type Vtable = < ITextControlCuttingToClipboardEventArgs as windows_core::Interface >::Vtable ;
+                    const IID: windows_core::GUID =
+                        <ITextControlCuttingToClipboardEventArgs as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for TextControlCuttingToClipboardEventArgs {
+                    const NAME: &'static str =
+                        "Microsoft.UI.Xaml.Controls.TextControlCuttingToClipboardEventArgs";
+                }
+                unsafe impl Send for TextControlCuttingToClipboardEventArgs {}
+                unsafe impl Sync for TextControlCuttingToClipboardEventArgs {}
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct TextControlPasteEventArgs(windows_core::IUnknown);

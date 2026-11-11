@@ -398,6 +398,8 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.text.input.ImeAction
@@ -564,6 +566,18 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
 
     /** A composition this field reported live (its end is the collector's). */
     var richComposing = false
+
+    /** The core's list markers (kaya_text_markers), re-read when the core's
+     *  document moved; the draw reads them (docs/rich-document-plan.md §11). */
+    var richMarkers by mutableStateOf("")
+
+    /** The plain text a rich paste is inserting, the core holding its runs
+     *  (kaya_text_paste); the edit that inserts exactly it takes them. */
+    var richPasteArmed: String? = null
+
+    /** The last selection that covered text (UTF-16): the field's copy
+     *  collapses it before the clipboard hears the copy. */
+    var richCopyRange: androidx.compose.ui.text.TextRange? = null
 
     /** Armed over a collapsed caret, spent by the next insertion — Compose
      * drops a zero-length `addStyle` silently, so pending is kaya's state
@@ -2266,6 +2280,9 @@ object KayaSceneModel {
      * (docs/canvas-plan.md §6).
      */
     var presentationDark = false
+    /** A rich field's automatic ink, the colour its text sheet opens on
+     *  when the selection carries none (docs/rich-document-plan.md §5). */
+    var automaticInk = Color.Black
     // Grid cell leading edges by child node id, grid-local (recorded
     // at place time): the expect_grid_columns observation clusters
     // these — geometry, never the model's columns copy.
@@ -3926,6 +3943,7 @@ object KayaCompose {
     private const val COMMAND_CLEAR = 1
     private const val COMMAND_FOCUS = 2
     private const val COMMAND_EMOJI_PICKER = 3
+    private const val COMMAND_TEXT_COLOR = 4
     // Menu item kinds (spec enum "menu_kind"; DESIGN.md, Menus): menu
     // and radio_group are the grouping nodes, the rest are leaves.
     const val MENU_KIND_MENU = 1
@@ -4361,6 +4379,12 @@ object KayaCompose {
     private const val RICH_ATTR_CODE = 5L
     private const val RICH_ATTR_LINK = 6L
     private const val RICH_ATTR_BLOCK = 7L
+    private const val RICH_ATTR_LIST = 8L
+    private const val RICH_ATTR_INDENT = 9L
+    private const val RICH_ATTR_CHECKED = 10L
+    private const val RICH_ATTR_START = 11L
+    private const val RICH_ATTR_ALIGN = 12L
+    private const val RICH_ATTR_COLOR = 13L
     private const val BLOCK_BODY = 0L
     private const val BLOCK_HEADING1 = 1L
     private const val BLOCK_HEADING2 = 2L
@@ -4389,6 +4413,8 @@ object KayaCompose {
         PROP_DOCUMENT.toLong(),
         RICH_ATTR_BOLD, RICH_ATTR_ITALIC, RICH_ATTR_UNDERLINE, RICH_ATTR_STRIKE,
         RICH_ATTR_CODE, RICH_ATTR_LINK, RICH_ATTR_BLOCK,
+        RICH_ATTR_LIST, RICH_ATTR_INDENT, RICH_ATTR_CHECKED, RICH_ATTR_START,
+        RICH_ATTR_ALIGN, RICH_ATTR_COLOR,
         BLOCK_BODY, BLOCK_HEADING1, BLOCK_HEADING2, BLOCK_HEADING3, BLOCK_QUOTE,
         BLOCK_CODE_BLOCK,
         EDIT_SOURCE_USER, EDIT_SOURCE_IME_COMMIT, EDIT_SOURCE_PASTE,
@@ -6260,6 +6286,7 @@ object KayaCompose {
                             KayaSceneModel.focusedId = id
                             KayaSceneModel.emojiPickerFor = KayaSceneModel.nodes[id]
                         }
+                        COMMAND_TEXT_COLOR -> kayaPresentTextColor(KayaSceneModel.nodes[id]!!)
                         else -> error("kaya: unknown command $command")
                     }
                 }
@@ -6902,6 +6929,27 @@ object KayaCompose {
         return if (said.startsWith("sent exit 0")) null else "the runner's key $code: $said"
     }
 
+    /** `press shift+tab|backspace` (docs/rich-document-plan.md §6): one key
+     * through the focused window's own key path, the caret where it is. */
+    private fun kayaDispatchKey(activity: ComponentActivity, code: Int, meta: Int): String? {
+        val sent = onUi(activity) {
+            val node = kayaFocusedTypingNode() ?: return@onUi false
+            val now = android.os.SystemClock.uptimeMillis()
+            val host = kayaFieldViews[node.id]?.rootView ?: activity.window.decorView
+            for (action in intArrayOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
+                host.dispatchKeyEvent(
+                    KeyEvent(
+                        now, now, action, code, 0, meta,
+                        android.view.KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0,
+                        android.view.InputDevice.SOURCE_KEYBOARD,
+                    ),
+                )
+            }
+            true
+        }
+        return if (sent == true) null else "press: no text field holds focus"
+    }
+
     private fun kayaTypeAtFocus(
         activity: ComponentActivity,
         text: String,
@@ -6971,6 +7019,7 @@ object KayaCompose {
             var tries = 0
             while (true) {
                 val was = onUi(activity) { kayaFocusedTypingNode()?.textState?.text?.length }
+                val taken = kayaRichKeysTaken
                 // ONE UI-THREAD HOP PER CHARACTER, so a runloop turn
                 // passes between them exactly as it does between a
                 // user's keystrokes.
@@ -6998,7 +7047,7 @@ object KayaCompose {
                 // ONCE: where it submits it inserts nothing, and a resend is
                 // a second submit (docs/traps.md, the doubled submit).
                 if (was == null || (c == '\n' && submitsOnReturn) ||
-                    kayaKeyLanded(activity, was)) break
+                    kayaKeyLanded(activity, was, taken)) break
                 tries += 1
                 if (tries >= 10) {
                     Log.e(
@@ -7054,10 +7103,12 @@ object KayaCompose {
     /** Did the last dispatched key reach the focused field? Bounded, and
      * free in the common case: the field applies a key on the turn it is
      * dispatched, so the first sample already differs. */
-    private fun kayaKeyLanded(activity: ComponentActivity, was: Int): Boolean {
+    private fun kayaKeyLanded(activity: ComponentActivity, was: Int, taken: Int): Boolean {
         repeat(20) {
             val now = onUi(activity) { kayaFocusedTypingNode()?.textState?.text?.length }
             if (now != was) return true
+            // A KEY THE CORE TOOK moves no text (docs/rich-document-plan.md §11).
+            if (kayaRichKeysTaken != taken) return true
             Thread.sleep(5)
         }
         return false
@@ -8277,6 +8328,8 @@ object KayaCompose {
                 val id = KayaSceneModel.focusedId ?: return false
                 val node = KayaSceneModel.nodes[id] ?: return false
                 val offer = kayaClipboardOffer() ?: return false
+                // A rich field pastes HTML too (docs/rich-document-plan.md §7).
+                if (node.rich && offer.hasMimeType(ClipDescription.MIMETYPE_TEXT_HTML)) return true
                 if (node.accepts.isEmpty()) {
                     return offer.hasMimeType(ClipDescription.MIMETYPE_TEXT_PLAIN)
                 }
@@ -8315,6 +8368,12 @@ object KayaCompose {
             "paste" -> {
                 val id = KayaSceneModel.focusedId ?: return true
                 val node = KayaSceneModel.nodes[id] ?: return true
+                if (node.rich && kayaIsTextField(node)) {
+                    // THE FIELD'S OWN PASTE, at its selection, through the
+                    // rich clipboard (docs/rich-document-plan.md §7).
+                    kayaEditFocusedText(role)
+                    return true
+                }
                 if (node.accepts.isEmpty()) {
                     // THE PLATFORM'S OWN INSERTION: no responder chain
                     // here, and the MODEL owns the field's text.
@@ -8412,9 +8471,14 @@ object KayaCompose {
         val view = kayaComposeRoot(activity.window.decorView) ?: return
         val owner = (view as RootForTest).semanticsOwner
         val node = kayaFocusedSemanticsNode(owner.rootSemanticsNode) ?: return
-        val action =
-            if (role == "cut") node.config.getOrNull(SemanticsActions.CutText)
-            else node.config.getOrNull(SemanticsActions.CopyText)
+        val action = when (role) {
+            "cut" -> node.config.getOrNull(SemanticsActions.CutText)
+            "paste" -> node.config.getOrNull(SemanticsActions.PasteText)
+            else -> node.config.getOrNull(SemanticsActions.CopyText)
+        }
+        if (action == null) {
+            Log.i("kaya", "KAYA_DIAG $role: the focused field offers no ${role.replaceFirstChar { it.uppercase() }}Text action")
+        }
         action?.action?.invoke()
     }
 
@@ -8446,6 +8510,153 @@ object KayaCompose {
      * Compose highlight witness composites what it expects, and aims in
      * surface space"). NOT ON THE UI THREAD — `PixelCopy` deadlocks.
      */
+    /** `select_text`: the focus moved to the field, then its selection,
+     * reported to the core at once. null, or what refused. UI thread. */
+    private fun kayaSelectTextVerb(parts: List<String>): String? {
+        if (parts.size < 3) return "wants a target and a start:end range"
+        val node = kayaTextTarget(parts[1]) ?: return "no such target ${parts[1]}"
+        val bounds = parts[2].split(":")
+        val s = bounds.getOrNull(0)?.toIntOrNull()
+        val e = bounds.getOrNull(1)?.toIntOrNull()
+        if (bounds.size != 2 || s == null || e == null) return "${parts[2]} is not a start:end range"
+        val text = node.textState.text.toString()
+        val start = kayaUtf16Offset(text, s)
+        val end = kayaUtf16Offset(text, e)
+        if (start < 0 || end < 0 || start > end) {
+            return "${parts[2]} is not on a character boundary of the " +
+                "${text.toByteArray(Charsets.UTF_8).size}-byte text"
+        }
+        if (node.textState.composition != null) return "an input-method composition is live on ${parts[1]}"
+        KayaSceneModel.focusedId = node.id
+        node.textState.edit { selection = androidx.compose.ui.text.TextRange(start, end) }
+        if (node.rich) KayaPresent.textSelection(node.id, s.toLong(), e.toLong())
+        return null
+    }
+
+    /** click_marker's aim: the drawn marker's centre in WINDOW coordinates,
+     * or the sentence saying why there is none. UI thread. */
+    private fun kayaMarkerPoint(parts: List<String>): Pair<Offset, String?>? {
+        if (parts.size < 3) return null
+        val at = parts[2].toIntOrNull() ?: return null
+        val none = Offset.Zero
+        val node = kayaTextTarget(parts[1]) ?: return Pair(none, "no such target ${parts[1]}")
+        val drawn = kayaDrawnMarkers[node.id]?.firstOrNull { it.marker.start == at }
+            ?: return Pair(none, "no marker is drawn at byte $at (drawn: \"${kayaDrawnMarkerSpelling(node.id)}\")")
+        val origin = kayaTextOrigins[node.id] ?: return Pair(none, "${parts[1]} has not been placed")
+        // A finger scrolls the box into view first: a phone's field is a
+        // viewport the keyboard shortens.
+        val layout = kayaTextLayouts[node.id]?.invoke()
+        if (layout != null) {
+            val scroll = node.scrollState
+            val viewport = kayaViewportHeight(layout, scroll)
+            val delta = when {
+                drawn.hit.top < scroll.value -> drawn.hit.top - scroll.value
+                drawn.hit.bottom > scroll.value + viewport -> drawn.hit.bottom - (scroll.value + viewport)
+                else -> 0f
+            }
+            if (delta != 0f) scroll.dispatchRawDelta(delta)
+        }
+        val c = drawn.box.center
+        val aim = Offset(origin.x + c.x, origin.y + c.y - node.scrollState.value)
+        KayaVTrace.note("marker", "-> tap $aim (window) at the box ${drawn.box} from origin $origin")
+        return Pair(aim, null)
+    }
+
+    /** The colour a `light RRGGBB dark RRGGBB` (or bare `RRGGBB`) names for
+     * this appearance, or null. */
+    private fun kayaAppearanceColor(spec: String, dark: Boolean): String? {
+        val words = spec.trim().split(' ').filter { it.isNotEmpty() }
+        if (words.size == 1) return words[0].takeIf { kayaIsHex6(it) }
+        val i = words.indexOf(if (dark) "dark" else "light")
+        return words.getOrNull(i + 1)?.takeIf { i >= 0 && kayaIsHex6(it) }
+    }
+
+    private fun kayaIsHex6(word: String): Boolean =
+        word.length == 6 && word.all { it.isDigit() || it.uppercaseChar() in 'A'..'F' }
+
+    /** Two RRGGBB within TEXT_INK_TOLERANCE per channel. */
+    private fun kayaInkClose(got: String, want: String): Boolean {
+        val a = got.toIntOrNull(16) ?: return false
+        val b = want.toIntOrNull(16) ?: return false
+        return (0 until 3).all { k ->
+            kotlin.math.abs(((a shr (8 * k)) and 0xFF) - ((b shr (8 * k)) and 0xFF)) <= KAYA_TEXT_INK_TOLERANCE
+        }
+    }
+
+    /**
+     * A run's drawn ink as RRGGBB: the window's own picture of the run's
+     * character boxes (the caret's left out), the ground taken as their
+     * commonest colour and the ink as the pixel farthest from it; or, in
+     * angle brackets, what was measured instead. OFF THE UI THREAD
+     * (PixelCopy answers on it).
+     */
+    private fun kayaTextInkRead(activity: ComponentActivity, spec: String, range: String): String {
+        class Aim(val trouble: String?, val boxes: List<android.graphics.Rect>, val caret: android.graphics.Rect?,
+                  val viewport: android.graphics.Rect?, val read: KayaHighlights?)
+        val aim = onUi(activity) {
+            val node = kayaTextTarget(spec) ?: return@onUi Aim("<no such target>", emptyList(), null, null, null)
+            val bounds = range.split(":")
+            val text = node.textState.text.toString()
+            val a = bounds.getOrNull(0)?.toIntOrNull()?.let { kayaUtf16Offset(text, it) } ?: -1
+            val b = bounds.getOrNull(1)?.toIntOrNull()?.let { kayaUtf16Offset(text, it) } ?: -1
+            if (bounds.size != 2 || a < 0 || b <= a) {
+                return@onUi Aim("<$range is not a non-empty range on a character boundary>", emptyList(), null, null, null)
+            }
+            val selection = node.textState.selection
+            if (!selection.collapsed && selection.min < b && selection.max > a) {
+                return@onUi Aim(
+                    "<the selection ${selection.min}:${selection.max} (UTF-16) covers the run, " +
+                        "so its ground is the selection's>", emptyList(), null, null, null)
+            }
+            val layout = kayaTextLayouts[node.id]?.invoke()
+            val box = kayaTextBoxes[node.id]
+            if (layout == null || box == null) return@onUi Aim("<the field has not been laid out>", emptyList(), null, null, null)
+            val scroll = node.scrollState.value
+            fun window(r: androidx.compose.ui.geometry.Rect) = android.graphics.Rect(
+                r.left.toInt() + box.left, (r.top - scroll).toInt() + box.top,
+                r.right.toInt() + box.left, (r.bottom - scroll).toInt() + box.top)
+            val boxes = (a until b).filter { !text[it].isWhitespace() }.map { window(layout.getBoundingBox(it)) }
+            val caret = if (selection.collapsed && kayaFocusedTypingNode() === node) {
+                window(layout.getCursorRect(selection.start)).apply { inset(-4, -4) }
+            } else null
+            val decor = activity.window.decorView
+            val loc = IntArray(2)
+            decor.getLocationInWindow(loc)
+            Aim(null, boxes, caret, box, KayaHighlights(
+                surfaceOffset = android.graphics.Point(loc[0], loc[1]),
+                surfaceSize = android.graphics.Point(decor.width, decor.height)))
+        } ?: return "<no answer from the UI thread>"
+        if (aim.trouble != null) return aim.trouble
+        val viewport = aim.viewport!!
+        if (aim.boxes.isEmpty()) return "<no laid-out character in $range>"
+        if (aim.boxes.any { !viewport.contains(it) }) return "<the run $range is outside the viewport>"
+        val area = android.graphics.Rect(aim.boxes[0])
+        aim.boxes.forEach { area.union(it) }
+        val shot = kayaPhotograph(activity, area, aim.read!!) ?: return "<no picture of the window>"
+        try {
+            val counts = HashMap<Int, Int>()
+            val pixels = ArrayList<Int>()
+            for (r in aim.boxes) {
+                for (y in r.top until r.bottom) for (x in r.left until r.right) {
+                    if (aim.caret?.contains(x, y) == true) continue
+                    val px = shot.at(x, y) ?: continue
+                    val rgb = px and 0xFFFFFF
+                    pixels.add(rgb)
+                    counts[rgb] = (counts[rgb] ?: 0) + 1
+                }
+            }
+            val ground = counts.maxByOrNull { it.value }?.key ?: return "<the picture held no pixel of $range>"
+            fun distance(c: Int) = (0 until 3).sumOf { k ->
+                val d = ((c shr (8 * k)) and 0xFF) - ((ground shr (8 * k)) and 0xFF)
+                d * d
+            }
+            val ink = pixels.maxByOrNull { distance(it) }!!
+            return "%06X".format(ink)
+        } finally {
+            shot.bitmap.recycle()
+        }
+    }
+
     private fun kayaHighlightRead(activity: ComponentActivity, spec: String): String {
         val gathered = onUi(activity) { kayaGatherHighlights(activity, spec) }
         if (gathered.trouble != null) return gathered.trouble
@@ -10412,6 +10623,11 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
      * (docs/clipboard-plan.md §7). IT WAITS UNTIL THE CONTENT IS REALLY
      * THERE, twice, or every step after it races.
      */
+    /** An html string spells a double quote `\q` (harness.rs's clip_argument):
+     * a .steps string cannot carry one. */
+    private fun kayaClipArgument(kind: String, argument: String): String =
+        if (kind == "html") argument.replace("\\q", "\"") else argument
+
     private fun kayaClipboardSeed(kind: String, argument: String) {
         val arg = kayaExpandPath(argument)
         val extras = android.os.Bundle()
@@ -14196,7 +14412,9 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             else if (parts.size == 2 && parts[1] == "space") kayaPressKey(activity, KeyEvent.KEYCODE_SPACE)
                             else if (parts.size == 2 && parts[1] == "up") kayaPressKey(activity, KeyEvent.KEYCODE_DPAD_UP)
                             else if (parts.size == 2 && parts[1] == "down") kayaPressKey(activity, KeyEvent.KEYCODE_DPAD_DOWN)
-                            else "press wants one of the named keys (return, tab, space, up, down): $line"
+                            else if (parts.size == 2 && parts[1] == "shift+tab") kayaDispatchKey(activity, KeyEvent.KEYCODE_TAB, KeyEvent.META_SHIFT_ON or KeyEvent.META_SHIFT_LEFT_ON)
+                            else if (parts.size == 2 && parts[1] == "backspace") kayaDispatchKey(activity, KeyEvent.KEYCODE_DEL, 0)
+                            else "press wants one of the named keys (return, tab, shift+tab, backspace, space, up, down): $line"
                         if (why != null) failures.add(why)
                         else kayaAwaitAnswer(answered)
                         if (why == null) kayaKeyboardWall(activity, "press ${parts[1]}")?.let { failures.add(it) }
@@ -15055,7 +15273,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             // QUIET-WAIT ONLY (tools/check-verbs.py's
                             // QUIET_ONLY): the clipboard is not the app.
                             kayaAwaitQuiet()
-                            kayaClipboardSeed(parts[1], quoted(parts.drop(2)))
+                            kayaClipboardSeed(parts[1], kayaClipArgument(parts[1], quoted(parts.drop(2))))
                         } else {
                             failures.add("clipboard_seed wants a kind and its content")
                         }
@@ -15063,7 +15281,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                     "expect_clipboard" -> {
                         if (parts.size > 2) {
                             val kind = parts[1]
-                            val want = quoted(parts.drop(2))
+                            val want = kayaClipArgument(kind, quoted(parts.drop(2)))
                             // POLLED by the generic expect wrapper: the
                             // copy went out on the apply pump, so the
                             // clipboard changes a moment after the click.
@@ -15836,8 +16054,113 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         if (got == want) observed.add("${parts[2]} $want")
                         else failures.add("${parts[2]} is $got, wanted $want")
                     }
-                    "select_text", "expect_markers", "click_marker", "pick_text_color",
-                    "expect_text_ink" -> depthStub("richdoc")
+                    "select_text" -> {
+                        // `select_text <target> <start:end>` in BYTES
+                        // (docs/rich-document-plan.md §9): the field focused,
+                        // then its selection, which the core hears at once.
+                        val trouble = onUi(activity) { kayaSelectTextVerb(parts) }
+                        if (trouble != null) {
+                            failures.add("select_text: $trouble")
+                        } else {
+                            val id = onUi(activity) { kayaTextTarget(parts[1])?.id }
+                            var waited = 0
+                            while (waited < 3000 && onUi(activity) { KayaSceneModel.composeFocusedId } != id) {
+                                Thread.sleep(20)
+                                waited += 20
+                            }
+                            if (waited >= 3000) {
+                                failures.add("select_text: ${parts[1]} never took the focus in 3 s")
+                            }
+                        }
+                    }
+                    "expect_markers" -> {
+                        // WHAT THE FIELD DREW, never the core's numbering; a
+                        // disagreement between the two names both.
+                        val want = quoted(parts.drop(2))
+                        val read = onUi(activity) {
+                            kayaTextTarget(parts[1])?.let {
+                                Pair(kayaDrawnMarkerSpelling(it.id), KayaPresent.textMarkers(it.id))
+                            }
+                        }
+                        val phantom = onUi(activity) {
+                            kayaTextTarget(parts[1])?.let { kayaPhantomLines[it.id] } ?: emptyList()
+                        } ?: emptyList()
+                        when {
+                            read == null -> failures.add("no such target ${parts[1]}")
+                            phantom.isNotEmpty() -> failures.add(
+                                "${parts[1]} draws an empty line the text does not hold at " +
+                                    "unit(s) ${phantom.joinToString(",")} (docs/traps.md, Compose's " +
+                                    "paragraph-style boundary)")
+                            read.first == want -> observed.add("markers \"$want\"")
+                            read.first != read.second -> failures.add(
+                                "markers drawn \"${read.first}\" — but the core numbers " +
+                                    "\"${read.second}\", wanted \"$want\"")
+                            else -> failures.add("markers \"${read.first}\", wanted \"$want\"")
+                        }
+                    }
+                    "click_marker" -> {
+                        // A tap at a drawn marker's centre, through the
+                        // window's own touch path to the field's pointer pass.
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val at = onUi(activity) { kayaMarkerPoint(parts) }
+                        when {
+                            at == null -> failures.add("click_marker wants a target and a byte offset: $line")
+                            at.second != null -> failures.add("click_marker: ${at.second}")
+                            else -> {
+                                kayaTouchTap(activity, at.first.x, at.first.y)
+                                kayaAwaitAnswer(answered)
+                            }
+                        }
+                    }
+                    "pick_text_color" -> {
+                        // The sheet the text_color command presented: its hex
+                        // field and its Done (docs/rich-document-plan.md §11).
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val want = quoted(parts.drop(2))
+                        val hex = kayaAppearanceColor(want, KayaSceneModel.presentationDark)
+                        var drive: KayaColorSheetDrive? = null
+                        val until = System.currentTimeMillis() + 10_000
+                        while (System.currentTimeMillis() < until) {
+                            val over = onUi(activity) {
+                                val node = kayaTextTarget(parts[1])
+                                node != null && KayaSceneModel.colorSheetFor === node
+                            }
+                            drive = kayaColorSheetDrive
+                            if (over == true && drive != null) break
+                            drive = null
+                            Thread.sleep(50)
+                        }
+                        when {
+                            hex == null -> failures.add(
+                                "pick_text_color \"$want\" names no " +
+                                    "${if (KayaSceneModel.presentationDark) "dark" else "light"} colour")
+                            drive == null -> failures.add(
+                                "pick_text_color ${parts[1]}: no colour sheet is presented over it")
+                            else -> {
+                                onUi(activity) { drive.hex(hex) }
+                                Thread.sleep(300)
+                                onUi(activity) { drive.done() }
+                                kayaAwaitAnswer(answered)
+                            }
+                        }
+                    }
+                    "expect_text_ink" -> {
+                        // The run's drawn ink off the window's own pixels,
+                        // within 3 per channel (harness.rs's TEXT_INK_TOLERANCE).
+                        val want = quoted(parts.drop(3))
+                        val dark = KayaSceneModel.presentationDark
+                        val got = kayaTextInkRead(activity, parts[1], parts[2])
+                        val wanted = kayaAppearanceColor(want, dark)
+                        val mode = if (dark) "dark" else "light"
+                        when {
+                            wanted == null -> failures.add("expect_text_ink \"$want\" names no $mode colour")
+                            got.startsWith("<") -> failures.add("ink at ${parts[2]}: $got, wanted $want")
+                            kayaInkClose(got, wanted) -> observed.add("ink at ${parts[2]} $mode $got")
+                            else -> failures.add("ink at ${parts[2]} reads $mode $got, wanted $want")
+                        }
+                    }
                     "format" -> {
                         // `format <target> <start:end> <name>[=<value>] [off]`
                         // in BYTES (docs/rich-text-plan.md R9): select the
@@ -18107,9 +18430,21 @@ data class KayaRichRun(
     val value: String,
 )
 
-/** The v1 vocabulary (docs/rich-text-plan.md R3). */
-internal val KAYA_RICH_NAMES =
-    listOf("bold", "italic", "underline", "strike", "code", "link", "block")
+/** kaya's vocabulary (docs/rich-text-plan.md R3, docs/rich-document-plan.md §2). */
+internal val KAYA_RICH_NAMES = listOf(
+    "bold", "italic", "underline", "strike", "code", "link", "block",
+    "list", "indent", "checked", "start", "align", "color")
+
+/** The attributes that cover whole paragraphs (richdoc::PARAGRAPH_ATTRS). */
+internal val KAYA_RICH_PARAGRAPH = setOf("block", "list", "indent", "checked", "start", "align")
+
+/** kaya's names, or an app's dotted extension (RD8), carried and drawn as nothing. */
+internal fun kayaRichNameKept(name: String): Boolean =
+    KAYA_RICH_NAMES.contains(name) || name.contains('.')
+
+/** RD7's table: the marks that grow over text typed at their end. */
+internal fun kayaRichExpandsAtEnd(name: String): Boolean =
+    name == "bold" || name == "italic" || name == "underline" || name == "strike" || name == "color"
 
 /**
  * Per attribute: disjoint, sorted, never adjacent-and-equal, a later run
@@ -18198,47 +18533,104 @@ internal fun kayaRichFormat(
 /** The attributes covering one UTF-16 index. */
 internal fun kayaRichAttrsAt(runs: List<KayaRichRun>, at: Int): LinkedHashMap<String, String> {
     val out = LinkedHashMap<String, String>()
-    for (name in KAYA_RICH_NAMES) {
-        runs.firstOrNull { it.name == name && it.start <= at && at < it.end }
-            ?.let { out[name] = it.value }
+    for (run in runs) {
+        if (run.start <= at && at < run.end && !out.containsKey(run.name)) out[run.name] = run.value
     }
     return out
 }
 
+/** The paragraph attributes the empty final paragraph holds: what the newline
+ * before it carries, under a pending arm at the text's end (scene.rs's
+ * final_state). */
+internal fun kayaRichFinalState(node: KayaNode, text: String): LinkedHashMap<String, String> {
+    val out = LinkedHashMap<String, String>()
+    if (text.endsWith('\n')) {
+        for ((name, value) in kayaRichAttrsAt(node.richRuns, text.length - 1)) {
+            if (KAYA_RICH_PARAGRAPH.contains(name)) out[name] = value
+        }
+    }
+    if (node.richPendingAt == text.length) {
+        for ((name, value) in node.richPendingOn) {
+            if (KAYA_RICH_PARAGRAPH.contains(name)) out[name] = value
+        }
+        for (name in node.richPendingOff) out.remove(name)
+    }
+    return out
+}
+
+/** The paragraph `from..to` (no terminator) and its attributes, read from its
+ * carrier: its first unit, its terminator when empty, or the final state. */
+internal fun kayaRichParaAttrs(
+    node: KayaNode,
+    runs: List<KayaRichRun>,
+    text: String,
+    from: Int,
+    to: Int,
+): LinkedHashMap<String, String> {
+    if (from == to && to >= text.length) return kayaRichFinalState(node, text)
+    val out = LinkedHashMap<String, String>()
+    for ((name, value) in kayaRichAttrsAt(runs, from)) {
+        if (KAYA_RICH_PARAGRAPH.contains(name)) out[name] = value
+    }
+    return out
+}
+
+/** The paragraph `at` lies in, without its terminator; a unit on a newline is
+ * its paragraph's end (richdoc::para_index). */
+internal fun kayaRichParagraphAt(text: String, at: Int): Pair<Int, Int> {
+    val from = if (at <= 0) 0 else text.lastIndexOf('\n', at - 1) + 1
+    var to = text.indexOf('\n', at.coerceAtMost(text.length))
+    if (to < 0) to = text.length
+    return Pair(from, to)
+}
+
 /**
- * The inheritance rule (docs/rich-text-plan.md R4 and R10), the core's
- * `typed_runs` one unit over: typed text takes the character before it,
- * except `link`; armed typing attributes win; a heading ENDS at Return.
- * `text` is the PRE-EDIT text, as the core's `self.text` is at its call.
- * The CORE's copy is the authority and this one only decides what the user
- * SEES — `expect_runs` prints both when they disagree.
+ * The inheritance rule, the core's `typed_runs` one unit over
+ * (docs/rich-document-plan.md §11): `text` and the runs are the PRE-EDIT
+ * ones, as the core's are at its call. The CORE's copy is the authority and
+ * this one only decides what the user SEES; `expect_runs` prints both when
+ * they disagree.
  */
 internal fun kayaRichTypedRuns(node: KayaNode, text: String, start: Int, inserted: String):
     List<KayaRichRun> {
     if (inserted.isEmpty()) return emptyList()
-    // The character before the caret, never half a surrogate pair.
-    val before =
-        if (start <= 0) -1
-        else if (start - 2 >= 0 && Character.isLowSurrogate(text[start - 1])) start - 2
-        else start - 1
-    val attrs = if (before < 0) LinkedHashMap() else kayaRichAttrsAt(node.richRuns, before)
-    attrs.remove("link")
+    val inline = LinkedHashMap<String, String>()
+    if (start > 0) {
+        for ((name, value) in kayaRichAttrsAt(node.richRuns, start - 1)) {
+            if (!KAYA_RICH_PARAGRAPH.contains(name) && kayaRichExpandsAtEnd(name)) inline[name] = value
+        }
+    }
+    val (from, to) = kayaRichParagraphAt(text, start)
+    val para = kayaRichParaAttrs(node, node.richRuns, text, from, to)
     if (start == node.richPendingAt) {
-        attrs.putAll(node.richPendingOn)
-        for (name in node.richPendingOff) attrs.remove(name)
+        for ((name, value) in node.richPendingOn) {
+            if (KAYA_RICH_PARAGRAPH.contains(name)) para[name] = value else inline[name] = value
+        }
+        for (name in node.richPendingOff) {
+            para.remove(name)
+            inline.remove(name)
+        }
     }
-    // R10: at the END of a heading paragraph the block stops at the
-    // insertion's first newline (and is dropped when that newline is the
-    // first character); a quote or code block continues, a Return INSIDE a
-    // paragraph keeps both halves, and inline attributes ride either way.
-    val headingEnds = attrs["block"]?.startsWith("heading") == true &&
-        (start >= text.length || text[start] == '\n')
+    val atEnd = start >= text.length || text[start] == '\n'
     val newline = inserted.indexOf('\n')
-    val blockEnd = if (headingEnds && newline >= 0) newline else inserted.length
-    return attrs.mapNotNull { (name, value) ->
-        val end = if (name == "block") blockEnd else inserted.length
-        if (end > 0) KayaRichRun(0, end, name, value) else null
+    val after: Map<String, String> = when {
+        newline < 0 -> emptyMap()
+        atEnd -> para.filter { (name, value) ->
+            when (name) {
+                "block" -> !value.startsWith("heading")
+                "checked", "start" -> false
+                else -> true
+            }
+        }
+        else -> para.filterKeys { it != "start" }
     }
+    val length = inserted.length
+    val cut = if (newline < 0) length else newline
+    val out = ArrayList<KayaRichRun>()
+    for ((name, value) in inline) out.add(KayaRichRun(0, length, name, value))
+    for ((name, value) in para) out.add(KayaRichRun(0, cut, name, value))
+    for ((name, value) in after) out.add(KayaRichRun(cut, length, name, value))
+    return kayaRichNormalize(out)
 }
 
 /**
@@ -18277,7 +18669,25 @@ internal data class KayaRichPalette(
      *  keeps (docs/font-picker-plan.md §3). */
     val bold: FontWeight = FontWeight.Bold,
     val codeFamily: FontFamily = FontFamily.Monospace,
+    /** A `color` run draws kaya_ink_for_dark of its stored colour on a dark
+     *  page (docs/rich-document-plan.md RD5). */
+    val dark: Boolean = false,
 )
+
+private val kayaDarkInks = HashMap<Int, Int>()
+
+/** A document colour as this page draws it: the stored `#RRGGBB` on a light
+ * page, the core's map of it on a dark one; null for a value that is not one. */
+internal fun kayaDocumentInk(value: String, dark: Boolean): Color? {
+    val rgb = kayaParseDocumentColor(value) ?: return null
+    val drawn = if (dark) kayaDarkInks.getOrPut(rgb) { KayaPresent.inkForDark(rgb) } else rgb
+    return Color(0xFF000000.toInt() or drawn)
+}
+
+internal fun kayaParseDocumentColor(value: String): Int? {
+    if (value.length != 7 || value[0] != '#') return null
+    return value.substring(1).toIntOrNull(16)
+}
 
 /** The run table cut into maximal segments of constant attributes — the
  * mac arm's `enumerateAttributes`, which is what keeps two decorations on
@@ -18320,6 +18730,8 @@ internal fun kayaRichSpanStyle(
     return SpanStyle(
         color = when {
             attrs.containsKey("link") -> palette.link
+            attrs.containsKey("color") ->
+                kayaDocumentInk(attrs.getValue("color"), palette.dark) ?: Color.Unspecified
             block == "quote" -> palette.quote
             else -> Color.Unspecified
         },
@@ -18357,6 +18769,14 @@ internal fun kayaRichTransformation(
     palette: KayaRichPalette,
 ): androidx.compose.foundation.text.input.OutputTransformation =
     androidx.compose.foundation.text.input.OutputTransformation {
+        // ONE PARAGRAPH STYLE PER PARAGRAPH, never per segment: a boundary
+        // inside a paragraph breaks the line (docs/rich-text-plan.md §18).
+        val styled = kayaRichParagraphs(runs, asCharSequence())
+            .mapNotNull { p -> kayaRichParagraphStyle(p)?.let { Pair(p, it) } }
+        for (at in kayaRichBoundaryNewlines(styled.map { it.first }, asCharSequence())) {
+            replace(at, at + 1, KAYA_RICH_BOUNDARY_NEWLINE)
+        }
+        for ((p, style) in styled) addStyle(style, p.from, p.stop)
         // Clamped against the OUTPUT buffer: the table follows the text one
         // frame behind, so a run may name an offset this buffer has not.
         for ((from, to, attrs) in kayaRichSegments(runs, length)) {
@@ -18364,11 +18784,6 @@ internal fun kayaRichTransformation(
             val stop = minOf(to, length)
             if (stop <= from) continue
             addStyle(kayaRichSpanStyle(attrs, palette), from, stop)
-        }
-        // ONE PARAGRAPH STYLE PER QUOTE RUN, never per segment — a boundary
-        // inside a quote breaks the line (docs/rich-text-plan.md §18).
-        for ((from, to) in kayaRichQuoteExtents(runs, asCharSequence())) {
-            addStyle(KAYA_RICH_QUOTE_PARAGRAPH, from, to)
         }
     }
 
@@ -18394,60 +18809,122 @@ internal fun kayaRichAnnotated(
     }
 }
 
-/**
- * A QUOTE PARAGRAPH'S EXTENT: the block run WITH its terminating newline,
+/** One paragraph's drawing facts: `from..stop` WITH its terminating newline,
  * since a paragraph-style boundary in front of one draws an empty line
- * (docs/rich-text-plan.md §18).
- */
-internal fun kayaRichQuoteExtents(
+ * (docs/rich-text-plan.md §18). */
+internal data class KayaRichParagraph(
+    val from: Int,
+    val stop: Int,
+    val level: Int,
+    val list: Boolean,
+    val quote: Boolean,
+    val align: String?,
+)
+
+/** Every paragraph with a carrier, its attributes read from it. */
+internal fun kayaRichParagraphs(
     runs: List<KayaRichRun>,
     text: CharSequence,
-): List<Pair<Int, Int>> {
-    val out = ArrayList<Pair<Int, Int>>()
-    for (run in runs) {
-        if (run.name != "block" || run.value != "quote") continue
-        val from = run.start.coerceIn(0, text.length)
-        var to = run.end.coerceIn(from, text.length)
-        if (to < text.length && text[to] == '\n') to += 1
-        if (to > from) out.add(Pair(from, to))
+): List<KayaRichParagraph> {
+    val out = ArrayList<KayaRichParagraph>()
+    var from = 0
+    while (from <= text.length) {
+        var to = from
+        while (to < text.length && text[to] != '\n') to += 1
+        val terminated = to < text.length
+        if (from < to || terminated) {
+            val attrs = kayaRichAttrsAt(runs, from)
+            out.add(KayaRichParagraph(
+                from, if (terminated) to + 1 else to,
+                attrs["indent"]?.toIntOrNull() ?: 0,
+                attrs.containsKey("list"),
+                attrs["block"] == "quote",
+                attrs["align"]))
+        }
+        from = to + 1
     }
     return out
 }
 
 /**
+ * The newlines at a paragraph-style boundary, but the text's last, which is
+ * the empty final paragraph's line: foundation 1.11.4 lays such a newline out
+ * as an empty line of its own, so the field DRAWS it as
+ * [KAYA_RICH_BOUNDARY_NEWLINE] and the boundary breaks the line
+ * (docs/traps.md, Compose's paragraph-style boundary).
+ */
+internal fun kayaRichBoundaryNewlines(styled: List<KayaRichParagraph>, text: CharSequence): Set<Int> {
+    val out = HashSet<Int>()
+    val last = text.length - 1
+    for (p in styled) {
+        if (p.stop - 1 in 0 until last && text[p.stop - 1] == '\n') out.add(p.stop - 1)
+        if (p.from - 1 in 0 until last && text[p.from - 1] == '\n') out.add(p.from - 1)
+    }
+    return out
+}
+
+private const val KAYA_RICH_BOUNDARY_NEWLINE = "\u200B"
+
+/** The quote paragraphs, for the rule. */
+internal fun kayaRichQuoteExtents(
+    runs: List<KayaRichRun>,
+    text: CharSequence,
+): List<KayaRichParagraph> = kayaRichParagraphs(runs, text).filter { it.quote }
+
+/** A level's indent, a list item's gutter and a quote's indent, then the
+ * alignment; null for a paragraph that needs none. */
+internal fun kayaRichParagraphStyle(p: KayaRichParagraph): androidx.compose.ui.text.ParagraphStyle? {
+    val indent = kayaRichTextIndent(p)
+    val align = when (p.align) {
+        "center" -> androidx.compose.ui.text.style.TextAlign.Center
+        "end" -> androidx.compose.ui.text.style.TextAlign.End
+        "justify" -> androidx.compose.ui.text.style.TextAlign.Justify
+        else -> null
+    }
+    if (indent == 0f && align == null) return null
+    return androidx.compose.ui.text.ParagraphStyle(
+        textAlign = align ?: androidx.compose.ui.text.style.TextAlign.Unspecified,
+        textIndent = androidx.compose.ui.text.style.TextIndent(indent.sp, indent.sp))
+}
+
+/** Where a paragraph's text starts, in sp: its level's step, the list gutter
+ * one step more, a quote's indent on top (the mac arm's 24 and 20 points). */
+internal fun kayaRichTextIndent(p: KayaRichParagraph): Float =
+    KAYA_RICH_INDENT_STEP * (p.level + if (p.list) 1 else 0) +
+        if (p.quote) KAYA_RICH_QUOTE_INDENT else 0f
+
+/** The rule sits at the paragraph's own leading edge, before a list's gutter. */
+internal fun kayaRichRuleIndent(p: KayaRichParagraph): Float = KAYA_RICH_INDENT_STEP * p.level
+
+/**
  * THE QUOTE'S LEADING RULE, over the paragraph's own line bounds: Compose
  * draws no paragraph border and offers no hook inside a text layout, so
- * the bar is kaya's own, behind the text and inside the indent
- * [KAYA_RICH_QUOTE_PARAGRAPH] clears for it (docs/rich-text-plan.md §18).
+ * the bar is kaya's own, behind the text and inside the indent the
+ * paragraph style clears for it (docs/rich-text-plan.md §18).
  */
 internal fun androidx.compose.ui.graphics.drawscope.DrawScope.kayaRichQuoteRule(
-    extents: List<Pair<Int, Int>>,
+    extents: List<KayaRichParagraph>,
     layout: androidx.compose.ui.text.TextLayoutResult,
     color: Color,
 ) {
     val width = KAYA_RICH_QUOTE_RULE_WIDTH.toPx()
     val length = layout.layoutInput.text.length
-    for ((from, to) in extents) {
-        if (from >= length) continue
-        val first = layout.getLineForOffset(from)
-        val last = layout.getLineForOffset((to - 1).coerceIn(from, length - 1))
+    for (p in extents) {
+        if (p.from >= length) continue
+        val first = layout.getLineForOffset(p.from)
+        val last = layout.getLineForOffset((p.stop - 1).coerceIn(p.from, length - 1))
         val top = layout.getLineTop(first)
         val bottom = layout.getLineBottom(last)
         drawRect(
             color,
-            topLeft = Offset(0f, top),
+            topLeft = Offset(kayaRichRuleIndent(p).sp.toPx(), top),
             size = androidx.compose.ui.geometry.Size(width, bottom - top))
     }
 }
 
-/** A quote's indent, the mac arm's 20 points in this platform's unit. */
-private val KAYA_RICH_QUOTE_INDENT = 20.sp
-
-/** The indent the rule is drawn inside, declared AFTER the value it
- * reads (a file's top-level properties initialize in order). */
-private val KAYA_RICH_QUOTE_PARAGRAPH = androidx.compose.ui.text.ParagraphStyle(
-    textIndent = androidx.compose.ui.text.style.TextIndent(
-        KAYA_RICH_QUOTE_INDENT, KAYA_RICH_QUOTE_INDENT))
+/** A quote's indent and one list level's step, the mac arm's points in sp. */
+private const val KAYA_RICH_QUOTE_INDENT = 20f
+internal const val KAYA_RICH_INDENT_STEP = 24f
 
 /** The leading rule's width. */
 private val KAYA_RICH_QUOTE_RULE_WIDTH = 3.dp
@@ -18522,7 +18999,7 @@ internal fun kayaFormatSelection(
     removed: Boolean,
 ): String? {
     if (!node.rich) return "widget ${node.id} is not a rich textarea"
-    if (!KAYA_RICH_NAMES.contains(name)) return "$name is not a rich attribute"
+    if (!kayaRichNameKept(name)) return "$name is not a rich attribute"
     if (node.textState.composition != null) {
         return "an input-method composition is live on widget ${node.id}"
     }
@@ -18559,8 +19036,294 @@ internal fun kayaFormatSelection(
     node.richSeq += 1
     KayaPresent.textFormatted(
         node.tag, start.toLong(), end.toLong(), name, value, off)
+    kayaRichDeriveMarkers(node)
     return null
 }
+
+/** The core's markers re-read for a rich textarea, once the core heard
+ * whatever moved them (docs/rich-document-plan.md §11). */
+internal fun kayaRichDeriveMarkers(node: KayaNode) {
+    if (!node.rich || !kayaIsTextField(node)) return
+    val spelled = KayaPresent.textMarkers(node.id)
+    if (spelled != node.richMarkers) node.richMarkers = spelled
+}
+
+/** One marker as the core spells it: start in bytes, level, the marker. */
+internal data class KayaRichMarker(val start: Int, val level: Int, val marker: String)
+
+internal fun kayaRichParseMarkers(spelled: String): List<KayaRichMarker> =
+    if (spelled.isEmpty()) emptyList() else spelled.split('|').mapNotNull { item ->
+        val space = item.indexOf(' ')
+        val colon = item.indexOf(':')
+        if (space < 0 || colon < 0 || colon > space) return@mapNotNull null
+        val start = item.substring(0, colon).toIntOrNull() ?: return@mapNotNull null
+        val level = item.substring(colon + 1, space).toIntOrNull() ?: return@mapNotNull null
+        KayaRichMarker(start, level, item.substring(space + 1))
+    }
+
+/** What the field drew for one marker: the core's marker and where it went, in
+ * the layout's own coordinates (the viewport's scroll not applied). */
+internal data class KayaDrawnMarker(
+    val marker: KayaRichMarker,
+    val box: androidx.compose.ui.geometry.Rect,
+    val hit: androidx.compose.ui.geometry.Rect = box,
+)
+
+/** Per textarea, the markers its last draw put on screen (expect_markers). */
+internal val kayaDrawnMarkers = java.util.concurrent.ConcurrentHashMap<Long, List<KayaDrawnMarker>>()
+
+/** Per textarea, the empty lines its last draw laid out that hold no
+ * character (expect_markers refuses them). */
+internal val kayaPhantomLines = java.util.concurrent.ConcurrentHashMap<Long, List<Int>>()
+
+/** The lines that hold no character, the text's end aside (the empty final
+ * paragraph's line): the paragraph-style boundary's empty line, measured. */
+internal fun kayaRichPhantomLines(layout: androidx.compose.ui.text.TextLayoutResult): List<Int> {
+    val length = layout.layoutInput.text.length
+    return (0 until layout.lineCount).filter {
+        layout.getLineStart(it) == layout.getLineEnd(it) && layout.getLineStart(it) < length
+    }.map { layout.getLineStart(it) }
+}
+
+/** The drawn record in the core's spelling. */
+internal fun kayaDrawnMarkerSpelling(id: Long): String =
+    (kayaDrawnMarkers[id] ?: emptyList()).joinToString("|") {
+        "${it.marker.start}:${it.marker.level} ${it.marker.marker}"
+    }
+
+/**
+ * THE LIST MARKERS, DRAWN behind the text at each item's first line from the
+ * core's one numbering (docs/rich-document-plan.md §6): foundation 1.11.4's
+ * `Bullet` is read-only and has no numbers. Right-aligned in the gutter the
+ * paragraph style clears, a checklist item's box in Material's checkbox
+ * shape. Answers what it drew.
+ */
+internal fun androidx.compose.ui.graphics.drawscope.DrawScope.kayaRichMarkers(
+    markers: List<KayaRichMarker>,
+    runs: List<KayaRichRun>,
+    live: String,
+    layout: androidx.compose.ui.text.TextLayoutResult,
+    measurer: androidx.compose.ui.text.TextMeasurer,
+    style: androidx.compose.ui.text.TextStyle,
+    ink: Color,
+    box: KayaRichBoxColors,
+): List<KayaDrawnMarker> {
+    val drawn = ArrayList<KayaDrawnMarker>(markers.size)
+    val length = layout.layoutInput.text.length
+    if (length != live.length) return drawn
+    val gap = KAYA_RICH_MARKER_GAP.toPx()
+    for (m in markers) {
+        val at = kayaUtf16Offset(live, m.start)
+        if (at < 0) continue
+        val line = layout.getLineForOffset(at)
+        val top = layout.getLineTop(line)
+        val bottom = layout.getLineBottom(line)
+        val (from, to) = kayaRichParagraphAt(live, at)
+        val attrs = kayaRichAttrsAt(runs, if (from == to && to >= live.length) maxOf(0, to - 1) else from)
+        val paragraph = KayaRichParagraph(
+            from, to, m.level, true, attrs["block"] == "quote", attrs["align"])
+        val textX =
+            if (from < to) layout.getHorizontalPosition(from, usePrimaryDirection = true)
+            else kayaRichTextIndent(paragraph).sp.toPx()
+        val right = textX - gap
+        val rect = if (m.marker == "[ ]" || m.marker == "[x]") {
+            val side = KAYA_RICH_CHECK_BOX.toPx()
+            val y = (top + bottom - side) / 2f
+            val r = androidx.compose.ui.geometry.Rect(right - side, y, right, y + side)
+            if (r.left < 0f) continue
+            kayaRichCheckBox(r, m.marker == "[x]", box)
+            drawn.add(KayaDrawnMarker(m, r, r.inflate(KAYA_RICH_BOX_SLOP.toPx())))
+            continue
+        } else {
+            val shaped = measurer.measure(m.marker, style.copy(color = ink))
+            val x = right - shaped.size.width
+            // A MARKER WITH NO GUTTER IS NOT DRAWN: the paragraph style's
+            // indent is what clears it.
+            if (x < 0f) continue
+            val y = layout.getLineBaseline(line) - shaped.firstBaseline
+            drawText(shaped, topLeft = Offset(x, y))
+            androidx.compose.ui.geometry.Rect(
+                x, y, right, y + shaped.size.height)
+        }
+        drawn.add(KayaDrawnMarker(m, rect))
+    }
+    return drawn
+}
+
+/** Material's checkbox colours, read where a CompositionLocal can be. */
+internal data class KayaRichBoxColors(val on: Color, val check: Color, val off: Color)
+
+/** Material 3's checkbox, drawn: a 2dp-rounded square, outlined when
+ * unchecked, filled with its tick when checked. */
+internal fun androidx.compose.ui.graphics.drawscope.DrawScope.kayaRichCheckBox(
+    r: androidx.compose.ui.geometry.Rect,
+    checked: Boolean,
+    colors: KayaRichBoxColors,
+) {
+    val corner = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+    val stroke = 2.dp.toPx()
+    if (checked) {
+        drawRoundRect(colors.on, r.topLeft, r.size, corner)
+        val tick = androidx.compose.ui.graphics.Path().apply {
+            moveTo(r.left + r.width * 0.22f, r.top + r.height * 0.52f)
+            lineTo(r.left + r.width * 0.42f, r.top + r.height * 0.72f)
+            lineTo(r.left + r.width * 0.78f, r.top + r.height * 0.32f)
+        }
+        drawPath(tick, colors.check, style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke))
+    } else {
+        drawRoundRect(
+            colors.off,
+            Offset(r.left + stroke / 2, r.top + stroke / 2),
+            androidx.compose.ui.geometry.Size(r.width - stroke, r.height - stroke),
+            corner,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke))
+    }
+}
+
+/** The drawn checklist box a tap at `position` (the viewport's) lands on. */
+internal fun kayaRichBoxAt(node: KayaNode, position: Offset): KayaDrawnMarker? {
+    if (!node.rich) return null
+    val at = Offset(position.x, position.y + node.scrollState.value)
+    return kayaDrawnMarkers[node.id]?.filter {
+        (it.marker.marker == "[ ]" || it.marker.marker == "[x]") && it.hit.contains(at)
+    }?.minByOrNull { (it.box.center - at).getDistanceSquared() }
+}
+
+/** A tap on a drawn checklist box toggles the item, through the core. */
+internal fun kayaRichToggleBox(node: KayaNode, drawn: KayaDrawnMarker) {
+    val at = drawn.marker.start.toLong()
+    val took = KayaPresent.textKey(node.id, KAYA_TEXT_KEY_CHECK, at, at)
+    if (took) kayaRichKeysTaken += 1
+    KayaVTrace.note("marker", "box at byte $at: the core ${if (took) "took" else "declined"} the toggle")
+}
+
+/** Whether this edit inserted exactly the armed paste's text; spends the arm. */
+internal fun kayaRichPasteLanded(node: KayaNode, before: String, after: String): Boolean {
+    val armed = node.richPasteArmed ?: return false
+    node.richPasteArmed = null
+    val (start, _, length) = kayaRichDerive(before, after)
+    return after.substring(start, start + length) == armed
+}
+
+/** A rich paste's runs are the core's normaliser's: read back from the core
+ * over the inserted text once it heard the edit. */
+internal fun kayaRichTakeCoreRuns(node: KayaNode, before: String, after: String) {
+    val (start, _, length) = kayaRichDerive(before, after)
+    val from = kayaByteOffset(after, start)
+    val to = kayaByteOffset(after, start + length)
+    if (from < 0 || to <= from) return
+    var kept = node.richRuns.flatMap { run ->
+        if (run.end <= start || run.start >= start + length) listOf(run)
+        else listOfNotNull(
+            run.copy(end = start).takeIf { run.start < start },
+            run.copy(start = start + length).takeIf { run.end > start + length })
+    }
+    for (item in KayaPresent.textRuns(node.id).split('|')) {
+        val space = item.indexOf(' ')
+        val colon = item.indexOf(':')
+        if (space < 0 || colon < 0 || colon > space) continue
+        val a = item.substring(0, colon).toIntOrNull() ?: continue
+        val b = item.substring(colon + 1, space).toIntOrNull() ?: continue
+        val lo = maxOf(a, from)
+        val hi = minOf(b, to)
+        if (hi <= lo) continue
+        val attr = item.substring(space + 1)
+        val eq = attr.indexOf('=')
+        val name = if (eq < 0) attr else attr.substring(0, eq)
+        val value = if (eq < 0) "true" else attr.substring(eq + 1)
+        kept = kept + KayaRichRun(kayaUtf16Offset(after, lo), kayaUtf16Offset(after, hi), name, value)
+    }
+    node.richRuns = kayaRichNormalize(kept)
+    node.richSeq += 1
+}
+
+/**
+ * A RICH FIELD'S CLIPBOARD (docs/rich-document-plan.md §7): the field's own
+ * copy and cut put the core's HTML beside the plain text (Android has no RTF
+ * flavour), and its paste reads the clip's HTML through the core's
+ * normaliser and inserts the plain text it answers, the core holding its runs.
+ */
+internal class KayaRichClipboard(
+    private val node: KayaNode,
+    private val platform: androidx.compose.ui.platform.Clipboard,
+) : androidx.compose.ui.platform.Clipboard {
+    override val nativeClipboard: android.content.ClipboardManager
+        get() = platform.nativeClipboard
+
+    override suspend fun getClipEntry(): androidx.compose.ui.platform.ClipEntry? {
+        val entry = platform.getClipEntry() ?: return null
+        val clip = entry.clipData
+        if (clip.itemCount == 0) return entry
+        val html = clip.getItemAt(0).htmlText ?: return entry
+        val plain = KayaPresent.textPaste(node.id, html)
+        KayaVTrace.note("clipboard", "rich field ${node.id} pastes html as ${plain.length} unit(s)")
+        if (plain.isEmpty()) return entry
+        node.richPasteArmed = plain
+        return androidx.compose.ui.platform.ClipEntry(ClipData.newPlainText("kaya", plain))
+    }
+
+    override suspend fun setClipEntry(clipEntry: androidx.compose.ui.platform.ClipEntry?) {
+        val copied = clipEntry?.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.text?.length ?: -1
+        val rich = kayaRichClip(node, copied)
+        KayaVTrace.note(
+            "clipboard", "rich field ${node.id} copies ${if (rich == null) "plain" else "html beside the text"} " +
+                "($copied unit(s); selection ${node.textState.selection}, last covering ${node.richCopyRange})")
+        platform.setClipEntry(rich?.let { androidx.compose.ui.platform.ClipEntry(it) } ?: clipEntry)
+    }
+}
+
+/** The range the field copied (`length` units, read off its clip) as the
+ * clipboard takes it: the field's own text, not its drawn one, with the
+ * core's HTML of it; null when no covering selection is that long. */
+internal fun kayaRichClip(node: KayaNode, length: Int): ClipData? {
+    val text = node.textState.text.toString()
+    val live = node.textState.selection
+    val selection = if (!live.collapsed) live else node.richCopyRange ?: return null
+    if (selection.length != length || selection.max > text.length) return null
+    val from = kayaByteOffset(text, selection.min)
+    val to = kayaByteOffset(text, selection.max)
+    if (from < 0 || to < 0) return null
+    val html = KayaPresent.textCopy(node.id, from.toLong(), to.toLong(), true)
+    if (html.isEmpty()) return null
+    return ClipData.newHtmlText("kaya", text.substring(selection.min, selection.max), html)
+}
+
+/**
+ * THE `text_color` COMMAND (docs/rich-document-plan.md §5): kaya's own
+ * Material colour sheet (docs/color-picker-plan.md §6) over the field's
+ * selection, opened on the selection's colour as this page draws it or the
+ * automatic ink; each colour it commits is the widget's own `color` act.
+ */
+internal fun kayaPresentTextColor(node: KayaNode) {
+    if (!node.rich || !kayaIsTextField(node)) {
+        Log.i("kaya", "KAYA_DIAG text_color refused: widget ${node.id} is not a rich textarea")
+        return
+    }
+    val selection = node.textState.selection
+    val stored = kayaRichAttrsAt(node.richRuns, selection.min)["color"]
+    val dark = KayaSceneModel.presentationDark
+    val shown = stored?.let { kayaDocumentInk(it, dark) } ?: KayaSceneModel.automaticInk
+    val packed = (shown.toArgb().toLong() and 0xFFFFFFL) shl 8 or 0xFFL
+    KayaSceneModel.colorDraft = KayaColorDraft(packed, false)
+    KayaSceneModel.colorSheetFor = node
+}
+
+/** A colour the sheet committed over a rich field: the widget's `color` act,
+ * stored as it reads on a light page (through kaya_ink_from_dark when dark). */
+internal fun kayaTextColorPicked(node: KayaNode, packed: Long, opened: Long) {
+    if ((packed or 0xFFL) == (opened or 0xFFL)) return
+    val rgb = ((packed shr 8) and 0xFFFFFFL).toInt()
+    val stored = if (KayaSceneModel.presentationDark) KayaPresent.inkFromDark(rgb) else rgb
+    kayaFormatSelection(node, "color", "#%06X".format(stored), false)?.let {
+        Log.i("kaya", "KAYA_DIAG text_color pick refused: $it")
+    }
+}
+
+/** The marker's gap before the text, a checklist box's side, and the slop a
+ * finger's tap on it is given. */
+private val KAYA_RICH_MARKER_GAP = 6.dp
+private val KAYA_RICH_CHECK_BOX = 16.dp
+private val KAYA_RICH_BOX_SLOP = 12.dp
 
 /**
  * A RANGED formatting act — a DOCUMENT WRITE, not the widget's own act
@@ -18578,7 +19341,7 @@ internal fun kayaFormatRange(
     removed: Boolean,
 ): String? {
     if (!node.rich) return "widget ${node.id} is not rich"
-    if (!KAYA_RICH_NAMES.contains(name)) return "$name is not a rich attribute"
+    if (!kayaRichNameKept(name)) return "$name is not a rich attribute"
     // A LABEL's text is the model mirror alone (docs/rich-text-plan.md §15).
     val text = if (kayaIsTextField(node)) node.textState.text.toString() else node.text
     if (from < 0 || to < from) return "range $from:$to is backwards"
@@ -18586,6 +19349,7 @@ internal fun kayaFormatRange(
     val off = removed || (name == "block" && value == "body")
     node.richRuns = kayaRichFormat(node.richRuns, from, to, name, if (off) null else value)
     node.richSeq += 1
+    kayaRichDeriveMarkers(node)
     return null
 }
 
@@ -18601,6 +19365,7 @@ internal fun kayaRichSetDocument(node: KayaNode, text: String, runs: List<KayaRi
     node.richPendingOn.clear()
     node.richPendingOff.clear()
     node.richSeq += 1
+    kayaRichDeriveMarkers(node)
 }
 
 /**
@@ -18646,6 +19411,7 @@ internal fun kayaRichApplyEdit(
         KayaUndoState.clearHistory(node)
     }
     node.richSeq += 1
+    kayaRichDeriveMarkers(node)
 }
 
 /** Whether `at` falls between the halves of a surrogate pair. */
@@ -18719,6 +19485,17 @@ internal fun kayaRichInputTransformation(node: KayaNode):
         val was = changes.getOriginalRange(0)
         val now = changes.getRange(0)
         val before = originalText.toString()
+        // RETURN AND BACKSPACE ARE OFFERED TO THE CORE FIRST, from the hardware
+        // key and the IME's commit alike, before the field takes them
+        // (docs/rich-document-plan.md §11).
+        val key = kayaRichEditKey(
+            before, originalSelection, was, asCharSequence().subSequence(now.min, now.max))
+        if (key != 0 && node.textState.composition == null &&
+            kayaRichOfferKey(node, key, before, originalSelection)
+        ) {
+            revertAllChanges()
+            return@InputTransformation
+        }
         val start = kayaByteOffset(before, was.min)
         val end = kayaByteOffset(before, was.max)
         if (start < 0 || end < 0) return@InputTransformation
@@ -18726,6 +19503,69 @@ internal fun kayaRichInputTransformation(node: KayaNode):
             .toString().toByteArray(Charsets.UTF_8).size
         node.richReported = Triple(start, end, inserted)
     }
+
+/** The keys the core is offered (capi.rs's KAYA_TEXT_KEY_*). */
+internal const val KAYA_TEXT_KEY_RETURN = 1
+internal const val KAYA_TEXT_KEY_BACKSPACE = 2
+internal const val KAYA_TEXT_KEY_TAB = 3
+internal const val KAYA_TEXT_KEY_SHIFT_TAB = 4
+internal const val KAYA_TEXT_KEY_CHECK = 5
+
+/** harness.rs's TEXT_INK_TOLERANCE: the measured antialiasing error of a drawn
+ * run's ink, per channel (NOT the canvas's pinned INK_TOLERANCE). */
+internal const val KAYA_TEXT_INK_TOLERANCE = 3
+
+/** Keys the core took, so the typing driver counts a swallowed key as landed. */
+@Volatile internal var kayaRichKeysTaken = 0
+
+/** The key one user edit is: a newline over a collapsed caret is Return, the
+ * newline before a collapsed caret deleted is Backspace; 0 for any other. */
+internal fun kayaRichEditKey(
+    before: String,
+    selection: androidx.compose.ui.text.TextRange,
+    was: androidx.compose.ui.text.TextRange,
+    inserted: CharSequence,
+): Int {
+    if (!selection.collapsed) return 0
+    val caret = selection.start
+    return when {
+        inserted.toString() == "\n" && was.collapsed && was.start == caret -> KAYA_TEXT_KEY_RETURN
+        inserted.isEmpty() && was.max == caret && was.length == 1 && before[was.min] == '\n' ->
+            KAYA_TEXT_KEY_BACKSPACE
+        else -> 0
+    }
+}
+
+/** One key offered over `selection` (UTF-16 in `text`); true when the core
+ * took it, its act arriving as ranged applies. */
+internal fun kayaRichOfferKey(
+    node: KayaNode,
+    key: Int,
+    text: String,
+    selection: androidx.compose.ui.text.TextRange,
+): Boolean {
+    if (!node.rich) return false
+    val from = kayaByteOffset(text, selection.min)
+    val to = kayaByteOffset(text, selection.max)
+    if (from < 0 || to < 0) return false
+    if (!KayaPresent.textKey(node.id, key, from.toLong(), to.toLong())) return false
+    kayaRichKeysTaken += 1
+    return true
+}
+
+/** A hardware key the field never turns into an edit of its own: Tab and
+ * Shift+Tab, and Backspace at the text's first unit. */
+internal fun kayaRichPreviewKey(node: KayaNode, event: androidx.compose.ui.input.key.KeyEvent): Boolean {
+    if (!node.rich || event.type != KeyEventType.KeyDown || node.textState.composition != null) return false
+    val selection = node.textState.selection
+    val key = when {
+        event.key == Key.Tab && event.isShiftPressed -> KAYA_TEXT_KEY_SHIFT_TAB
+        event.key == Key.Tab -> KAYA_TEXT_KEY_TAB
+        event.key == Key.Backspace && selection.collapsed && selection.start == 0 -> KAYA_TEXT_KEY_BACKSPACE
+        else -> return false
+    }
+    return kayaRichOfferKey(node, key, node.textState.text.toString(), selection)
+}
 
 /**
  * A1 (docs/undo-plan.md §3): a core undo group committed, so the focused
@@ -21925,7 +22765,8 @@ fun KayaTextField(
         quote = LocalContentColor.current.copy(alpha = KAYA_RICH_QUOTE_ALPHA),
         code = LocalContentColor.current.copy(alpha = KAYA_RICH_CODE_ALPHA),
         bold = kayaNodeBold(node, LocalTextStyle.current),
-        codeFamily = kayaNodeCodeFamily(node))
+        codeFamily = kayaNodeCodeFamily(node),
+        dark = isSystemInDarkTheme())
     val richSeq = node.richSeq
     val cap = KayaSceneModel.keyboardFieldCap?.takeIf { !singleLine && it.first == node.id }?.second
     val output = remember(node, node.rich, richSeq, palette) {
@@ -21956,6 +22797,7 @@ fun KayaTextField(
                 KayaPresent.textComposing(node.id, true)
             }
             if (node.rich && !read.composing) {
+                if (!read.selection.collapsed) node.richCopyRange = read.selection
                 val from = kayaByteOffset(read.text, read.selection.min)
                 val to = kayaByteOffset(read.text, read.selection.max)
                 if (from >= 0 && to >= 0) {
@@ -21975,6 +22817,7 @@ fun KayaTextField(
                 // it — the field is uncontrolled and the app's model must
                 // follow — and only the banking is suppressed.
                 val quiet = kayaTakeNativeUndoEcho(node.id, value)
+                val pasted = node.rich && kayaRichPasteLanded(node, before, value)
                 if (node.rich) {
                     kayaRichUserEdit(node, before, value)
                     // A COMMIT'S OWN RANGE addresses marked text no mirror
@@ -21991,10 +22834,14 @@ fun KayaTextField(
                             node.id, KayaCompose.EDIT_SOURCE_IME_COMMIT.toInt())
                         quiet -> KayaPresent.textEditSource(
                             node.id, KayaCompose.EDIT_SOURCE_NATIVE_UNDO.toInt())
+                        pasted -> KayaPresent.textEditSource(
+                            node.id, KayaCompose.EDIT_SOURCE_PASTE.toInt())
                     }
                 }
                 KayaPresent.emitTextChanged(
                     node.tag, value, KayaSceneModel.focusedId == node.id, quiet)
+                if (pasted) kayaRichTakeCoreRuns(node, before, value)
+                if (node.rich) kayaRichDeriveMarkers(node)
             }
             if (commit) {
                 node.richComposing = false
@@ -22003,193 +22850,200 @@ fun KayaTextField(
         }
     }
     val fieldStyle = kayaNodeStyle(node, kayaFieldBase())
-    BasicTextField(
-        state = node.textState,
-        inputTransformation = input,
-        outputTransformation = output,
-        // THE TEXTAREA IS A BOUNDED EDITOR WITH ITS OWN VIEWPORT, as
-        // every other backend's already is. `MultiLine(minHeightInLines)`
-        // leaves the maximum at Int.MAX_VALUE, so a 40-line document
-        // rendered 2496px tall with nothing able to scroll it (measured,
-        // range-probe-android.md §0.2) and `expect_revealed offscreen`
-        // would be true forever. Bounded through the field's OWN scroll,
-        // which a verticalScroll wrapper would cost.
-        lineLimits =
-            if (singleLine) TextFieldLineLimits.SingleLine
-            else if (cap != null) TextFieldLineLimits.MultiLine(
-                minHeightInLines = 1,
-                maxHeightInLines = if (node.maxLines > 0) node.maxLines else if (tall) Int.MAX_VALUE else KAYA_TEXTAREA_LINES)
-            // A GROWING textarea is one line at rest and grows to its own cap
-            // (docs/grow-lines-plan.md).
-            else if (node.maxLines > 0) TextFieldLineLimits.MultiLine(
-                minHeightInLines = 1, maxHeightInLines = node.maxLines)
-            else TextFieldLineLimits.MultiLine(
-                minHeightInLines = if (tall) 1 else 3,
-                maxHeightInLines = if (tall) Int.MAX_VALUE else KAYA_TEXTAREA_LINES),
-        // The viewport's REAL state, owned here rather than remembered
-        // inside the field, because reveal drives it and expect_revealed
-        // reads it — the same ScrollState `expect_at_end` already reads
-        // off a scroll node.
-        scrollState = node.scrollState,
-        // S8: a filter query is not prose, and the phone's Return key says
-        // Search. Autocorrection stays the platform's default. A SUBMITTING
-        // textarea's key says Send (docs/submit-plan.md S2, S4).
-        keyboardOptions =
-            if (search) {
-                KeyboardOptions(
-                    capitalization = KeyboardCapitalization.None,
-                    imeAction = ImeAction.Search,
-                )
-            } else if (!singleLine && node.submits) {
-                KeyboardOptions(imeAction = ImeAction.Send)
-            } else if (singleLine) {
-                kayaContentKeyboard(node.contentType, secure = false)
-            } else {
-                KeyboardOptions.Default
-            },
-        // THE SUBMIT GESTURE (docs/submit-plan.md S2): the keyboard's action on
-        // an entry or a search field publishes and then does what the platform
-        // does (the search key still dismisses); a submitting textarea's Send
-        // publishes and inserts nothing; a plain textarea's key is its own.
-        onKeyboardAction = { performDefaultAction ->
-            if (singleLine) {
-                KayaPresent.emitSubmitted(node.tag, kayaLf(node.textState.text.toString()))
-                performDefaultAction()
-            } else if (node.submits) {
-                KayaPresent.emitSubmitted(node.tag, kayaLf(node.textState.text.toString()))
-            } else {
-                performDefaultAction()
-            }
-        },
-        // The platform's own text layout, kept as the PROVIDER LAMBDA
-        // and not as a result: reading it stays in the layout/draw phase
-        // and never invalidates composition. Measured on this backend
-        // (§1c): the naive spelling — hoist the ranges into the
-        // composable body — recomposed the field 200 times in 200
-        // frames, where the draw-scope read recomposes zero times and
-        // re-lays-out zero times.
-        onTextLayout = { layout -> kayaTextLayouts[node.id] = layout },
-        interactionSource = interaction,
-        textStyle = fieldStyle,
-        // Material's TextField caret (docs/editor-plan.md E7): foundation's
-        // default is black in both appearances.
-        cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
-        modifier = a11y
-            .then(if (singleLine && !search) kayaContentHint(node.id, node.contentType) else Modifier)
-            .then(if (cap != null) Modifier.sizeIn(maxHeight = with(LocalDensity.current) { cap.toDp() }) else Modifier)
-            .then(fill)
-            .focusRequester(focusRequester)
-            // ESCAPE IS THE CLEAR ACT ON A DESKTOP KEYBOARD (S5), and an
-            // EMPTY field does nothing — the key goes on to whatever else
-            // wants it. PREVIEW, because the field consumes the key itself.
-            .then(
+    val platformClipboard = androidx.compose.ui.platform.LocalClipboard.current
+    val clipboard = remember(node, node.rich, platformClipboard) {
+        if (node.rich) KayaRichClipboard(node, platformClipboard) else platformClipboard
+    }
+    CompositionLocalProvider(androidx.compose.ui.platform.LocalClipboard provides clipboard) {
+        BasicTextField(
+            state = node.textState,
+            inputTransformation = input,
+            outputTransformation = output,
+            // THE TEXTAREA IS A BOUNDED EDITOR WITH ITS OWN VIEWPORT, as
+            // every other backend's already is. `MultiLine(minHeightInLines)`
+            // leaves the maximum at Int.MAX_VALUE, so a 40-line document
+            // rendered 2496px tall with nothing able to scroll it (measured,
+            // range-probe-android.md §0.2) and `expect_revealed offscreen`
+            // would be true forever. Bounded through the field's OWN scroll,
+            // which a verticalScroll wrapper would cost.
+            lineLimits =
+                if (singleLine) TextFieldLineLimits.SingleLine
+                else if (cap != null) TextFieldLineLimits.MultiLine(
+                    minHeightInLines = 1,
+                    maxHeightInLines = if (node.maxLines > 0) node.maxLines else if (tall) Int.MAX_VALUE else KAYA_TEXTAREA_LINES)
+                // A GROWING textarea is one line at rest and grows to its own cap
+                // (docs/grow-lines-plan.md).
+                else if (node.maxLines > 0) TextFieldLineLimits.MultiLine(
+                    minHeightInLines = 1, maxHeightInLines = node.maxLines)
+                else TextFieldLineLimits.MultiLine(
+                    minHeightInLines = if (tall) 1 else 3,
+                    maxHeightInLines = if (tall) Int.MAX_VALUE else KAYA_TEXTAREA_LINES),
+            // The viewport's REAL state, owned here rather than remembered
+            // inside the field, because reveal drives it and expect_revealed
+            // reads it — the same ScrollState `expect_at_end` already reads
+            // off a scroll node.
+            scrollState = node.scrollState,
+            // S8: a filter query is not prose, and the phone's Return key says
+            // Search. Autocorrection stays the platform's default. A SUBMITTING
+            // textarea's key says Send (docs/submit-plan.md S2, S4).
+            keyboardOptions =
                 if (search) {
-                    Modifier.onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown &&
-                            event.key == Key.Escape &&
-                            node.textState.text.isNotEmpty()
-                        ) {
-                            kayaSearchClear(node)
-                            true
-                        } else {
-                            false
-                        }
-                    }
+                    KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        imeAction = ImeAction.Search,
+                    )
+                } else if (!singleLine && node.submits) {
+                    KeyboardOptions(imeAction = ImeAction.Send)
+                } else if (singleLine) {
+                    kayaContentKeyboard(node.contentType, secure = false)
                 } else {
-                    Modifier
-                }
-            )
-            // A HARDWARE RETURN (docs/submit-plan.md S2, §7.3): a key event
-            // never reaches onKeyboardAction, so a single-line field's Return
-            // publishes here, and a submitting textarea's publishes and
-            // inserts nothing; Shift+Return falls through to the newline.
-            .onPreviewKeyEvent { event ->
-                val hardwareReturn = event.type == KeyEventType.KeyDown &&
-                    (event.key == Key.Enter || event.key == Key.NumPadEnter)
-                if (hardwareReturn && (singleLine || (node.submits && !event.isShiftPressed))) {
+                    KeyboardOptions.Default
+                },
+            // THE SUBMIT GESTURE (docs/submit-plan.md S2): the keyboard's action on
+            // an entry or a search field publishes and then does what the platform
+            // does (the search key still dismisses); a submitting textarea's Send
+            // publishes and inserts nothing; a plain textarea's key is its own.
+            onKeyboardAction = { performDefaultAction ->
+                if (singleLine) {
                     KayaPresent.emitSubmitted(node.tag, kayaLf(node.textState.text.toString()))
-                    true
+                    performDefaultAction()
+                } else if (node.submits) {
+                    KayaPresent.emitSubmitted(node.tag, kayaLf(node.textState.text.toString()))
                 } else {
-                    false
-                }
-            }
-            // Gain-only back-propagation: onFocusChanged also fires with
-            // the initial unfocused state at attach, and a loss branch
-            // there would clear a focusedId the LaunchedEffect below has
-            // not yet requested.
-            .onFocusChanged { state ->
-                if (state.isFocused) {
-                    KayaSceneModel.focusedId = node.id
-                    KayaSceneModel.composeFocusedId = node.id
-                } else if (KayaSceneModel.composeFocusedId == node.id) {
-                    KayaSceneModel.composeFocusedId = null
+                    performDefaultAction()
                 }
             },
-        // The M3 clothes the bare foundation field does not bring:
-        // container, indicator line and padding, so the two kinds look
-        // exactly as they did before the migration.
-        decorator = { inner ->
-            // The prompt an empty field shows (docs/search-plan.md S3): the
-            // platform's own slot, on all three text kinds.
-            val prompt: (@Composable () -> Unit)? =
-                if (node.placeholder.isEmpty()) {
-                    null
-                } else {
-                    { Text(node.placeholder) }
-                }
-            val glyph: (@Composable () -> Unit)? =
-                if (!search) {
-                    null
-                } else {
-                    { Icon(Icons.Default.Search, contentDescription = null) }
-                }
-            // THE CLEAR AFFORDANCE, kaya's own because Material draws none
-            // (S5): shown only while there is text, and it does not take the
-            // focus, because clearing KEEPS it.
-            val clear: (@Composable () -> Unit)? =
-                if (!search || node.textState.text.isEmpty()) {
-                    null
-                } else {
-                    {
-                        IconButton(
-                            onClick = { kayaSearchClear(node) },
-                            modifier = Modifier.focusProperties { canFocus = false },
-                        ) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear text")
+            // The platform's own text layout, kept as the PROVIDER LAMBDA
+            // and not as a result: reading it stays in the layout/draw phase
+            // and never invalidates composition. Measured on this backend
+            // (§1c): the naive spelling — hoist the ranges into the
+            // composable body — recomposed the field 200 times in 200
+            // frames, where the draw-scope read recomposes zero times and
+            // re-lays-out zero times.
+            onTextLayout = { layout -> kayaTextLayouts[node.id] = layout },
+            interactionSource = interaction,
+            textStyle = fieldStyle,
+            // Material's TextField caret (docs/editor-plan.md E7): foundation's
+            // default is black in both appearances.
+            cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
+            modifier = a11y
+                .then(if (singleLine && !search) kayaContentHint(node.id, node.contentType) else Modifier)
+                .then(if (cap != null) Modifier.sizeIn(maxHeight = with(LocalDensity.current) { cap.toDp() }) else Modifier)
+                .then(fill)
+                .focusRequester(focusRequester)
+                // ESCAPE IS THE CLEAR ACT ON A DESKTOP KEYBOARD (S5), and an
+                // EMPTY field does nothing — the key goes on to whatever else
+                // wants it. PREVIEW, because the field consumes the key itself.
+                .then(
+                    if (search) {
+                        Modifier.onPreviewKeyEvent { event ->
+                            if (event.type == KeyEventType.KeyDown &&
+                                event.key == Key.Escape &&
+                                node.textState.text.isNotEmpty()
+                            ) {
+                                kayaSearchClear(node)
+                                true
+                            } else {
+                                false
+                            }
                         }
+                    } else {
+                        Modifier
+                    }
+                )
+                .onPreviewKeyEvent { event -> kayaRichPreviewKey(node, event) }
+                // A HARDWARE RETURN (docs/submit-plan.md S2, §7.3): a key event
+                // never reaches onKeyboardAction, so a single-line field's Return
+                // publishes here, and a submitting textarea's publishes and
+                // inserts nothing; Shift+Return falls through to the newline.
+                .onPreviewKeyEvent { event ->
+                    val hardwareReturn = event.type == KeyEventType.KeyDown &&
+                        (event.key == Key.Enter || event.key == Key.NumPadEnter)
+                    if (hardwareReturn && (singleLine || (node.submits && !event.isShiftPressed))) {
+                        KayaPresent.emitSubmitted(node.tag, kayaLf(node.textState.text.toString()))
+                        true
+                    } else {
+                        false
                     }
                 }
-            TextFieldDefaults.DecorationBox(
-                value = node.textState.text.toString(),
-                // THE HIGHLIGHT LAYER GOES AROUND THE INNER FIELD, not
-                // around the decoration: the inner field IS the scrolling
-                // viewport, so a decoration-level draw would sit still
-                // while the text moved under it.
-                innerTextField = { KayaMeasure(node) { KayaGutter(node, fieldStyle) { KayaHighlightLayer(node, palette, inner) } } },
-                enabled = true,
-                singleLine = singleLine,
-                visualTransformation = VisualTransformation.None,
-                interactionSource = interaction,
-                placeholder = prompt,
-                leadingIcon = glyph,
-                trailingIcon = clear,
-                contentPadding = kayaCappedPadding(
-                    if (inComposer) PaddingValues(horizontal = 12.dp, vertical = 12.dp)
-                    else TextFieldDefaults.contentPaddingWithoutLabel(),
-                    if (inComposer) 12.dp else 16.dp, cap),
-                colors = if (inComposer) {
-                    TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent,
-                    )
-                } else {
-                    TextFieldDefaults.colors()
+                // Gain-only back-propagation: onFocusChanged also fires with
+                // the initial unfocused state at attach, and a loss branch
+                // there would clear a focusedId the LaunchedEffect below has
+                // not yet requested.
+                .onFocusChanged { state ->
+                    if (state.isFocused) {
+                        KayaSceneModel.focusedId = node.id
+                        KayaSceneModel.composeFocusedId = node.id
+                    } else if (KayaSceneModel.composeFocusedId == node.id) {
+                        KayaSceneModel.composeFocusedId = null
+                    }
                 },
-            )
-        },
-    )
+            // The M3 clothes the bare foundation field does not bring:
+            // container, indicator line and padding, so the two kinds look
+            // exactly as they did before the migration.
+            decorator = { inner ->
+                // The prompt an empty field shows (docs/search-plan.md S3): the
+                // platform's own slot, on all three text kinds.
+                val prompt: (@Composable () -> Unit)? =
+                    if (node.placeholder.isEmpty()) {
+                        null
+                    } else {
+                        { Text(node.placeholder) }
+                    }
+                val glyph: (@Composable () -> Unit)? =
+                    if (!search) {
+                        null
+                    } else {
+                        { Icon(Icons.Default.Search, contentDescription = null) }
+                    }
+                // THE CLEAR AFFORDANCE, kaya's own because Material draws none
+                // (S5): shown only while there is text, and it does not take the
+                // focus, because clearing KEEPS it.
+                val clear: (@Composable () -> Unit)? =
+                    if (!search || node.textState.text.isEmpty()) {
+                        null
+                    } else {
+                        {
+                            IconButton(
+                                onClick = { kayaSearchClear(node) },
+                                modifier = Modifier.focusProperties { canFocus = false },
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear text")
+                            }
+                        }
+                    }
+                TextFieldDefaults.DecorationBox(
+                    value = node.textState.text.toString(),
+                    // THE HIGHLIGHT LAYER GOES AROUND THE INNER FIELD, not
+                    // around the decoration: the inner field IS the scrolling
+                    // viewport, so a decoration-level draw would sit still
+                    // while the text moved under it.
+                    innerTextField = { KayaMeasure(node) { KayaGutter(node, fieldStyle) { KayaHighlightLayer(node, palette, fieldStyle, inner) } } },
+                    enabled = true,
+                    singleLine = singleLine,
+                    visualTransformation = VisualTransformation.None,
+                    interactionSource = interaction,
+                    placeholder = prompt,
+                    leadingIcon = glyph,
+                    trailingIcon = clear,
+                    contentPadding = kayaCappedPadding(
+                        if (inComposer) PaddingValues(horizontal = 12.dp, vertical = 12.dp)
+                        else TextFieldDefaults.contentPaddingWithoutLabel(),
+                        if (inComposer) 12.dp else 16.dp, cap),
+                    colors = if (inComposer) {
+                        TextFieldDefaults.colors(
+                            focusedContainerColor = Color.Transparent,
+                            unfocusedContainerColor = Color.Transparent,
+                            focusedIndicatorColor = Color.Transparent,
+                            unfocusedIndicatorColor = Color.Transparent,
+                        )
+                    } else {
+                        TextFieldDefaults.colors()
+                    },
+                )
+            },
+        )
+    }
     LaunchedEffect(KayaSceneModel.focusedId) {
         if (KayaSceneModel.focusedId == node.id) focusRequester.requestFocus()
     }
@@ -22214,6 +23068,7 @@ fun KayaTextField(
 private fun KayaHighlightLayer(
     node: KayaNode,
     palette: KayaRichPalette,
+    style: androidx.compose.ui.text.TextStyle,
     inner: @Composable () -> Unit,
 ) {
     // THE WASH THIS LAYER IS PAINTED UNDER, taken from the composition
@@ -22230,6 +23085,14 @@ private fun KayaHighlightLayer(
     val runs = remember(node, node.richSeq) {
         if (node.rich) node.richRuns else emptyList()
     }
+    val markers = remember(node, node.richMarkers) { kayaRichParseMarkers(node.richMarkers) }
+    val measurer = rememberTextMeasurer()
+    val ink = style.color.takeOrElse { LocalContentColor.current }
+    SideEffect { if (node.rich) KayaSceneModel.automaticInk = ink }
+    val boxColors = KayaRichBoxColors(
+        on = MaterialTheme.colorScheme.primary,
+        check = MaterialTheme.colorScheme.onPrimary,
+        off = MaterialTheme.colorScheme.onSurfaceVariant)
     androidx.compose.foundation.layout.Box(
         propagateMinConstraints = true,
         modifier = Modifier
@@ -22243,14 +23106,22 @@ private fun KayaHighlightLayer(
                     val down = awaitFirstDown(
                         requireUnconsumed = false,
                         pass = androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                    val url = kayaRichLinkAt(node, down.position)
-                        ?: return@awaitEachGesture
+                    // A CHECKLIST ITEM'S DRAWN BOX is kaya's own hit test as
+                    // a link is (docs/rich-document-plan.md §6).
+                    val box = kayaRichBoxAt(node, down.position)
+                    if (node.richMarkers.isNotEmpty()) {
+                        KayaVTrace.note(
+                            "marker", "down at ${down.position} scroll ${node.scrollState.value}: " +
+                                (box?.let { "box ${it.marker.start} ${it.hit}" } ?: "no box"))
+                    }
+                    val url = if (box == null) kayaRichLinkAt(node, down.position) else null
+                    if (box == null && url == null) return@awaitEachGesture
                     down.consume()
                     val up = waitForUpOrCancellation(
                         androidx.compose.ui.input.pointer.PointerEventPass.Initial)
                         ?: return@awaitEachGesture
                     up.consume()
-                    kayaOpenLink(url)
+                    if (box != null) kayaRichToggleBox(node, box) else url?.let { kayaOpenLink(it) }
                 }
             }
             // The viewport's rectangle in the window, for the paint
@@ -22260,6 +23131,7 @@ private fun KayaHighlightLayer(
             .onGloballyPositioned {
                 val r = it.boundsInWindow()
                 kayaTextTops[node.id] = it.positionInWindow().y
+                kayaTextOrigins[node.id] = it.positionInWindow()
                 kayaTextBoxes[node.id] = android.graphics.Rect(
                     r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
             }
@@ -22279,7 +23151,11 @@ private fun KayaHighlightLayer(
             // the declaration, so a verb cannot pass on kaya's intent.
             kayaPaintedRanges[node.id] = paint
             kayaSelectionWash[node.id] = wash
-            if (paint.isEmpty() && quotes.isEmpty()) return@drawBehind
+            if (markers.isEmpty()) {
+                kayaDrawnMarkers.remove(node.id)
+                kayaPhantomLines.remove(node.id)
+            }
+            if (paint.isEmpty() && quotes.isEmpty() && markers.isEmpty()) return@drawBehind
             val layout = kayaTextLayouts[node.id]?.invoke() ?: return@drawBehind
             // The field scrolls its text inside this box, so the paint
             // moves with it. Clipped for the same reason: a range below
@@ -22288,6 +23164,11 @@ private fun KayaHighlightLayer(
             clipRect {
                 translate(top = -scrolled) {
                     kayaRichQuoteRule(quotes, layout, palette.quote)
+                    if (markers.isNotEmpty()) {
+                        kayaPhantomLines[node.id] = kayaRichPhantomLines(layout)
+                        kayaDrawnMarkers[node.id] = kayaRichMarkers(
+                            markers, runs, live, layout, measurer, style, ink, boxColors)
+                    }
                     for (r in paint) {
                         if (r.start < 0 || r.start > r.stop || r.stop > live.length) continue
                         drawPath(
@@ -23589,6 +24470,8 @@ internal val kayaSheetTops = HashMap<Long, Float>()
 
 /** Each text field's own viewport top in the window, unclipped. */
 internal val kayaTextTops = HashMap<Long, Float>()
+/** The text box's origin in the window, where click_marker's tap is aimed. */
+internal val kayaTextOrigins = HashMap<Long, Offset>()
 
 /** A textarea's height at one line: its first line inside the decoration's
  * padding above and below it (A20; docs/traps.md, the grown textarea's
@@ -27449,6 +28332,8 @@ internal fun kayaRgbToHsv(r: Double, g: Double, b: Double): DoubleArray {
  * translucent choice lands opaque (§5 AMENDED).
  */
 class KayaColorDraft(start: Long, val alpha: Boolean) {
+    /** The colour the sheet opened on; a rich field's pick equal to it is no act. */
+    val opened = start
     var hue by mutableDoubleStateOf(0.0)
     var saturation by mutableDoubleStateOf(0.0)
     var brightness by mutableDoubleStateOf(0.0)
@@ -27520,6 +28405,10 @@ internal fun kayaColorCommitted(node: KayaNode, packed: Long) {
 
 /** THE SHEET'S DOOR: its dismissal, its Done, and set_color's drive. */
 internal fun kayaColorSheetClosed(node: KayaNode, draft: KayaColorDraft) {
+    if (node.rich && kayaIsTextField(node)) {
+        kayaTextColorPicked(node, kayaColorDraftPacked(draft), draft.opened)
+        return
+    }
     kayaColorCommitted(node, kayaColorDraftPacked(draft))
 }
 

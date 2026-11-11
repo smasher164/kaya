@@ -206,6 +206,9 @@ RUST_SCENES = [
     # THE RICH ROWS (docs/rich-text-plan.md §19): rust-only for richtext's
     # reason; the copy's act is the harness's format verb, no keyboard.
     "richrows",
+    # THE RICH DOCUMENT (docs/rich-document-plan.md §11): rust-only, the
+    # mac lane's depth row.
+    "richdoc",
     # The number field (docs/number-field-plan.md §4.2), and under de-DE.
     "numberfield", "numberfieldde", "timecode", "numberfieldar",
     # The colour picker (docs/color-picker-plan.md §4.2), and its panel
@@ -244,8 +247,10 @@ RUST_SCENES = [
 # decision 5's design — the tiers present identical bytes, and the leg
 # buys that the native path executes at all.
 # Scenes that also run under KAYA_APPEARANCE=dark, as `<scene>dark-swiftui`:
-# the tints resolved in the dark appearance (docs/tints-plan.md §4).
-DARK_EXTRAS = ("tints", "grounds")
+# the tints resolved in the dark appearance (docs/tints-plan.md §4), and the
+# rich document's colours drawn and picked on a dark page
+# (docs/rich-document-plan.md RD5).
+DARK_EXTRAS = ("tints", "grounds", "richdoc")
 # Scenes that also run in a bundle pinned to landscape, as
 # `<scene>land-<suite>` (docs/safe-area-plan.md §5.4): the keyboard leaves
 # least room there. The reading appended proves the interface turned: a

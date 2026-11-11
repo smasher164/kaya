@@ -91,6 +91,7 @@ static class Program
             case "dnd": DndScene.Run(); break;
             case "ranges": RangesScene.Run(); break;
             case "richtext": RichTextScene.Run(); break;
+            case "richdoc": RichdocScene.Run(); break;
             case "richlabel": RichlabelScene.Run(); break;
             case "richrows": Richrows.RichrowsScene.Run(); break;
             case "ownundo": OwnundoScene.Run(); break;

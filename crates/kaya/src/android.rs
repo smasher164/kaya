@@ -1307,6 +1307,37 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "(J)Ljava/lang/String;".into(),
                 fn_ptr: present_text_last_edit as *mut _,
             },
+            // The rich document (docs/rich-document-plan.md §11).
+            NativeMethod {
+                name: "textKey".into(),
+                sig: "(JIJJ)Z".into(),
+                fn_ptr: present_text_key as *mut _,
+            },
+            NativeMethod {
+                name: "textMarkers".into(),
+                sig: "(J)Ljava/lang/String;".into(),
+                fn_ptr: present_text_markers as *mut _,
+            },
+            NativeMethod {
+                name: "textCopy".into(),
+                sig: "(JJJZ)Ljava/lang/String;".into(),
+                fn_ptr: present_text_copy as *mut _,
+            },
+            NativeMethod {
+                name: "textPaste".into(),
+                sig: "(JLjava/lang/String;)Ljava/lang/String;".into(),
+                fn_ptr: present_text_paste as *mut _,
+            },
+            NativeMethod {
+                name: "inkForDark".into(),
+                sig: "(I)I".into(),
+                fn_ptr: present_ink_for_dark as *mut _,
+            },
+            NativeMethod {
+                name: "inkFromDark".into(),
+                sig: "(I)I".into(),
+                fn_ptr: present_ink_from_dark as *mut _,
+            },
         ],
     )
 }
@@ -1712,6 +1743,98 @@ extern "system" fn present_text_last_edit<'a>(
     present_text_answer(env, |buf| unsafe {
         crate::capi::kaya_text_last_edit(widget as u64, buf.as_mut_ptr(), buf.len())
     })
+}
+
+extern "system" fn present_text_key(
+    _env: JNIEnv,
+    _class: JClass,
+    widget: jlong,
+    key: jint,
+    start: jlong,
+    end: jlong,
+) -> jni::sys::jboolean {
+    crate::capi::kaya_text_key(widget as u64, key as u32, start as u64, end as u64)
+}
+
+/// A rich read whose answer may outgrow kaya_text_runs' 64 KiB (a copy of
+/// a long document): asked again at the length the core answered.
+fn present_text_sized<'a>(
+    env: JNIEnv<'a>,
+    mut read: impl FnMut(&mut [u8]) -> usize,
+) -> jni::sys::jstring {
+    let mut buf = vec![0u8; 65536];
+    let mut wrote = read(&mut buf);
+    if wrote > buf.len() {
+        buf = vec![0u8; wrote];
+        wrote = read(&mut buf).min(buf.len());
+    }
+    let answer = std::str::from_utf8(&buf[..wrote]).unwrap_or("");
+    env.new_string(answer)
+        .expect("kaya: handing a rich document read back to the JVM failed")
+        .into_raw()
+}
+
+extern "system" fn present_text_markers<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass,
+    widget: jlong,
+) -> jni::sys::jstring {
+    present_text_sized(env, |buf| unsafe {
+        crate::capi::kaya_text_markers(widget as u64, buf.as_mut_ptr(), buf.len())
+    })
+}
+
+extern "system" fn present_text_copy<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass,
+    widget: jlong,
+    start: jlong,
+    end: jlong,
+    html: jni::sys::jboolean,
+) -> jni::sys::jstring {
+    present_text_sized(env, |buf| unsafe {
+        crate::capi::kaya_text_copy(
+            widget as u64,
+            start as u64,
+            end as u64,
+            u8::from(html != 0),
+            buf.as_mut_ptr(),
+            buf.len(),
+        )
+    })
+}
+
+/// Android's clipboard has no RTF flavour, so the HTML is the paste's one
+/// rich reading; "" when it reads as no text and the paste stays plain.
+extern "system" fn present_text_paste<'a>(
+    mut env: JNIEnv<'a>,
+    _class: JClass,
+    widget: jlong,
+    html: JString<'a>,
+) -> jni::sys::jstring {
+    let html: String = env
+        .get_string(&html)
+        .expect("kaya: reading a paste's html failed")
+        .into();
+    present_text_sized(env, |buf| unsafe {
+        crate::capi::kaya_text_paste(
+            widget as u64,
+            std::ptr::null(),
+            0,
+            html.as_ptr(),
+            html.len(),
+            buf.as_mut_ptr(),
+            buf.len(),
+        )
+    })
+}
+
+extern "system" fn present_ink_for_dark(_env: JNIEnv, _class: JClass, rgb: jint) -> jint {
+    crate::capi::kaya_ink_for_dark(rgb as u32) as jint
+}
+
+extern "system" fn present_ink_from_dark(_env: JNIEnv, _class: JClass, rgb: jint) -> jint {
+    crate::capi::kaya_ink_from_dark(rgb as u32) as jint
 }
 
 // --- Row windowing (docs/virtualization-plan.md §3) ------------------

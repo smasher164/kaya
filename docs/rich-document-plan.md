@@ -783,7 +783,7 @@ text):
 | macOS | NATIVE `NSTextList` where it draws on kaya's floor; DRAWN by `KayaRichFragment` (the TextKit 2 fragment that already paints the quote rule) where it does not, which the measurements say includes macOS 14 and 15 | the paragraph style's head indent |
 | iOS | the same choice, measured on iOS 16 to 26 | the same |
 | GTK | DRAWN in `snapshot_layer`, at each item's first line from `gtk_text_view_get_line_yrange` (the quote rule's route) | a `left-margin` paragraph tag per level |
-| WinUI | NATIVE `ListType`/`ListStart`/`ListLevelIndex`, read back without `IncludeNumbering` | the list level's own indent |
+| WinUI | DRAWN on an overlay in the control's template, with a real CheckBox for a checklist item (built 2026-11-11: TOM's native list paragraphs move no offsets, but its Bullet draws one glyph at every level and a custom bullet character counts up across items, so kaya's markers cannot be spelled natively; docs/measurements/richdoc-winui-2026-11-11.md) | a TOM paragraph indent per level |
 | Compose | DRAWN in `drawBehind` from the field's `TextLayoutResult` (the quote rule's route) | a `TextIndent` paragraph style per level |
 
 The marker formats are §2's on every platform, native or drawn. The
@@ -1338,3 +1338,33 @@ the prefix makes the run's scope its spelling, so a mark that covers a whole
 paragraph and a paragraph key never collide. B is nine folds of a second
 structure; C makes a newer kaya's file uneditable in an older one, which RD8
 ruled against.
+
+### RD18. What a screen reader hears of a drawn list marker (ASKED 2026-11-11)
+
+The mechanism, short: R3 rules that no marker is ever in the text, so the
+platforms that have no editable list (GTK and Compose) DRAW the "•", "2." or
+checkbox beside the item, and the Mac and iOS draw it too (§11). A screen
+reader reads the text and the attributes the control exposes, not the
+pixels. Measured on the build: GTK's AT-SPI exposes nothing of a drawn
+marker (no list kind, number or checked state), and neither does Compose to
+TalkBack. Compose adds a second cost: foundation 1.11.4 draws an empty line
+wherever a paragraph style starts or ends at a newline, which made every
+list item double-spaced, so the arm draws that newline as a zero-width space
+(U+200B, the same length, so offsets do not move); TalkBack then reads every
+word and line but loses the paragraph breaks between styled paragraphs. Two
+other repairs were measured and failed (a tiny font on the newline did not
+shrink the line).
+
+- A. Expose each list item's position through the accessibility tree the
+  platform offers beside the text: an accessible description per item on
+  GTK ("bullet", "2 of 3", "checked") and a custom accessibility action or
+  state on Compose, from the core's markers; keep the U+200B repair.
+- B. As A, and replace the U+200B repair with an accessibility-only text
+  that keeps the newlines (Compose's semantics override), so TalkBack hears
+  the breaks while the drawn text stays single-spaced.
+- C. Leave both as built and record the gap.
+
+RECOMMEND B. A list a sighted user sees as a numbered checklist should not
+reach a TalkBack or Orca user as run-on text with no numbers or states; both
+halves read kaya's own model, so no platform guesswork is involved. It is a
+slice of its own, after this build.

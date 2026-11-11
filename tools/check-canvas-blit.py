@@ -177,6 +177,10 @@ def check(gtk, winui, swiftui, compose):
             hit = VOCAB.search(line)
             if hit is None or n in allowed or DEFINITION.match(line):
                 continue
+            # Compose's own DrawScope.drawText (the rich document's drawn
+            # list markers) is a call and an import, never a constant read.
+            if line.lstrip().startswith("import ") or line[hit.end():].startswith("("):
+                continue
             bad.append(
                 f"{paths[key]}:{n} consults the canvas vocabulary "
                 f"({hit.group(1)}) outside its definition and its one "

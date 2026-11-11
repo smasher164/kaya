@@ -693,4 +693,27 @@ object KayaPresent {
     /** HARNESS SIDE: the last text_edited the core published for the
      *  widget. kaya_text_last_edit's JNI spelling. */
     @JvmStatic external fun textLastEdit(widget: Long): String
+
+    /** A key on a rich textarea (KAYA_TEXT_KEY_*), the selection in bytes;
+     *  true when the core took it and the arm swallows it. kaya_text_key's
+     *  JNI spelling. */
+    @JvmStatic external fun textKey(widget: Long, key: Int, start: Long, end: Long): Boolean
+
+    /** The core's list markers, `start:level marker|…` in bytes.
+     *  kaya_text_markers' JNI spelling. */
+    @JvmStatic external fun textMarkers(widget: Long): String
+
+    /** A copy's rich flavour of `start..end` in bytes (HTML, or RTF).
+     *  kaya_text_copy's JNI spelling. */
+    @JvmStatic external fun textCopy(widget: Long, start: Long, end: Long, html: Boolean): String
+
+    /** A paste's HTML read by the core and armed for the next report; the
+     *  plain text to insert, or "" to paste plain. kaya_text_paste's JNI
+     *  spelling (Android's clipboard has no RTF flavour). */
+    @JvmStatic external fun textPaste(widget: Long, html: String): String
+
+    /** A document colour, packed 0xRRGGBB, as the dark page draws it, and
+     *  back. kaya_ink_for_dark's and kaya_ink_from_dark's JNI spellings. */
+    @JvmStatic external fun inkForDark(rgb: Int): Int
+    @JvmStatic external fun inkFromDark(rgb: Int): Int
 }

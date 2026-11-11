@@ -16,20 +16,10 @@ The Mac arm, the Rust guest and tools/scenes/richdoc.steps run on the mac lane
 (plain and dark). The new harness verbs refuse on the Rust backends through
 Stage defaults, and each unbuilt arm refuses the scene through the stub call:
 
-  - **DEPTH STUB: richdoc on gtk** — markers drawn in `snapshot_layer` from
-    `gtk_text_view_get_line_yrange`, a `left-margin` tag per level, colour on
-    `notify::dark`, the four keys and the box click offered to `kaya_text_key`,
-    RTF and HTML through the clipboard, and the five verbs.
-  - **DEPTH STUB: richdoc on winui** — native list paragraphs or drawn markers
-    (§6), colour re-applied after `ActualThemeChanged`, the keys, the clipboard,
-    the colour picker flyout, and the five verbs.
-  - **DEPTH STUB: richdoc on compose** — markers in `drawBehind`, a
-    `TextIndent` per level, colour when the palette re-resolves, the keys, the
-    clipboard, kaya's colour sheet, and the five verbs.
-  - **DEPTH STUB: richdoc on swiftui/ios** — the Mac arm's shared helpers
-    (`kayaRichParagraphStyle`, `kayaDocumentInk`, the fragment's markers) wired
-    into the UITextView arm, the keys, the clipboard,
-    UIColorPickerViewController for `text_color`, and the five verbs.
+  - ~~**DEPTH STUB: richdoc on gtk**~~ — BUILT 2026-11-11: markers drawn in `snapshot_layer` from the core's numbering with a drawn-marker record, a derived left-margin tag per paragraph (the view's margin plus the level, since a tag's left-margin replaces the view's), colour through brand::ink_for_dark on the style manager's dark notify, the four keys and the box click offered to Scene::rich_key, RTF and HTML copy and paste, GtkColorDialog for text_color, the five verbs; richdoc and richdocdark legs on x11 and wayland. AT-SPI exposes nothing of a drawn marker (measured; plan §6's open accessibility question).
+  - ~~**DEPTH STUB: richdoc on winui**~~ — BUILT 2026-11-11: markers DRAWN on an overlay in the RichEditBox template (TOM's Bullet draws U+2981 at every level and a custom bullet counts up, measured in docs/measurements/richdoc-winui-2026-11-11.md), a real CheckBox per checklist item, indent and alignment through TOM paragraph formats, colour through brand::ink_for_dark re-applied after every theme change (microsoft-ui-xaml #6908 reproduced) with the template's translucent focused foreground held opaque, the keys from PreviewKeyDown, RTF and CF_HTML copy and paste, the ColorPicker flyout for text_color, the five verbs; richdoc and richdocdark on the windows lane.
+  - ~~**DEPTH STUB: richdoc on compose**~~ — BUILT 2026-11-11: markers drawn behind the field from the core's numbering with a drawn-marker record, a TextIndent and TextAlign per paragraph, colour through kaya_ink_for_dark when the palette re-resolves, the keys from the hardware path and the IME's commits, HTML copy and paste (Android has no RTF flavour), kaya's colour sheet for text_color, the five verbs; richdoc and richdocdark on the android lane. A paragraph-style boundary's newline is drawn as U+200B, since foundation 1.11.4 draws an empty line there, so TalkBack reads no break between styled paragraphs and no drawn marker (RD18 asks).
+  - ~~**DEPTH STUB: richdoc on swiftui/ios**~~ — BUILT 2026-11-11: the UITextView arm draws the markers, indent, alignment and dark-mapped colour; the keys are offered in shouldChangeTextIn (UIKit asks the delegate before insertText or deleteBackward, measured), Shift+Tab is a key command, a tap on a box is the check key; RTF and HTML copy and paste with the board read off the main thread; UIColorPickerViewController started from an sRGB colour for text_color; the five verbs through the simulator's driver; richdoc and richdocdark on the iOS lane.
 
 ## ~~RULING — a growing video view or surface is laid out five ways (measured 2026-11-01, the call screen's geometry)~~ RESOLVED 2026-11-01, ruled and built (the maintainer: "i agree with your recommendation of a"): a growing aspect box fills until either axis of its room is used up, its box the picture with no bands, centred across a column where the width is not the limit, and the share it does not use stays with the container (docs/media-plan.md §3, a growing box; `crate::media::grown_box`). All five arms follow it: SwiftUI's KayaFlex caps the share and proposes the fitted box (the iOS slot under the box is gone), Compose takes `weight(fill = false)`, GTK's flex layout allocates the box (and a growing view takes no minimum, which had held the window at 1132 high), WinUI widens the host and caps the rows. tools/scenes/farend.steps reads `surface@narrow` "80x60" with the gap under it 8 and `surface@tall` "4:3" on all five lanes in all nine languages, watched red on the old arms.
 

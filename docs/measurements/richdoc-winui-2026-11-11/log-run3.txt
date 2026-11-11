@@ -1,0 +1,68 @@
+﻿04:51:29.928 == G1 Bullet type with ListStart = a char, four consecutive at one level, then a level-2 pair ==
+04:51:29.953   g1 para 0 start=0 firstchar="A" ListType=Bullet(2) ListStart=8226 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=0.0 range.IncludeNumbering="Apples"
+04:51:29.953   g1 para 1 start=7 firstchar="G" ListType=Bullet(2) ListStart=8226 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=19.0 range.IncludeNumbering="Green ones"
+04:51:29.953   g1 para 2 start=18 firstchar="B" ListType=Bullet(2) ListStart=8226 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=37.0 range.IncludeNumbering="Bread"
+04:51:29.953   g1 para 3 start=24 firstchar="W" ListType=Bullet(2) ListStart=8226 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=56.0 range.IncludeNumbering="Wash"
+04:51:29.954   g1 para 4 start=29 firstchar="S" ListType=Bullet(2) ListStart=9702 ListLevelIndex=2 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=74.0 range.IncludeNumbering="Slice"
+04:51:29.954   g1 para 5 start=35 firstchar="M" ListType=Bullet(2) ListStart=9702 ListLevelIndex=2 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=93.0 range.IncludeNumbering="Milk"
+04:51:29.954   g1 para 6 start=40 firstchar="E" ListType=Bullet(2) ListStart=9642 ListLevelIndex=3 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=112.0 range.IncludeNumbering="Eggs"
+04:51:29.955   g1 para 7 start=45 firstchar="T" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=130.0 range.IncludeNumbering="Tail"
+04:51:30.335   shot C:\kaya\doc-probe\g1.bmp 520x420
+04:51:30.336 == G2 checklist: Bullet with ListStart E739 / E73A, mark font Segoe Fluent Icons; and U+2610/2611 with mark font Segoe UI Symbol ==
+04:51:30.349   g2 para 0 start=0 firstchar="A" ListType=Bullet(2) ListStart=59193 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=0.0 range.IncludeNumbering="\u2981\tApples"
+04:51:30.349   g2 para 1 start=7 firstchar="G" ListType=Bullet(2) ListStart=59194 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=19.0 range.IncludeNumbering="\u2981\tGreen ones"
+04:51:30.349   g2 para 2 start=18 firstchar="B" ListType=Bullet(2) ListStart=59193 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=37.0 range.IncludeNumbering="\u2981\tBread"
+04:51:30.349   g2 para 3 start=24 firstchar="W" ListType=Bullet(2) ListStart=9744 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=56.0 range.IncludeNumbering="\u2981\tWash"
+04:51:30.349   g2 para 4 start=29 firstchar="S" ListType=Bullet(2) ListStart=9745 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=74.0 range.IncludeNumbering="\u2981\tSlice"
+04:51:30.349   g2 para 5 start=35 firstchar="M" ListType=Bullet(2) ListStart=9744 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=93.0 range.IncludeNumbering="\u2981\tMilk"
+04:51:30.350   g2 para 6 start=40 firstchar="E" ListType=Arabic(3) ListStart=3 ListLevelIndex=0 ListStyle=Period ListTab=0 Left=0 First=-0 rect.X=14.0 rect.Y=112.0 range.IncludeNumbering="3.\tEggs"
+04:51:30.350   g2 para 7 start=45 firstchar="T" ListType=Bullet(2) ListStart=8226 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=130.0 range.IncludeNumbering="\u2981\tTail"
+04:51:30.350   g2 StoryLength=50 AdjustCrlf|NoHidden="Apples\rGreen ones\rBread\rWash\rSlice\rMilk\rEggs\rTail" AdjustCrlf|NoHidden|IncludeNumbering="\u2981\tApples\r\u2981\tGreen ones\r\u2981\tBread\r\u2981\tWash\r\u2981\tSlice\r\u2981\tMilk\r3.\tEggs\r\u2981\tTail"
+04:51:30.694   shot C:\kaya\doc-probe\g2.bmp 520x420
+04:51:30.694 == G3 empty final paragraph as a list item ==
+04:51:30.696   g3 StoryLength=6 AdjustCrlf|NoHidden="Eggs\r" AdjustCrlf|NoHidden|IncludeNumbering="\u2981\tEggs\r"
+04:51:30.696   g3 final para ListType=Bullet start=9702 storylen=6
+04:51:31.034   shot C:\kaya\doc-probe\g3.bmp 520x420
+04:51:31.034 == K keys on a plain paragraph and on a list item (real keybd_event) ==
+04:51:31.345   key SetRange(1) -> Start=1 End=1 char-at="b"
+04:51:31.459   PreviewKeyDown Tab handled=False
+04:51:31.860   after Tab in plain StoryLength=8 AdjustCrlf|NoHidden="abc\rdef" AdjustCrlf|NoHidden|IncludeNumbering="abc\r\u2981\tdef"
+04:51:31.861   focus after Tab: Keyboard
+04:51:31.862   key SetRange(4) -> Start=4 End=4 char-at="d"
+04:51:31.962   PreviewKeyDown Tab handled=False
+04:51:32.384   after Tab at list start StoryLength=8 AdjustCrlf|NoHidden="abc\rdef" AdjustCrlf|NoHidden|IncludeNumbering="abc\r\u2981\tdef"
+04:51:32.385   after Tab at list start para 0 start=0 firstchar="a" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=0.0 range.IncludeNumbering="abc"
+04:51:32.385   after Tab at list start para 1 start=4 firstchar="d" ListType=Bullet(2) ListStart=0 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=19.0 range.IncludeNumbering="\u2981\tdef"
+04:51:32.493   PreviewKeyDown Shift handled=False
+04:51:32.495   PreviewKeyDown Tab handled=False
+04:51:32.893   after Shift+Tab StoryLength=8 AdjustCrlf|NoHidden="abc\rdef" AdjustCrlf|NoHidden|IncludeNumbering="abc\r\u2981\tdef"
+04:51:32.894   after Shift+Tab para 0 start=0 firstchar="a" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=0.0 range.IncludeNumbering="abc"
+04:51:32.895   after Shift+Tab para 1 start=4 firstchar="d" ListType=Bullet(2) ListStart=0 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=10.0 rect.Y=19.0 range.IncludeNumbering="\u2981\tdef"
+04:51:33.001   PreviewKeyDown Back handled=False
+04:51:33.402   after Back at list start StoryLength=8 AdjustCrlf|NoHidden="abc\rdef" AdjustCrlf|NoHidden|IncludeNumbering="abc\rdef"
+04:51:33.403   after Back at list start para 0 start=0 firstchar="a" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=0.0 range.IncludeNumbering="abc"
+04:51:33.403   after Back at list start para 1 start=4 firstchar="d" ListType=None(1) ListStart=0 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=19.0 range.IncludeNumbering="def"
+04:51:33.404   key SetRange(7) -> Start=7 End=7 char-at="\r"
+04:51:33.526   PreviewKeyDown Enter handled=False
+04:51:33.934   after Return at end StoryLength=9 AdjustCrlf|NoHidden="abc\rdef\r" AdjustCrlf|NoHidden|IncludeNumbering="abc\rdef\r"
+04:51:33.934   after Return at end para 0 start=0 firstchar="a" ListType=None(1) ListStart=0 ListLevelIndex=0 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=0.0 range.IncludeNumbering="abc"
+04:51:33.934   after Return at end para 1 start=4 firstchar="d" ListType=None(1) ListStart=0 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=19.0 range.IncludeNumbering="def"
+04:51:33.934   after Return at end para 2 start=8 firstchar="\r" ListType=None(1) ListStart=0 ListLevelIndex=1 ListStyle=Parenthesis ListTab=0 Left=0 First=-0 rect.X=0.0 rect.Y=37.0 range.IncludeNumbering=""
+04:51:33.934 == C copy ==
+04:51:33.936   CopyingToClipboard raised
+04:51:33.937   after ITextSelection.Copy
+04:51:33.938   after ITextRange.Copy
+04:51:34.040   PreviewKeyDown Control handled=False
+04:51:34.041   PreviewKeyDown C handled=False
+04:51:34.041   CopyingToClipboard raised
+04:51:34.459   after Ctrl+C
+04:51:34.460 == T a run's colour across a theme switch ==
+04:51:35.074   light: run=#FF016FEF other=#FF000000
+04:51:35.136   shot C:\kaya\doc-probe\t-light.bmp 520x420
+04:51:35.142   ActualThemeChanged -> Dark
+04:51:36.341   dark: run=#FFFFFFFF other=#FFFFFFFF
+04:51:36.385   shot C:\kaya\doc-probe\t-dark.bmp 520x420
+04:51:36.388   ActualThemeChanged -> Light
+04:51:37.594   light again: run=#FF000000 other=#FF000000
+04:51:37.635   shot C:\kaya\doc-probe\t-light2.bmp 520x420
+04:51:37.635 PROBEDONE

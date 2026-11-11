@@ -99,6 +99,8 @@ mod ownundo;
 mod richlabel;
 #[path = "richrows.rs"]
 mod richrows;
+#[path = "richdoc.rs"]
+mod richdoc;
 
 #[path = "notes.rs"]
 mod notes;
@@ -266,6 +268,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("ownundo") => ownundo::app(ctx),
         Ok("richlabel") => richlabel::app(ctx),
         Ok("richrows") => richrows::app(ctx),
+        Ok("richdoc") => richdoc::app(ctx),
         Ok("notes") => notes::app(ctx),
         Ok("styling") => styling::app(ctx),
         Ok("toolbar") => toolbar::app(ctx),

@@ -642,13 +642,22 @@ final class KayaDrive: XCTestCase {
             field.typeText(text)
             return (true, "typed \(text.count) character(s)")
         case "key":
-            // `press tab|space|up|down` (docs/reveal-plan.md V10): a hardware key;
-            // shift is the menu bar read's (kayaAwaitMenuBuild).
-            let keys = ["tab": XCUIKeyboardKey.tab.rawValue, "space": XCUIKeyboardKey.space.rawValue,
-                        "up": XCUIKeyboardKey.upArrow.rawValue, "down": XCUIKeyboardKey.downArrow.rawValue,
-                        "shift": XCUIKeyboardKey.shift.rawValue]
-            guard words.count == 2, let key = keys[words[1]] else { return (false, "key tab|space|up|down|shift") }
-            a.typeKey(key, modifierFlags: [])
+            // `press tab|space|up|down|shift+tab|backspace` (docs/reveal-plan.md
+            // V10, docs/rich-document-plan.md §11): a hardware key; shift is the
+            // menu bar read's (kayaAwaitMenuBuild).
+            let keys: [String: (String, XCUIElement.KeyModifierFlags)] = [
+                "tab": (XCUIKeyboardKey.tab.rawValue, []), "space": (XCUIKeyboardKey.space.rawValue, []),
+                "up": (XCUIKeyboardKey.upArrow.rawValue, []), "down": (XCUIKeyboardKey.downArrow.rawValue, []),
+                "shift": (XCUIKeyboardKey.shift.rawValue, []),
+                "shift+tab": (XCUIKeyboardKey.tab.rawValue, .shift),
+                "backspace": (XCUIKeyboardKey.delete.rawValue, []),
+            ]
+            guard words.count == 2, let key = keys[words[1]] else {
+                return (false, "key tab|space|up|down|shift|shift+tab|backspace")
+            }
+            // Backspace as the keyboard's own delete: typeKey's delete reaches
+            // no deleteBackward on a UITextView (measured 2026-11-11, the richdoc leg).
+            if words[1] == "backspace" { a.typeText(key.0) } else { a.typeKey(key.0, modifierFlags: key.1) }
             return (true, "pressed \(words[1])")
         case "colorhex_b64":
             // pick_color (docs/color-picker-plan.md §4.2, §5): the presented

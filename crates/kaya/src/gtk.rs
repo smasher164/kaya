@@ -488,6 +488,14 @@ fn guest_byte_of(buffer_text: &str, buffer_chars: i32) -> u64 {
 const RICH_PREFIX: &str = "kaya-rich-";
 const RICH_BLOCK_PREFIX: &str = "kaya-rich-block-";
 const RICH_LINK_PREFIX: &str = "kaya-rich-link-";
+/// A valued attribute's tag is `kaya-rich-v-<name>=<value>`, one per value.
+const RICH_VALUED_PREFIX: &str = "kaya-rich-v-";
+/// The derived left margin of a paragraph (docs/rich-document-plan.md §6):
+/// tag margins replace and never add, so one tag per sum, never read back.
+const RICH_GEOM_PREFIX: &str = "kaya-geom-";
+const LIST_INDENT_STEP: i32 = 24;
+const MARKER_GAP: f32 = 6.0;
+const CHECK_BOX: f32 = 14.0;
 
 /// A GROUND IS THE THEME'S OWN COLOUR (docs/rich-text-plan.md §18). A
 /// GtkTextTag takes a GdkRGBA and never a CSS token, and every resolver that
@@ -526,6 +534,9 @@ struct RichPending {
 /// kaya's (the highlight tag among them).
 fn rich_tag_attr_name(tag_name: &str) -> Option<String> {
     let rest = tag_name.strip_prefix(RICH_PREFIX)?;
+    if let Some(valued) = rest.strip_prefix("v-") {
+        return valued.split_once('=').map(|(name, _)| name.to_owned());
+    }
     if rest.starts_with("block-") {
         return Some("block".to_owned());
     }
@@ -540,6 +551,9 @@ fn rich_tag_attr_name(tag_name: &str) -> Option<String> {
 fn rich_attr_of(tag_name: &str, links: &HashMap<String, String>) -> Option<(String, String)> {
     let name = rich_tag_attr_name(tag_name)?;
     let rest = tag_name.strip_prefix(RICH_PREFIX)?;
+    if let Some(valued) = rest.strip_prefix("v-") {
+        return valued.split_once('=').map(|(n, v)| (n.to_owned(), v.to_owned()));
+    }
     match name.as_str() {
         "block" => Some((name, rest["block-".len()..].to_owned())),
         "link" => Some((name, links.get(tag_name)?.clone())),
@@ -564,7 +578,8 @@ fn rich_tag(
                 minted
             }
         },
-        other => format!("{RICH_PREFIX}{other}"),
+        other if value == crate::protocol::FLAG_VALUE => format!("{RICH_PREFIX}{other}"),
+        other => format!("{RICH_VALUED_PREFIX}{other}={value}"),
     };
     let table = buffer.tag_table();
     if let Some(tag) = table.lookup(&tag_name) {
@@ -573,7 +588,36 @@ fn rich_tag(
     let tag = gtk4::TextTag::new(Some(&tag_name));
     style_rich_tag(view, &tag, &tag_name);
     table.add(&tag);
+    // A colour sits UNDER every other tag, so a link keeps the link's colour.
+    if name == "color" {
+        tag.set_priority(0);
+    }
     tag
+}
+
+/// `#RRGGBB` as a packed colour; None for anything else.
+fn rich_rgb(value: &str) -> Option<u32> {
+    let hex = value.strip_prefix('#')?;
+    (hex.len() == 6).then(|| u32::from_str_radix(hex, 16).ok()).flatten()
+}
+
+fn rgba_of_rgb(rgb: u32) -> gdk::RGBA {
+    gdk::RGBA::new(
+        ((rgb >> 16) & 0xFF) as f32 / 255.0,
+        ((rgb >> 8) & 0xFF) as f32 / 255.0,
+        (rgb & 0xFF) as f32 / 255.0,
+        1.0,
+    )
+}
+
+fn rgb_of_rgba(c: &gdk::RGBA) -> u32 {
+    let ch = |v: f32| ((v.clamp(0.0, 1.0) * 255.0).round() as u32) & 0xFF;
+    (ch(c.red()) << 16) | (ch(c.green()) << 8) | ch(c.blue())
+}
+
+/// A stored document colour as this page draws it (docs/rich-document-plan.md RD5).
+fn rich_ink(rgb: u32) -> u32 {
+    if adw::StyleManager::default().is_dark() { crate::brand::ink_for_dark(rgb) } else { rgb }
 }
 
 /// THE RESTYLE: everything a rich tag draws, off the tag's OWN NAME — the
@@ -588,6 +632,18 @@ fn style_rich_tag(view: &gtk4::TextView, tag: &gtk4::TextTag, tag_name: &str) {
         "italic" => tag.set_style(gtk4::pango::Style::Italic),
         "underline" => tag.set_underline(gtk4::pango::Underline::Single),
         "strike" => tag.set_strikethrough(true),
+        "color" => {
+            let value = tag_name.split_once('=').map(|(_, v)| v).unwrap_or_default();
+            if let Some(rgb) = rich_rgb(value) {
+                tag.set_foreground_rgba(Some(&rgba_of_rgb(rich_ink(rgb))));
+            }
+        }
+        "align" => tag.set_justification(match tag_name.split_once('=').map(|(_, v)| v) {
+            Some("center") => gtk4::Justification::Center,
+            Some("end") => gtk4::Justification::Right,
+            Some("justify") => gtk4::Justification::Fill,
+            _ => gtk4::Justification::Left,
+        }),
         // A CODE RUN WEARS A GROUND (§18): the platform's own subtle fill
         // behind the monospace, and the one thing on this backend that also
         // reaches the accessibility tree as a `bg-color` run.
@@ -618,8 +674,8 @@ fn style_rich_tag(view: &gtk4::TextView, tag: &gtk4::TextTag, tag_name: &str) {
             // snapshot layer (§18, KayaRichTextView below): a GtkTextTag has
             // no paragraph border, and `paragraph-background` is the whole
             // ground it does have.
+            // Its margin is the paragraph's geometry tag (apply_rich_geometry).
             "quote" => {
-                tag.set_left_margin(QUOTE_MARGIN);
                 tag.set_indent(0);
                 tag.set_paragraph_background_rgba(Some(&rich_ground(
                     view,
@@ -731,22 +787,127 @@ fn install_rich_link_click(view: &gtk4::TextView, id: u64) {
     view.add_controller(click);
 }
 
-/// THE QUOTE'S RULE (docs/rich-text-plan.md §18): a GtkTextTag has no
-/// paragraph border, so the leading bar every editor draws is painted in the
-/// text view's own BELOW_TEXT layer. GTK hands that layer a snapshot already
-/// translated into BUFFER coordinates, which is why the walk below carries no
-/// scroll arithmetic; it covers the visible band alone.
+/// A paragraph's geometry off the buffer's own tags at its carrier (its first
+/// byte; an empty paragraph's terminator; the empty final paragraph's, the
+/// newline before it): (level, list item, quote, aligned off the start).
+fn rich_line_geometry(line: &gtk4::TextIter) -> (i32, bool, bool, bool) {
+    use gtk4::prelude::TextTagExt;
+    let mut carrier = line.clone();
+    if carrier.is_end() && carrier.offset() > 0 {
+        carrier.backward_char();
+    }
+    let (mut level, mut list, mut quote, mut aligned) = (0, false, false, false);
+    for tag in carrier.tags() {
+        let Some(name) = tag.name() else { continue };
+        if name.starts_with(&format!("{RICH_VALUED_PREFIX}align=")) {
+            aligned = true;
+        } else if let Some(n) = name.strip_prefix(&format!("{RICH_VALUED_PREFIX}indent=")) {
+            level = n.parse().unwrap_or(0);
+        } else if name.starts_with(&format!("{RICH_VALUED_PREFIX}list=")) {
+            list = true;
+        } else if name == format!("{RICH_BLOCK_PREFIX}quote") {
+            quote = true;
+        }
+    }
+    (level, list, quote, aligned)
+}
+
+/// The left edge of a paragraph's text in buffer pixels, the view's own
+/// margin aside: the Mac's step (docs/rich-document-plan.md §6).
+fn rich_text_margin(level: i32, list: bool, quote: bool) -> i32 {
+    level * LIST_INDENT_STEP
+        + if list { LIST_INDENT_STEP } else { 0 }
+        + if quote { QUOTE_MARGIN } else { 0 }
+}
+
+/// Every line's derived margin tag, recomputed whole. A tag's margin
+/// REPLACES the view's own (a writing measure's), so the tag carries the sum,
+/// and the view's margin moving recomputes it (the `left-margin` notify).
+fn apply_rich_geometry(view: &gtk4::TextView) {
+    use gtk4::prelude::{TextBufferExt, TextTagExt, TextViewExt};
+    let buffer = view.buffer();
+    let base = view.left_margin();
+    let table = buffer.tag_table();
+    let mut old = Vec::new();
+    table.foreach(|tag| {
+        if tag.name().is_some_and(|n| n.starts_with(RICH_GEOM_PREFIX)) {
+            old.push(tag.clone());
+        }
+    });
+    let (start, end) = buffer.bounds();
+    for tag in old {
+        buffer.remove_tag(&tag, &start, &end);
+    }
+    let mut line = buffer.start_iter();
+    loop {
+        let (level, list, quote, _) = rich_line_geometry(&line);
+        let margin = rich_text_margin(level, list, quote);
+        let mut next = line.clone();
+        let more = next.forward_line();
+        if margin > 0 {
+            let margin = base + margin;
+            let name = format!("{RICH_GEOM_PREFIX}{margin}");
+            let tag = table.lookup(&name).unwrap_or_else(|| {
+                let tag = gtk4::TextTag::new(Some(&name));
+                tag.set_left_margin(margin);
+                table.add(&tag);
+                tag
+            });
+            let stop = if more { next.clone() } else { buffer.end_iter() };
+            buffer.apply_tag(&tag, &line, &stop);
+        }
+        if !more {
+            break;
+        }
+        line = next;
+    }
+}
+
+/// After any change to a rich textarea's document: the geometry, and the
+/// core's markers handed to the view, which draws them at its next frame.
+fn refresh_rich_view(core: &CoreState, id: WidgetId) {
+    let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else { return };
+    let Some(rich) = view.downcast_ref::<rich_view::KayaRichTextView>() else { return };
+    apply_rich_geometry(view);
+    let markers = core.scene.rich_markers(id).unwrap_or_default();
+    rich.set_markers(markers);
+}
+
+/// THE QUOTE'S RULE (docs/rich-text-plan.md §18) AND THE LIST MARKERS
+/// (docs/rich-document-plan.md §6): a GtkTextTag has no paragraph border and
+/// a marker is never a character, so both are painted in the text view's own
+/// BELOW_TEXT layer. GTK hands that layer a snapshot already translated into
+/// BUFFER coordinates; it covers the visible band alone. The markers are the
+/// core's, handed over by `refresh_rich_view` (a snapshot can run inside a
+/// CORE borrow: skin::shot_of), and `drawn` is what the last frame painted.
 mod rich_view {
     use super::{
-        QUOTE_MARGIN, QUOTE_RULE_ALPHA, QUOTE_RULE_INSET, QUOTE_RULE_WIDTH, RICH_BLOCK_PREFIX,
-        rich_ground,
+        CHECK_BOX, MARKER_GAP, QUOTE_MARGIN, QUOTE_RULE_ALPHA, QUOTE_RULE_INSET, QUOTE_RULE_WIDTH,
+        RICH_BLOCK_PREFIX, rich_ground, rich_line_geometry, rich_text_margin,
     };
     use gtk4::glib;
     use gtk4::prelude::*;
     use gtk4::subclass::prelude::*;
+    use std::cell::RefCell;
+
+    #[derive(Clone, Debug)]
+    pub struct Drawn {
+        pub start: u64,
+        pub level: u32,
+        pub text: String,
+        /// Buffer coordinates.
+        pub rect: gtk4::graphene::Rect,
+        /// Where the paragraph's text starts, and where its geometry tag puts
+        /// it (None where nothing pins it: an aligned or an empty final line).
+        pub text_x: f32,
+        pub margin_x: Option<f32>,
+    }
 
     #[derive(Default)]
-    pub struct KayaRichTextViewInner;
+    pub struct KayaRichTextViewInner {
+        markers: RefCell<Vec<crate::richdoc::Marker>>,
+        drawn: RefCell<Vec<Drawn>>,
+    }
 
     #[glib::object_subclass]
     impl ObjectSubclass for KayaRichTextViewInner {
@@ -758,6 +919,103 @@ mod rich_view {
     impl ObjectImpl for KayaRichTextViewInner {}
     impl WidgetImpl for KayaRichTextViewInner {}
 
+    impl KayaRichTextViewInner {
+        fn draw_markers(&self, view: &gtk4::TextView, snapshot: &gtk4::Snapshot) {
+            let mut drawn = Vec::new();
+            let markers = self.markers.borrow();
+            if markers.is_empty() {
+                self.drawn.replace(drawn);
+                return;
+            }
+            let buffer = view.buffer();
+            let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            let band = view.visible_rect();
+            let bottom = band.y() + band.height();
+            let ink = view.color();
+            for marker in markers.iter() {
+                let at = buffer.iter_at_offset(super::buffer_offset_of_byte(&raw, marker.start));
+                let first = view.iter_location(&at);
+                if first.y() + first.height() < band.y() || first.y() > bottom {
+                    continue;
+                }
+                let (level, list, quote, aligned) = rich_line_geometry(&at);
+                let margin_x = (view.left_margin() + rich_text_margin(level, list, quote)) as f32;
+                // The text's own left edge where the line has text; the
+                // geometry's where GTK lays out no character (the empty
+                // final paragraph).
+                let text_x = if at.is_end() { margin_x } else { first.x() as f32 };
+                let margin_x = (!at.is_end() && !aligned).then_some(margin_x);
+                let (cy, ch) = (first.y() as f32, first.height() as f32);
+                let rect = if marker.text == "[ ]" || marker.text == "[x]" {
+                    let rect = gtk4::graphene::Rect::new(
+                        text_x - MARKER_GAP - CHECK_BOX,
+                        cy + (ch - CHECK_BOX) / 2.0,
+                        CHECK_BOX,
+                        CHECK_BOX,
+                    );
+                    draw_check(view, snapshot, &rect, marker.text == "[x]");
+                    rect
+                } else {
+                    let layout = view.create_pango_layout(Some(&marker.text));
+                    let (w, h) = layout.pixel_size();
+                    let rect = gtk4::graphene::Rect::new(
+                        text_x - MARKER_GAP - w as f32,
+                        cy + (ch - h as f32) / 2.0,
+                        w as f32,
+                        h as f32,
+                    );
+                    snapshot.save();
+                    snapshot.translate(&gtk4::graphene::Point::new(rect.x(), rect.y()));
+                    snapshot.append_layout(&layout, &ink);
+                    snapshot.restore();
+                    rect
+                };
+                drawn.push(Drawn {
+                    start: marker.start,
+                    level: marker.level,
+                    text: marker.text.clone(),
+                    rect,
+                    text_x,
+                    margin_x,
+                });
+            }
+            self.drawn.replace(drawn);
+        }
+    }
+
+    /// Adwaita's own check: a rounded square, the accent fill and the
+    /// platform's `object-select-symbolic` when checked.
+    fn draw_check(view: &gtk4::TextView, snapshot: &gtk4::Snapshot, rect: &gtk4::graphene::Rect, checked: bool) {
+        let rounded = gtk4::gsk::RoundedRect::from_rect(*rect, 4.0);
+        let widget: &gtk4::Widget = view.upcast_ref();
+        if checked {
+            let fill = super::skin::colour(widget, "accent_bg_color").unwrap_or([0.21, 0.52, 0.89, 1.0]);
+            let mark = super::skin::colour(widget, "accent_fg_color").unwrap_or([1.0, 1.0, 1.0, 1.0]);
+            let rgba = |c: [f64; 4]| gtk4::gdk::RGBA::new(c[0] as f32, c[1] as f32, c[2] as f32, c[3] as f32);
+            snapshot.push_rounded_clip(&rounded);
+            snapshot.append_color(&rgba(fill), rect);
+            snapshot.pop();
+            let theme = gtk4::IconTheme::for_display(&view.display());
+            let icon = theme.lookup_icon(
+                "object-select-symbolic",
+                &[],
+                CHECK_BOX as i32,
+                gtk4::prelude::NativeExt::surface(&gtk4::prelude::WidgetExt::native(view).expect("a drawn view is in a window"))
+                    .map_or(1, |s| s.scale().ceil() as i32),
+                gtk4::TextDirection::None,
+                gtk4::IconLookupFlags::empty(),
+            );
+            snapshot.save();
+            snapshot.translate(&gtk4::graphene::Point::new(rect.x(), rect.y()));
+            icon.snapshot_symbolic(snapshot, CHECK_BOX as f64, CHECK_BOX as f64, &[rgba(mark)]);
+            snapshot.restore();
+        } else {
+            let mut edge = view.color();
+            edge.set_alpha(edge.alpha() * 0.35);
+            snapshot.append_border(&rounded, &[2.0; 4], &[edge; 4]);
+        }
+    }
+
     impl TextViewImpl for KayaRichTextViewInner {
         fn snapshot_layer(&self, layer: gtk4::TextViewLayer, snapshot: gtk4::Snapshot) {
             self.parent_snapshot_layer(layer, snapshot.clone());
@@ -765,39 +1023,36 @@ mod rich_view {
                 return;
             }
             let view = self.obj();
-            let Some(tag) =
+            let view: &gtk4::TextView = view.upcast_ref();
+            if let Some(tag) =
                 view.buffer().tag_table().lookup(&format!("{RICH_BLOCK_PREFIX}quote"))
-            else {
-                return;
-            };
-            let colour = rich_ground(&*view, QUOTE_RULE_ALPHA);
-            // The tag's own left margin REPLACES the view's for the lines it
-            // covers (GtkTextAttributes), so the gutter the rule stands in is
-            // the tag's 20 and not a sum.
-            let x = (QUOTE_MARGIN as f32 - QUOTE_RULE_INSET - QUOTE_RULE_WIDTH).max(0.0);
-            let band = view.visible_rect();
-            let bottom = band.y() + band.height();
-            let (mut line, _) = view.line_at_y(band.y());
-            loop {
-                let (y, height) = view.line_yrange(&line);
-                if y > bottom {
-                    break;
-                }
-                if height > 0 && line.has_tag(&tag) {
-                    snapshot.append_color(
-                        &colour,
-                        &gtk4::graphene::Rect::new(
-                            x,
-                            y as f32,
-                            QUOTE_RULE_WIDTH,
-                            height as f32,
-                        ),
-                    );
-                }
-                if !line.forward_line() {
-                    break;
+            {
+                let colour = rich_ground(view, QUOTE_RULE_ALPHA);
+                let band = view.visible_rect();
+                let bottom = band.y() + band.height();
+                let (mut line, _) = view.line_at_y(band.y());
+                loop {
+                    let (y, height) = view.line_yrange(&line);
+                    if y > bottom {
+                        break;
+                    }
+                    if height > 0 && line.has_tag(&tag) {
+                        // At the paragraph's own leading edge, so a quoted list
+                        // item's rule is not under its marker.
+                        let (level, _, _, _) = rich_line_geometry(&line);
+                        let x = (view.left_margin() + level * super::LIST_INDENT_STEP) as f32
+                            + (QUOTE_MARGIN as f32 - QUOTE_RULE_INSET - QUOTE_RULE_WIDTH).max(0.0);
+                        snapshot.append_color(
+                            &colour,
+                            &gtk4::graphene::Rect::new(x, y as f32, QUOTE_RULE_WIDTH, height as f32),
+                        );
+                    }
+                    if !line.forward_line() {
+                        break;
+                    }
                 }
             }
+            self.draw_markers(view, &snapshot);
         }
     }
 
@@ -811,6 +1066,20 @@ mod rich_view {
     impl Default for KayaRichTextView {
         fn default() -> Self {
             glib::Object::new()
+        }
+    }
+
+    impl KayaRichTextView {
+        pub fn set_markers(&self, markers: Vec<crate::richdoc::Marker>) {
+            if *self.imp().markers.borrow() != markers {
+                self.imp().markers.replace(markers);
+            }
+            self.queue_draw();
+        }
+
+        /// What the last frame painted, by paragraph start.
+        pub fn drawn(&self) -> Vec<Drawn> {
+            self.imp().drawn.borrow().clone()
         }
     }
 }
@@ -1295,6 +1564,10 @@ fn publish_rich_edit(
                 core.scene.set_text_edit_source(field, source);
             }
             if let Some(edit) = core.scene.note_rich_text(field, &text) {
+                mirror_typed_runs(core, field, &text, &edit);
+                for op in core.scene.take_rich_ops() {
+                    apply(core, op);
+                }
                 core.occurrences.send(crate::wire::decode_text_edited_tag(
                     &tag,
                     edit.source,
@@ -1304,6 +1577,295 @@ fn publish_rich_edit(
                 ));
             }
             send_asks(core);
+            refresh_rich_view(core, field);
+        });
+    });
+}
+
+/// THE TYPED-RUNS MIRROR (docs/rich-document-plan.md §11, Typing): the
+/// inserted range holds exactly the runs the core gave the edit, which is
+/// where GTK's inheritance and the core part (a Return at an item's end
+/// carries the list and not `checked`). Skipped when the buffer has moved
+/// past the text this report carried; that later report mirrors its own.
+fn mirror_typed_runs(core: &mut CoreState, field: WidgetId, text: &str, edit: &crate::scene::RichEdit) {
+    use gtk4::prelude::TextBufferExt;
+    if edit.inserted.is_empty() {
+        return;
+    }
+    let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&field) else { return };
+    let view = view.clone();
+    let buffer = view.buffer();
+    let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+    if lf(raw.clone()) != text {
+        return;
+    }
+    let from = buffer_offset_of_byte(&raw, edit.range.start);
+    let to = buffer_offset_of_byte(&raw, edit.range.start + edit.inserted.len() as u64);
+    let (start, stop) = (buffer.iter_at_offset(from), buffer.iter_at_offset(to));
+    for (tag, _) in rich_tags(&buffer) {
+        buffer.remove_tag(&tag, &start, &stop);
+    }
+    let links = core.rich_links.entry(field.0).or_default();
+    for run in &edit.runs {
+        let tag = rich_tag(&view, &buffer, links, &run.name, &run.value);
+        let s = buffer_offset_of_byte(&raw, edit.range.start + run.range.start);
+        let e = buffer_offset_of_byte(&raw, edit.range.start + run.range.end);
+        buffer.apply_tag(&tag, &buffer.iter_at_offset(s), &buffer.iter_at_offset(e));
+    }
+}
+
+/// The rich textarea's selection in guest bytes, and its text as the guest
+/// reads it.
+fn rich_selection_bytes(buffer: &gtk4::TextBuffer) -> (String, u64, u64) {
+    use gtk4::prelude::TextBufferExt;
+    let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+    let (a, z) = match buffer.selection_bounds() {
+        Some((a, z)) => (a.offset(), z.offset()),
+        None => {
+            let at = buffer.iter_at_mark(&buffer.get_insert()).offset();
+            (at, at)
+        }
+    };
+    let (start, end) = (guest_byte_of(&raw, a), guest_byte_of(&raw, z));
+    (raw, start, end)
+}
+
+/// How many keys the core took and GTK never saw: a swallowed Return lands
+/// as an act, not as text, and the typing verb's landing wait reads this.
+static RICH_KEYS_TAKEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A key (or a checklist box's click) offered to the core before GTK acts
+/// on it (docs/rich-document-plan.md §11, Keys); true when the core took it,
+/// its act already applied. A mirror behind the buffer (an edit whose report
+/// is still queued) is never asked: the key is the platform's.
+fn offer_rich_key(view: &gtk4::TextView, wid: u64, key: u32, at: Option<u64>) -> bool {
+    let (raw, mut start, mut end) = rich_selection_bytes(&view.buffer());
+    if let Some(at) = at {
+        (start, end) = (at, at);
+    }
+    CORE.with(|cell| {
+        let Ok(mut slot) = cell.try_borrow_mut() else {
+            kaya_diag!("KAYA_DIAG rich key {key} on widget {wid} arrived inside a CORE borrow, so GTK acts on it");
+            return false;
+        };
+        let Some(core) = slot.as_mut() else { return false };
+        let id = WidgetId(wid);
+        if core.scene.rich_text(id) != Some(lf(raw).as_str()) {
+            return false;
+        }
+        if !core.scene.rich_key(id, key, start, end) {
+            return false;
+        }
+        RICH_KEYS_TAKEN.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        for op in core.scene.take_rich_ops() {
+            apply(core, op);
+        }
+        send_asks(core);
+        refresh_rich_view(core, id);
+        true
+    })
+}
+
+/// Return, Backspace, Tab and Shift+Tab offered to the core in the CAPTURE
+/// phase, ahead of the input method and the view's own handling, and a press
+/// on a drawn checklist box offered as its toggle.
+fn install_rich_keys(
+    view: &gtk4::TextView, wid: u64, rich: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
+    preedit: std::rc::Rc<RefCell<HashMap<u64, String>>>,
+) {
+    use gtk4::prelude::{EventControllerExt, GestureExt, WidgetExt};
+    let keys = gtk4::EventControllerKey::new();
+    keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    {
+        let (rich, preedit) = (rich.clone(), preedit.clone());
+        keys.connect_key_pressed(move |ctl, key, _code, state| {
+            use gtk4::gdk::{Key, ModifierType as M};
+            if !rich.borrow().contains(&wid) || preedit.borrow().get(&wid).is_some_and(|p| !p.is_empty()) {
+                return glib::Propagation::Proceed;
+            }
+            if state.intersects(M::CONTROL_MASK | M::ALT_MASK | M::SUPER_MASK | M::META_MASK) {
+                return glib::Propagation::Proceed;
+            }
+            let shift = state.contains(M::SHIFT_MASK);
+            let code = match key {
+                Key::Return | Key::KP_Enter if !shift => crate::capi::KAYA_TEXT_KEY_RETURN,
+                Key::BackSpace if !shift => crate::capi::KAYA_TEXT_KEY_BACKSPACE,
+                Key::Tab | Key::KP_Tab if !shift => crate::capi::KAYA_TEXT_KEY_TAB,
+                Key::ISO_Left_Tab => crate::capi::KAYA_TEXT_KEY_SHIFT_TAB,
+                Key::Tab | Key::KP_Tab => crate::capi::KAYA_TEXT_KEY_SHIFT_TAB,
+                _ => return glib::Propagation::Proceed,
+            };
+            let Some(view) = ctl.widget().and_downcast::<gtk4::TextView>() else {
+                return glib::Propagation::Proceed;
+            };
+            if offer_rich_key(&view, wid, code, None) {
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+    }
+    view.add_controller(keys);
+    let click = gtk4::GestureClick::new();
+    click.set_button(gdk::BUTTON_PRIMARY);
+    click.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    click.connect_pressed(move |gesture, presses, x, y| {
+        use gtk4::prelude::TextViewExt;
+        if presses != 1 || !rich.borrow().contains(&wid) {
+            return;
+        }
+        let Some(view) = gesture.widget().and_downcast::<gtk4::TextView>() else { return };
+        let Some(drawn) = view.downcast_ref::<rich_view::KayaRichTextView>().map(|v| v.drawn()) else {
+            return;
+        };
+        let (bx, by) = view.window_to_buffer_coords(gtk4::TextWindowType::Widget, x as i32, y as i32);
+        let point = gtk4::graphene::Point::new(bx as f32, by as f32);
+        let Some(hit) = drawn
+            .iter()
+            .find(|d| (d.text == "[ ]" || d.text == "[x]") && d.rect.inset_r(-2.0, -2.0).contains_point(&point))
+        else {
+            return;
+        };
+        gesture.set_state(gtk4::EventSequenceState::Claimed);
+        offer_rich_key(&view, wid, crate::capi::KAYA_TEXT_KEY_CHECK, Some(hit.start));
+    });
+    view.add_controller(click);
+}
+
+/// COPY AND CUT PUT RTF AND HTML BESIDE THE PLAIN TEXT (docs/rich-document-plan.md
+/// §7), written by the core from its mirror, as one union provider. False
+/// leaves the act to GTK's own plain copy.
+fn rich_copy(view: &gtk4::TextView, wid: u64, cut: bool) -> bool {
+    use gtk4::glib::prelude::ToValue;
+    use gtk4::prelude::{TextBufferExt, TextViewExt, WidgetExt};
+    let buffer = view.buffer();
+    let Some((a, z)) = buffer.selection_bounds() else { return false };
+    let plain = lf(buffer.text(&a, &z, false).to_string());
+    let (raw, start, end) = rich_selection_bytes(&buffer);
+    let flavours = CORE.with(|cell| {
+        let slot = cell.try_borrow().ok()?;
+        let core = slot.as_ref()?;
+        let id = WidgetId(wid);
+        if core.scene.rich_text(id) != Some(lf(raw).as_str()) {
+            return None;
+        }
+        Some((core.scene.rich_copy(id, start, end, false)?, core.scene.rich_copy(id, start, end, true)?))
+    });
+    let Some((rtf, html)) = flavours else {
+        kaya_diag!("KAYA_DIAG rich copy on widget {wid}: the core's document was not readable here, so the copy is plain");
+        return false;
+    };
+    let provider = union_provider(vec![
+        gdk::ContentProvider::for_bytes("text/rtf", &glib::Bytes::from_owned(rtf.into_bytes())),
+        gdk::ContentProvider::for_bytes("text/html", &glib::Bytes::from_owned(html.into_bytes())),
+        gdk::ContentProvider::for_value(&plain.to_value()),
+    ]);
+    if let Err(e) = view.clipboard().set_content(Some(&provider)) {
+        kaya_diag!("KAYA_DIAG rich copy on widget {wid}: set_content refused: {e}");
+        return false;
+    }
+    if cut {
+        buffer.delete_selection(true, view.is_editable());
+    }
+    true
+}
+
+/// A PASTE READS RTF, THEN HTML, through the core's one normaliser, and the
+/// answer is inserted as a paste through the buffer's own insertion path
+/// (docs/rich-document-plan.md §7). The selection goes first and its report
+/// lands before the core is asked, since every edit spends an armed paste.
+fn rich_paste_from_board(view: gtk4::TextView, wid: u64, pasted: std::rc::Rc<std::cell::Cell<Option<u32>>>) {
+    use gtk4::prelude::WidgetExt;
+    let board = view.clipboard();
+    let formats = board.formats();
+    let (has_rtf, has_html) = (formats.contain_mime_type("text/rtf"), formats.contain_mime_type("text/html"));
+    let read = |want: bool, mime: &'static str, board: gdk::Clipboard, done: Box<dyn FnOnce(Option<Vec<u8>>)>| {
+        if want { ClipOffer::Board(board).read_bytes(mime, done) } else { done(None) }
+    };
+    let html_board = board.clone();
+    read(has_rtf, "text/rtf", board, Box::new(move |rtf| {
+        read(has_html, "text/html", html_board, Box::new(move |html| {
+            use gtk4::prelude::{TextBufferExt, TextViewExt};
+            let buffer = view.buffer();
+            buffer.begin_user_action();
+            if buffer.has_selection() {
+                buffer.delete_selection(true, view.is_editable());
+            }
+            glib::idle_add_local_once(move || {
+                let html = html.map(|b| String::from_utf8_lossy(&b).into_owned());
+                let answer = CORE.with(|cell| {
+                    let mut slot = cell.try_borrow_mut().ok()?;
+                    let core = slot.as_mut()?;
+                    Some(core.scene.rich_paste(WidgetId(wid), rtf.as_deref(), html.as_deref()))
+                });
+                pasted.set(Some(crate::wire::EDIT_SOURCE_PASTE as u32));
+                match answer {
+                    Some(Some(text)) => {
+                        buffer.insert_interactive_at_cursor(&text, view.is_editable());
+                        view.scroll_mark_onscreen(&buffer.get_insert());
+                    }
+                    other => {
+                        if other.is_none() {
+                            kaya_diag!("KAYA_DIAG rich paste on widget {wid}: the core was not free, so the paste is plain");
+                        }
+                        buffer.paste_clipboard(&view.clipboard(), None, view.is_editable());
+                    }
+                }
+                buffer.end_user_action();
+            });
+        }));
+    }));
+}
+
+/// The `text_color` command: GtkColorDialog over the selection, opened on
+/// the selection's colour as this page draws it (or the automatic ink), and
+/// each colour the user commits is the widget's own `color` act; a pick on a
+/// dark page is stored through brand::ink_from_dark (RD5).
+fn present_text_color(id: WidgetId, view: &gtk4::TextView) {
+    use gtk4::prelude::{TextBufferExt, TextTagExt, WidgetExt};
+    let buffer = view.buffer();
+    let at = match buffer.selection_bounds() {
+        Some((a, _)) => a,
+        None => buffer.iter_at_mark(&buffer.get_insert()),
+    };
+    let stored = at.tags().iter().find_map(|tag| {
+        tag.name()?.strip_prefix(&format!("{RICH_VALUED_PREFIX}color=")).and_then(rich_rgb)
+    });
+    let initial = match stored {
+        Some(rgb) => rgba_of_rgb(rich_ink(rgb)),
+        None => view.color(),
+    };
+    // THE SELECTION THE PICKER WAS ASKED OVER, held in marks: the chooser's
+    // hex entry takes the PRIMARY selection, and a GtkTextBuffer that loses
+    // PRIMARY collapses its own selection (measured on the x11 lane: 10:15
+    // when presented, 10:10 when the pick arrived).
+    let (from, to) = match buffer.selection_bounds() {
+        Some((a, z)) => (a, z),
+        None => (at.clone(), at.clone()),
+    };
+    let marks = (buffer.create_mark(None, &from, true), buffer.create_mark(None, &to, false));
+    view.grab_focus();
+    let dialog = gtk4::ColorDialog::new();
+    dialog.set_with_alpha(false);
+    let window = view.root().and_downcast::<gtk4::Window>();
+    let weak = view.downgrade();
+    dialog.choose_rgba(window.as_ref(), Some(&initial), gio::Cancellable::NONE, move |picked| {
+        let Some(view) = weak.upgrade() else { return };
+        let buffer = view.buffer();
+        let (from, to) = (buffer.iter_at_mark(&marks.0), buffer.iter_at_mark(&marks.1));
+        buffer.delete_mark(&marks.0);
+        buffer.delete_mark(&marks.1);
+        let Ok(rgba) = picked else { return };
+        buffer.select_range(&from, &to);
+        let picked = rgb_of_rgba(&rgba);
+        let stored = if adw::StyleManager::default().is_dark() { crate::brand::ink_from_dark(picked) } else { picked };
+        glib::idle_add_local_once(move || {
+            CORE.with_borrow_mut(|core| {
+                let Some(core) = core.as_mut() else { return };
+                if let Some(why) = rich_format_selection(core, id, "color", &format!("#{stored:06X}"), false) {
+                    kaya_diag!("KAYA_DIAG text_color pick refused: {why}");
+                }
+            });
         });
     });
 }
@@ -1435,7 +1997,11 @@ fn rich_format_selection(
             ));
         }
     }
+    for op in core.scene.take_rich_ops() {
+        apply(core, op);
+    }
     send_asks(core);
+    refresh_rich_view(core, id);
     None
 }
 
@@ -1540,6 +2106,7 @@ fn rich_format_range(
         let tag = rich_tag(&view, &buffer, links, name, value);
         buffer.apply_tag(&tag, &start, &stop);
     }
+    refresh_rich_view(core, id);
     None
 }
 
@@ -1564,7 +2131,10 @@ fn drop_stale_highlights(
         return;
     }
     declared.borrow_mut().remove(&id);
-    buffer.remove_all_tags(&buffer.start_iter(), &buffer.end_iter());
+    // THE HIGHLIGHT TAG ALONE (HighlightRanges' rule): a blanket clear took a
+    // rich document's formatting with it at the first keystroke after a find
+    // (the editor's list, measured on the linux lane 2026-11-11).
+    buffer.remove_tag(&highlight_tag(buffer), &buffer.start_iter(), &buffer.end_iter());
 }
 
 /// THE SECOND CLAUSE of `expect_no_clipping` (docs/flex-shrink-plan.md §4):
@@ -12897,6 +13467,8 @@ struct ClipboardHub {
     /// A clipboard surface appeared (accepts / copy / read): the harness
     /// primes the wayland serial only for scenes that will spend one.
     armed: std::cell::Cell<bool>,
+    /// CoreState::rich, shared: a rich textarea pastes RTF and HTML too.
+    rich: std::rc::Rc<RefCell<std::collections::HashSet<u64>>>,
 }
 
 impl ClipboardHub {
@@ -12907,6 +13479,7 @@ impl ClipboardHub {
             widgets: RefCell::new(HashMap::new()),
             sink,
             armed: std::cell::Cell::new(false),
+            rich: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
         }
     }
 
@@ -12982,6 +13555,11 @@ impl ClipboardHub {
                     return false;
                 };
                 let formats = display.clipboard().formats();
+                if self.rich.borrow().contains(&id)
+                    && (formats.contain_mime_type("text/rtf") || formats.contain_mime_type("text/html"))
+                {
+                    return true;
+                }
                 let accepts =
                     self.accepts.borrow().get(&id).cloned().unwrap_or_default();
                 if accepts.is_empty() {
@@ -15508,6 +16086,29 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let wid = id.0;
                     let buffer = view.buffer();
                     install_rich_link_click(&view, wid);
+                    install_rich_keys(&view, wid, core.rich.clone(), core.preedit.clone());
+                    {
+                        let rich = core.rich.clone();
+                        view.connect_left_margin_notify(move |v| {
+                            if rich.borrow().contains(&wid) {
+                                apply_rich_geometry(v);
+                            }
+                        });
+                    }
+                    {
+                        let rich = core.rich.clone();
+                        view.connect_copy_clipboard(move |v| {
+                            if rich.borrow().contains(&wid) && rich_copy(v, wid, false) {
+                                v.stop_signal_emission_by_name("copy-clipboard");
+                            }
+                        });
+                        let rich = core.rich.clone();
+                        view.connect_cut_clipboard(move |v| {
+                            if rich.borrow().contains(&wid) && rich_copy(v, wid, true) {
+                                v.stop_signal_emission_by_name("cut-clipboard");
+                            }
+                        });
+                    }
                     // A SUBMITTING TEXTAREA (docs/submit-plan.md S2): Return
                     // publishes and inserts nothing, Shift+Return is the
                     // newline; a plain textarea's Return reaches the buffer.
@@ -15572,10 +16173,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let paste_source = std::rc::Rc::new(std::cell::Cell::new(None::<u32>));
                     let rich_paste = core.rich.clone();
                     let pasted = paste_source.clone();
-                    view.connect_paste_clipboard(move |_| {
-                        if rich_paste.borrow().contains(&wid) {
-                            pasted.set(Some(crate::wire::EDIT_SOURCE_PASTE as u32));
+                    view.connect_paste_clipboard(move |v| {
+                        if !rich_paste.borrow().contains(&wid) {
+                            return;
                         }
+                        let formats = gtk4::prelude::WidgetExt::clipboard(v).formats();
+                        if formats.contain_mime_type("text/rtf") || formats.contain_mime_type("text/html") {
+                            v.stop_signal_emission_by_name("paste-clipboard");
+                            rich_paste_from_board(v.clone(), wid, pasted.clone());
+                            return;
+                        }
+                        pasted.set(Some(crate::wire::EDIT_SOURCE_PASTE as u32));
                     });
                     // THE RANGE THIS BACKEND SAYS IT IS ABOUT TO EDIT, measured
                     // BEFORE the change lands and carried to the core with the
@@ -17211,6 +17819,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             let links = core.rich_links.entry(id.0).or_default();
             set_rich_runs(&view, &buffer, links, &raw, 0, end, &runs, 0);
             note_quiet_text_write(core, id, &previous, &text);
+            refresh_rich_view(core, id);
         }
         // ONE EDIT, with the core's own post-edit selection (R5). Never a
         // history reset, and nothing echoes.
@@ -17257,6 +17866,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             let ins = buffer.iter_at_offset(buffer_offset(&after, selection.start));
             let bound = buffer.iter_at_offset(buffer_offset(&after, selection.stop));
             buffer.select_range(&ins, &bound);
+            refresh_rich_view(core, id);
         }
         // The widget's own act over its CURRENT selection — the path the
         // harness's `format` verb shares (docs/rich-text-plan.md §7) — or the
@@ -18119,6 +18729,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Textarea(..), Prop::Rich, Value::Bool(on)) => {
                     if on {
                         core.rich.borrow_mut().insert(id.0);
+                        // A rich copy spends the wayland serial (prime_if_clipboard_scene).
+                        core.clipboard.armed.set(true);
                     } else {
                         core.rich.borrow_mut().remove(&id.0);
                         core.rich_pending.borrow_mut().remove(&id.0);
@@ -19690,7 +20302,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // docs/emoji-picker-plan.md §2: GtkEmojiChooser, through the
                 // action a text widget installs for Ctrl+. — on an entry or a
                 // search field the action lives on its inner GtkText.
-                CommandKind::TextColor => crate::depth_stub("richdoc"),
+                // docs/rich-document-plan.md §11, the text colour picker.
+                CommandKind::TextColor => match widget {
+                    NativeWidget::Textarea(_, view) if core.rich.borrow().contains(&id.0) => {
+                        present_text_color(id, view);
+                    }
+                    _ => kaya_diag!("KAYA_DIAG text_color on widget {}: it is not a rich textarea, so no picker opens", id.0),
+                },
                 CommandKind::EmojiPicker => {
                     let control = widget.control();
                     let target = match control.downcast_ref::<gtk4::Editable>() {
@@ -21556,6 +22174,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             }
             hub
         };
+        let rich_set = clipboard_hub.rich.clone();
         CORE.with_borrow_mut(|core| {
             *core = Some(CoreState {
                 transactions: tx_rx,
@@ -21736,7 +22355,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 native_dirty: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 highlight_text: std::rc::Rc::new(RefCell::new(HashMap::new())),
                 preedit: std::rc::Rc::new(RefCell::new(HashMap::new())),
-                rich: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
+                rich: rich_set,
                 submits: std::rc::Rc::new(RefCell::new(std::collections::HashSet::new())),
                 follow_handlers: RefCell::new(HashMap::new()),
                 own_undo: RefCell::new(std::collections::HashSet::new()),
@@ -22170,6 +22789,47 @@ fn freshen_wayland_serial() {
 
 #[cfg(feature = "harness")]
 impl GtkStage {
+    /// The presented GtkColorChooserDialog's own editor, as a user's pick
+    /// lands: `show-editor`, the sRGB hex entry applied on activate, Select.
+    #[allow(deprecated)]
+    fn choose_in_color_chooser(hex: String) -> Result<(), String> {
+        use gtk4::prelude::{Cast, DialogExt, EditableExt, ObjectExt, WidgetExt};
+        fn entries(w: &gtk4::Widget, out: &mut Vec<gtk4::Entry>) {
+            if let Some(entry) = w.downcast_ref::<gtk4::Entry>() {
+                out.push(entry.clone());
+            }
+            let mut child = w.first_child();
+            while let Some(c) = child {
+                entries(&c, out);
+                child = c.next_sibling();
+            }
+        }
+        Self::on_main(|_| {
+            if let Some(dialog) = visible_color_chooser() {
+                dialog.set_property("show-editor", true);
+            }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        Self::on_main(move |_| {
+            let Some(dialog) = visible_color_chooser() else {
+                return Err("the colour chooser closed before its editor was reached".to_owned());
+            };
+            let mut found = Vec::new();
+            entries(dialog.upcast_ref(), &mut found);
+            let shown: Vec<_> = found.iter().filter(|e| e.is_mapped()).collect();
+            let Some(entry) = shown.first() else {
+                return Err(format!(
+                    "the chooser's editor shows no hex entry ({} entries in the dialog, none mapped)",
+                    found.len()
+                ));
+            };
+            entry.set_text(&hex);
+            entry.emit_activate();
+            dialog.response(gtk4::ResponseType::Ok);
+            Ok(())
+        })
+    }
+
     /// Freshen the wayland serial before a step that can lead to a
     /// copy — but only in scenes that will SPEND one (the hub arms
     /// when a clipboard surface appears), so the other two hundred
@@ -22587,8 +23247,20 @@ impl GtkStage {
     fn press_key(key: &str) {
         let hold = if TYPED_ONCE.swap(true, std::sync::atomic::Ordering::SeqCst) { "150" } else { "800" };
         let (tool, args): (&str, Vec<String>) = if linux_wayland_session() {
-            ("wtype", ["-P", "F24", "-s", hold, "-p", "F24", "-s", "20", "-k", key]
-                .iter().map(|a| (*a).to_owned()).collect())
+            // A chord (`shift+Tab`) holds its modifier around the key.
+            let (held, name) = match key.split_once('+') {
+                Some((modifier, name)) => (Some(modifier), name),
+                None => (None, key),
+            };
+            let mut args: Vec<&str> = vec!["-P", "F24", "-s", hold, "-p", "F24", "-s", "20"];
+            if let Some(m) = held {
+                args.extend(["-M", m]);
+            }
+            args.extend(["-k", name]);
+            if let Some(m) = held {
+                args.extend(["-m", m]);
+            }
+            ("wtype", args.iter().map(|a| (*a).to_owned()).collect())
         } else {
             let pid = std::process::id().to_string();
             let found = std::process::Command::new("xdotool")
@@ -23325,20 +23997,225 @@ impl crate::harness::Stage for GtkStage {
     /// disagreement is a KAYA_DIAG naming both, which is R9's per-backend
     /// half. Not while a composition is live — the marked text is the
     /// widget's alone until it commits (R5).
-    fn select_text(&self, _: crate::harness::Target, _: crate::harness::TextRange) -> Result<(), String> {
-        crate::depth_stub("richdoc")
+    /// The selection a user leaves: the view takes focus, then the range in
+    /// guest bytes.
+    fn select_text(&self, t: crate::harness::Target, range: crate::harness::TextRange) -> Result<(), String> {
+        Self::on_main(move |core| {
+            use gtk4::prelude::{TextBufferExt, WidgetExt};
+            let id = rich_target_id(core, t).ok_or("no such textarea")?;
+            let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else {
+                return Err("the target is no textarea".to_owned());
+            };
+            let buffer = view.buffer();
+            let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            let text = lf(raw.clone());
+            for at in [range.start, range.stop] {
+                if at as usize > text.len() {
+                    return Err(format!("byte {at} is past the {}-byte text", text.len()));
+                }
+                if !text.is_char_boundary(at as usize) {
+                    return Err(format!("byte {at} is inside a character of the {}-byte text", text.len()));
+                }
+            }
+            if !view.grab_focus() {
+                return Err("the textarea could not take focus".to_owned());
+            }
+            let ins = buffer.iter_at_offset(buffer_offset_of_byte(&raw, range.start));
+            let bound = buffer.iter_at_offset(buffer_offset_of_byte(&raw, range.stop));
+            buffer.select_range(&ins, &bound);
+            Ok(())
+        })
     }
-    fn drawn_markers(&self, _: crate::harness::Target) -> Result<(String, String), String> {
-        crate::depth_stub("richdoc")
+
+    /// What the view's last frame drew, beside the core's own numbering.
+    fn drawn_markers(&self, t: crate::harness::Target) -> Result<(String, String), String> {
+        Self::await_frames(1);
+        Self::on_main(move |core| {
+            let id = rich_target_id(core, t).ok_or("no such textarea")?;
+            let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else {
+                return Err("the target is no textarea".to_owned());
+            };
+            let rich = view
+                .downcast_ref::<rich_view::KayaRichTextView>()
+                .ok_or("the textarea is no KayaRichTextView")?;
+            let mut drawn = rich.drawn();
+            drawn.sort_by_key(|d| d.start);
+            // THE INDENT IS DRAWN TOO: a marker stands in the gutter its
+            // paragraph's geometry tag opens, so a margin GTK did not apply is
+            // a marker over text.
+            if let Some(d) = drawn.iter().find(|d| d.margin_x.is_some_and(|m| (m - d.text_x).abs() > 0.5)) {
+                return Err(format!(
+                    "the item at byte {} lays its text out at x {} but its level {} puts it at x {}",
+                    d.start,
+                    d.text_x,
+                    d.level,
+                    d.margin_x.unwrap_or_default()
+                ));
+            }
+            let spelled = drawn
+                .iter()
+                .map(|d| format!("{}:{} {}", d.start, d.level, d.text))
+                .collect::<Vec<_>>()
+                .join("|");
+            Ok((spelled, core.scene.rich_markers_string(id).unwrap_or_default()))
+        })
     }
-    fn click_marker(&self, _: crate::harness::Target, _: u64) -> Result<(), String> {
-        crate::depth_stub("richdoc")
+
+    /// A real click on the drawn marker's centre, the lane's own pointer
+    /// (tools/linux/dragdrive.py's `click`).
+    fn click_marker(&self, t: crate::harness::Target, start: u64) -> Result<(), String> {
+        Self::drive_pointer();
+        let driver = std::env::var(DRAG_DRIVER_VAR)
+            .map_err(|_| format!("{DRAG_DRIVER_VAR} is unset, so this lane has no pointer"))?;
+        Self::await_frames(2);
+        let aim = Self::on_main(move |core| {
+            use gtk4::prelude::{TextViewExt, WidgetExt};
+            let id = rich_target_id(core, t).ok_or("no such textarea")?;
+            let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else {
+                return Err("the target is no textarea".to_owned());
+            };
+            let drawn = view.downcast_ref::<rich_view::KayaRichTextView>().map(|v| v.drawn()).unwrap_or_default();
+            let Some(hit) = drawn.iter().find(|d| d.start == start) else {
+                let spelled: Vec<String> = drawn.iter().map(|d| format!("{}:{} {}", d.start, d.level, d.text)).collect();
+                return Err(format!("no marker is drawn at byte {start} (drawn: {:?})", spelled.join("|")));
+            };
+            let (cx, cy) = (hit.rect.x() + hit.rect.width() / 2.0, hit.rect.y() + hit.rect.height() / 2.0);
+            let (wx, wy) = view.buffer_to_window_coords(gtk4::TextWindowType::Widget, cx.round() as i32, cy.round() as i32);
+            let window = view.root().and_downcast::<gtk4::Window>().ok_or("the textarea is in no window")?;
+            let p = view
+                .compute_point(&window, &gtk4::graphene::Point::new(wx as f32, wy as f32))
+                .ok_or("the marker has no point in its window")?;
+            Ok((f64::from(p.x()), f64::from(p.y()), gtk4::prelude::NativeExt::surface_transform(&window)))
+        })?;
+        let (x, y, transform) = aim;
+        let proto = if linux_wayland_session() { "wayland" } else { "x11" };
+        let out = std::process::Command::new("python3")
+            .arg(&driver)
+            .args(["click", proto])
+            .arg(std::process::id().to_string())
+            .args([transform.0, transform.1, x, y].iter().map(|v| (v.round() as i64).to_string()))
+            .output()
+            .map_err(|e| format!("{driver} could not be run: {e}"))?;
+        crate::vtrace::note(
+            "click_marker",
+            format_args!(
+                "byte {start} at ({x}, {y}) -> exit {:?} {}{}",
+                out.status.code(),
+                String::from_utf8_lossy(&out.stdout).trim(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        );
+        if !out.status.success() {
+            return Err(format!("the pointer click failed ({}): {}", out.status, String::from_utf8_lossy(&out.stderr).trim()));
+        }
+        Ok(())
     }
-    fn pick_text_color(&self, _: crate::harness::Target, _: &str) -> Result<(), String> {
-        crate::depth_stub("richdoc")
+
+    /// The presented GtkColorDialog driven as a user's pick lands, with the
+    /// colour the step names for this page's appearance.
+    fn pick_text_color(&self, t: crate::harness::Target, want: &str) -> Result<(), String> {
+        let (target, shown, dark) = Self::on_main(move |core| {
+            (rich_target_id(core, t).is_some(), visible_color_chooser().is_some(), adw::StyleManager::default().is_dark())
+        });
+        if !target {
+            return Err("no such textarea".to_owned());
+        }
+        if !shown {
+            return Err("no colour panel is presented (the text_color command opens GtkColorDialog)".to_owned());
+        }
+        let mode = if dark { "dark" } else { "light" };
+        let words: Vec<&str> = want.split_whitespace().collect();
+        let hex = match words.as_slice() {
+            [one] => Some(*one),
+            _ => words.windows(2).find(|w| w[0] == mode).map(|w| w[1]),
+        };
+        let Some(hex) = hex.filter(|h| h.len() == 6 && u32::from_str_radix(h, 16).is_ok()) else {
+            return Err(format!("{want:?} names no {mode} colour"));
+        };
+        Self::choose_in_color_chooser(format!("#{hex}"))
     }
-    fn text_ink(&self, _: crate::harness::Target, _: crate::harness::TextRange) -> Result<String, String> {
-        crate::depth_stub("richdoc")
+
+    /// The run's drawn ink off the window's own picture: the pixel farthest
+    /// from the commonest colour inside the run's character cells.
+    fn text_ink(&self, t: crate::harness::Target, range: crate::harness::TextRange) -> Result<String, String> {
+        Self::await_frames(2);
+        Self::on_main(move |core| {
+            use gtk4::prelude::{TextBufferExt, TextViewExt, WidgetExt};
+            let id = rich_target_id(core, t).ok_or("no such textarea")?;
+            let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else {
+                return Err("the target is no textarea".to_owned());
+            };
+            let buffer = view.buffer();
+            let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            let (from, to) = (buffer_offset_of_byte(&raw, range.start), buffer_offset_of_byte(&raw, range.stop));
+            if let Some((a, z)) = buffer.selection_bounds() {
+                if a.offset() < to && z.offset() > from {
+                    return Err(format!(
+                        "the selection {}:{} covers the run, so its ground is the selection's",
+                        guest_byte_of(&raw, a.offset()),
+                        guest_byte_of(&raw, z.offset())
+                    ));
+                }
+            }
+            let shot = skin::shot_of(view.upcast_ref())?;
+            // The caret is the view's ink, not the run's.
+            let (caret, _) = view.cursor_locations(None);
+            let (cx, _) = view.buffer_to_window_coords(gtk4::TextWindowType::Widget, caret.x(), caret.y());
+            let caret_x = view
+                .compute_point(&shot.content, &gtk4::graphene::Point::new(cx as f32, 0.0))
+                .map_or(f64::NAN, |p| f64::from(p.x()));
+            let mut cells = Vec::new();
+            for at in from..to {
+                let it = buffer.iter_at_offset(at);
+                if it.char() == '\n' {
+                    continue;
+                }
+                let r = view.iter_location(&it);
+                let (wx, wy) = view.buffer_to_window_coords(gtk4::TextWindowType::Widget, r.x(), r.y());
+                let Some(p) = view.compute_point(&shot.content, &gtk4::graphene::Point::new(wx as f32, wy as f32)) else {
+                    continue;
+                };
+                let cell = [f64::from(p.x()), f64::from(p.y()), f64::from(r.width()), f64::from(r.height())];
+                if let Some(why) = unseen_in_shot(view.upcast_ref(), &shot.content, cell) {
+                    return Err(format!("the run is outside the viewport: {why}"));
+                }
+                cells.push(cell);
+            }
+            if cells.is_empty() {
+                return Err(format!("no laid-out character in {}:{}", range.start, range.stop));
+            }
+            let step = 1.0 / shot.scale;
+            let mut pixels = Vec::new();
+            for [x0, y0, w, h] in &cells {
+                let mut y = *y0;
+                while y < y0 + h {
+                    let mut x = *x0;
+                    while x < x0 + w {
+                        if (x - caret_x).abs() > 2.0 {
+                            if let Some(c) = shot.at(x, y) {
+                                pixels.push(c.map(|v| (v * 255.0).round() as i32));
+                            }
+                        }
+                        x += step;
+                    }
+                    y += step;
+                }
+            }
+            let mut counts: HashMap<[i32; 3], usize> = HashMap::new();
+            for p in &pixels {
+                *counts.entry(*p).or_default() += 1;
+            }
+            let ground = counts.iter().max_by_key(|(_, n)| **n).map(|(c, _)| *c).ok_or("no pixels in the run's cells")?;
+            let far = |p: &[i32; 3]| (0..3).map(|i| (p[i] - ground[i]).abs()).sum::<i32>();
+            let ink = pixels.iter().max_by_key(|p| far(p)).copied().unwrap_or(ground);
+            Ok(format!(
+                "{} {:02X}{:02X}{:02X}",
+                if shot.dark { "dark" } else { "light" },
+                ink[0],
+                ink[1],
+                ink[2]
+            ))
+        })
     }
     fn rich_runs(&self, target: crate::harness::Target) -> String {
         Self::on_main(move |core| match rich_target_id(core, target) {
@@ -23404,6 +24281,8 @@ impl crate::harness::Stage for GtkStage {
             "space" => Self::press_key("space"),
             "up" => Self::press_key("Up"),
             "down" => Self::press_key("Down"),
+            "shift+tab" => Self::press_key("shift+Tab"),
+            "backspace" => Self::press_key("BackSpace"),
             other => panic!("kaya: press {other:?}: not one of harness::PRESS_KEYS"),
         }
     }
@@ -24482,22 +25361,12 @@ impl crate::harness::Stage for GtkStage {
     /// `notify::rgba`, the door a user's choice takes.
     #[allow(deprecated)]
     fn pick_color(&self, t: crate::harness::Target, color: crate::Color) -> Result<(), String> {
-        use gtk4::prelude::{Cast, DialogExt, EditableExt, ObjectExt, WidgetExt};
+        use gtk4::prelude::{Cast, WidgetExt};
         fn choosers() -> Vec<gtk4::ColorChooserDialog> {
             gtk4::Window::list_toplevels()
                 .into_iter()
                 .filter_map(|w| w.downcast::<gtk4::ColorChooserDialog>().ok())
                 .collect()
-        }
-        fn entries(w: &gtk4::Widget, out: &mut Vec<gtk4::Entry>) {
-            if let Some(entry) = w.downcast_ref::<gtk4::Entry>() {
-                out.push(entry.clone());
-            }
-            let mut child = w.first_child();
-            while let Some(c) = child {
-                entries(&c, out);
-                child = c.next_sibling();
-            }
         }
         let before = Self::on_main(|_| choosers().len());
         let clicked = Self::on_main(move |core| {
@@ -24523,32 +25392,9 @@ impl crate::harness::Stage for GtkStage {
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        let hex = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
-        Self::on_main(|_| {
-            if let Some(dialog) = choosers().into_iter().find(|d| d.is_visible()) {
-                dialog.set_property("show-editor", true);
-            }
-        });
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        Self::on_main(move |_| {
-            let Some(dialog) = choosers().into_iter().find(|d| d.is_visible()) else {
-                return Err("the colour chooser closed before its editor was reached".to_owned());
-            };
-            let mut found = Vec::new();
-            entries(dialog.upcast_ref(), &mut found);
-            let shown: Vec<_> = found.iter().filter(|e| e.is_mapped()).collect();
-            let Some(entry) = shown.first() else {
-                return Err(format!(
-                    "the chooser's editor shows no hex entry ({} entries in the dialog, none mapped)",
-                    found.len()
-                ));
-            };
-            entry.set_text(&hex);
-            entry.emit_activate();
-            dialog.response(gtk4::ResponseType::Ok);
-            Ok(())
-        })
+        Self::choose_in_color_chooser(format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b))
     }
+
 
     fn color_value(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
@@ -25176,9 +26022,11 @@ impl crate::harness::Stage for GtkStage {
                 String::from_utf8_lossy(&out.stderr)
             );
         };
+        let taken_before = RICH_KEYS_TAKEN.load(std::sync::atomic::Ordering::SeqCst);
         send();
         // Point 4: every character delivered AND processed.
         let Some((id, before, submits)) = target else { return };
+        let only_returns = text.chars().all(|c| c == '\n');
         // RETURN IS A KEY, SENT ONCE AND NEVER WAITED FOR: in a single-line
         // field or a submitting textarea it submits and inserts nothing, so
         // waiting for a newline resent it two seconds later and the app got
@@ -25198,6 +26046,14 @@ impl crate::harness::Stage for GtkStage {
         let mut deadline = std::time::Instant::now() + std::time::Duration::from_millis(2000);
         loop {
             let now = Self::on_main(move |core| core.text_of(id).unwrap_or_default());
+            // A RETURN THE RICH DOCUMENT'S CORE TOOK (docs/rich-document-plan.md
+            // §11, Keys) is an act and inserts nothing; resending it would
+            // insert the newline it swallowed.
+            if only_returns && now == before
+                && RICH_KEYS_TAKEN.load(std::sync::atomic::Ordering::SeqCst) != taken_before
+            {
+                return;
+            }
             if !resent && now == before && std::time::Instant::now() >= deadline {
                 eprintln!(
                     "KAYA_UNDO_TRACE: type {shown} did not land within 2s and the field \
@@ -30003,6 +30859,17 @@ fn label_target_spec(target: crate::harness::Target) -> String {
 
 /// The widget id behind a textarea OR LABEL target, for the reads that ask the
 /// core — a rich label answers `expect_runs` too (docs/rich-text-plan.md §15).
+/// The colour chooser a GtkColorDialog (or a colour button) presented.
+#[cfg(feature = "harness")]
+#[allow(deprecated)]
+fn visible_color_chooser() -> Option<gtk4::ColorChooserDialog> {
+    use gtk4::prelude::{Cast, WidgetExt};
+    gtk4::Window::list_toplevels()
+        .into_iter()
+        .filter_map(|w| w.downcast::<gtk4::ColorChooserDialog>().ok())
+        .find(|d| d.is_visible())
+}
+
 #[cfg(all(feature = "harness", target_os = "linux"))]
 fn rich_target_id(
     core: &CoreState, target: crate::harness::Target,

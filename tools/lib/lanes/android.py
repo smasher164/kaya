@@ -175,6 +175,9 @@ LEGS = {
         # richtext's reason, and no IME_SCENES member — the copy's act is
         # the harness's format verb.
         "richrows-compose",
+        # The rich document (docs/rich-document-plan.md §11); the dark leg
+        # reads the colour map.
+        "richdoc-compose", "richdocdark-compose",
         # The list of open documents (docs/doctabs-plan.md §1.6).
         "doctabs-compose",
         "sheet-compose",
@@ -359,6 +362,7 @@ FLAGS = {
     "canvasdark-compose": {"scene": "canvas", "appearance": "dark"},
     "tintsdark-compose": {"scene": "tints", "appearance": "dark"},
     "groundsdark-compose": {"scene": "grounds", "appearance": "dark"},
+    "richdocdark-compose": {"scene": "richdoc", "appearance": "dark"},
     "music_headerdark-python": {"scene": "music_header", "appearance": "dark"},
     "music_artistdark-python": {"scene": "music_artist", "appearance": "dark"},
     "music_dockdark-python": {"scene": "music_dock", "appearance": "dark"},
