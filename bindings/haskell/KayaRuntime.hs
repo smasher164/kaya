@@ -12,6 +12,8 @@ module KayaRuntime
     registerBlob,
     imageDominantRaw,
     imagePaletteRaw,
+    kdocReadRaw,
+    kdocWriteRaw,
     Asset,
     openAsset,
     assetMissSentence,
@@ -367,6 +369,26 @@ imagePaletteRaw bytes n = unsafePerformIO $
           return (Just (zip colours (map realToFrac shares)))
   where
     k = max 0 (min n 16)
+
+foreign import ccall unsafe "kaya_kdoc_read"
+  c_kaya_kdoc_read :: Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_kdoc_write"
+  c_kaya_kdoc_write :: Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> IO CSize
+
+-- | The .kdoc pair's values lists, as their bytes
+-- (docs\/rich-document-plan.md RD13).
+kdocReadRaw, kdocWriteRaw :: BS.ByteString -> BS.ByteString
+kdocReadRaw = kdocCall c_kaya_kdoc_read
+kdocWriteRaw = kdocCall c_kaya_kdoc_write
+
+kdocCall :: (Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> IO CSize) -> BS.ByteString -> BS.ByteString
+kdocCall call input = unsafePerformIO $
+  unsafeUseAsCStringLen input $ \(p, len) -> do
+    needed <- call (castPtr p) (fromIntegral len) nullPtr 0
+    allocaBytes (fromIntegral needed) $ \out -> do
+      _ <- call (castPtr p) (fromIntegral len) out needed
+      BS.packCStringLen (castPtr out, fromIntegral needed)
 
 -- | An open asset: the bytes kaya read, held by the core until this is
 -- released.

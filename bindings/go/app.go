@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"strconv"
 )
 
 // Scalar is the signal-value constraint: the wire's value types.
@@ -1910,6 +1911,29 @@ const (
 	CodeBlock Block = "code_block"
 )
 
+// ListKind is a list item's kind, the `list` attribute's value
+// (docs/rich-document-plan.md RD2); ListNone is its absence, as Body is a
+// block's.
+type ListKind string
+
+const (
+	ListNone     ListKind = "none"
+	ListBullet   ListKind = "bullet"
+	ListNumbered ListKind = "numbered"
+	ListCheck    ListKind = "check"
+)
+
+// ParagraphAlign is a paragraph's alignment, the `align` attribute's value;
+// ParagraphStart is its absence.
+type ParagraphAlign string
+
+const (
+	ParagraphStart   ParagraphAlign = "start"
+	ParagraphCenter  ParagraphAlign = "center"
+	ParagraphEnd     ParagraphAlign = "end"
+	ParagraphJustify ParagraphAlign = "justify"
+)
+
 // TextRun is one attribute over one span, in TextRange's unit: Value is
 // "true" for the flags, a URL for a link, a Block's own spelling for a
 // block. NOT `Run`, which is this package's entry point.
@@ -1985,6 +2009,37 @@ func (d Document) Link(start, end int, url string) Document {
 // paragraphs or the core refuses it, naming the byte.
 func (d Document) Block(start, end int, kind Block) Document {
 	return d.Mark(start, end, "block", string(kind))
+}
+
+// List makes a range's paragraphs list items of kind (RD2).
+func (d Document) List(start, end int, kind ListKind) Document {
+	return d.Mark(start, end, "list", string(kind))
+}
+
+// Indent sets a range's paragraphs to level, 1 to 8 (RD3).
+func (d Document) Indent(start, end int, level int) Document {
+	return d.Mark(start, end, "indent", strconv.Itoa(level))
+}
+
+// Checked checks a range's checklist items.
+func (d Document) Checked(start, end int) Document {
+	return d.Mark(start, end, "checked", "true")
+}
+
+// ListStart numbers a numbered list from first, on its first item.
+func (d Document) ListStart(start, end int, first int) Document {
+	return d.Mark(start, end, "start", strconv.Itoa(first))
+}
+
+// Align aligns a range's paragraphs.
+func (d Document) Align(start, end int, align ParagraphAlign) Document {
+	return d.Mark(start, end, "align", string(align))
+}
+
+// Color colours a range's text, "#RRGGBB" as it reads on a light page
+// (RD4, RD5).
+func (d Document) Color(start, end int, rgb string) Document {
+	return d.Mark(start, end, "color", strings.ToUpper(rgb))
 }
 
 // AttrAt answers the attribute covering one byte offset, and whether
@@ -2168,6 +2223,37 @@ func (s Selection) Has(name string) bool {
 	return false
 }
 
+// List is the list kind every touched paragraph shares; ListNone otherwise.
+func (s Selection) List() ListKind {
+	for _, a := range s.Attrs {
+		if a.Name == "list" {
+			return ListKind(a.Value)
+		}
+	}
+	return ListNone
+}
+
+// ParagraphAlign is the alignment every touched paragraph shares;
+// ParagraphStart otherwise.
+func (s Selection) ParagraphAlign() ParagraphAlign {
+	for _, a := range s.Attrs {
+		if a.Name == "align" {
+			return ParagraphAlign(a.Value)
+		}
+	}
+	return ParagraphStart
+}
+
+// Color is the colour holding over the whole selection, and whether one does.
+func (s Selection) Color() (string, bool) {
+	for _, a := range s.Attrs {
+		if a.Name == "color" {
+			return a.Value, true
+		}
+	}
+	return "", false
+}
+
 // Block is the paragraph kind every touched paragraph shares; Body for body
 // text and for paragraphs of different kinds.
 func (s Selection) Block() Block {
@@ -2304,7 +2390,8 @@ func (tx *Tx) Link(w Widget, url string) {
 func (tx *Tx) FormatRange(w Widget, r TextRange, name, value string) {
 	r.check("FormatRange", w)
 	r = tx.app.rangedActBounds(w.id, r, name)
-	removed, word := name == "block" && value == "body", uint32(0)
+	value = canonicalValue(name, value)
+	removed, word := absentValue(name, value), uint32(0)
 	if removed {
 		value, word = "", 1
 	}
@@ -2328,6 +2415,84 @@ func (tx *Tx) UnformatRange(w Widget, r TextRange, name string) {
 // SetBlock makes the selection's paragraphs kind; Body clears.
 func (tx *Tx) SetBlock(w Widget, kind Block) {
 	tx.Format(w, "block", string(kind))
+}
+
+// SetList makes the selection's paragraphs list items of kind (a heading or
+// a code block becomes body); ListNone ends the list. The core answers
+// through App.OnFormat (docs/rich-document-plan.md §6, §11).
+func (tx *Tx) SetList(w Widget, kind ListKind) {
+	tx.Format(w, "list", string(kind))
+}
+
+// Indent moves each of the selection's paragraphs one level deeper, to 8.
+func (tx *Tx) Indent(w Widget) {
+	tx.Format(w, "indent", "+1")
+}
+
+// Outdent moves each of the selection's paragraphs one level shallower.
+func (tx *Tx) Outdent(w Widget) {
+	tx.Format(w, "indent", "-1")
+}
+
+// SetParagraphAlign aligns the selection's paragraphs.
+func (tx *Tx) SetParagraphAlign(w Widget, align ParagraphAlign) {
+	tx.Format(w, "align", string(align))
+}
+
+// CheckItems checks or unchecks the selection's checklist items.
+func (tx *Tx) CheckItems(w Widget, on bool) {
+	if on {
+		tx.Format(w, "checked", "true")
+	} else {
+		tx.Unformat(w, "checked")
+	}
+}
+
+// Color colours the selection's text, "#RRGGBB" as it reads on a light
+// page; automatic ink is Tx.Unformat of "color" (RD4).
+func (tx *Tx) Color(w Widget, rgb string) {
+	tx.Format(w, "color", strings.ToUpper(rgb))
+}
+
+// PickTextColor presents the platform's own colour picker over the
+// selection; each colour the user commits arrives as a "color" act through
+// App.OnFormat (docs/rich-document-plan.md §5).
+func (tx *Tx) PickTextColor(w Widget) {
+	tx.emit(TxWidgetCommand(w.id, CommandTextColor))
+}
+
+// canonicalValue is the core's one spelling for the values a binding folds
+// before the core sees them (richdoc::canonical_value): a colour in upper
+// case.
+func canonicalValue(name, value string) string {
+	if name == "color" {
+		return strings.ToUpper(value)
+	}
+	return value
+}
+
+// absentValue is whether value spells the attribute's absence.
+func absentValue(name, value string) bool {
+	switch name {
+	case "block":
+		return value == "body"
+	case "list":
+		return value == "none"
+	case "indent":
+		return value == "0"
+	case "align":
+		return value == "start"
+	}
+	return false
+}
+
+// paragraphAttr is whether name covers whole paragraphs (RD1).
+func paragraphAttr(name string) bool {
+	switch name {
+	case "block", "list", "indent", "checked", "start", "align":
+		return true
+	}
+	return false
 }
 
 // CanUndo says whether an OwnUndo textarea's app has something to undo —
@@ -7353,7 +7518,7 @@ func utf8Boundary(s string, at int) bool {
 // covers the whole paragraphs it touches, as the core snaps it
 // (docs/rich-text-plan.md §17).
 func (a *App) rangedActBounds(widget uint64, r TextRange, name string) TextRange {
-	if name != "block" {
+	if !paragraphAttr(name) {
 		return r
 	}
 	text := a.documents[widget].Text

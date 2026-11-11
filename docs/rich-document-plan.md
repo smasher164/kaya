@@ -1,6 +1,6 @@
 # The rich document: the design pass (2026-11-05, rulings TAKEN 2026-11-11)
 
-Status: RULED 2026-11-11; nothing here is built. RD9 RULED A and the safe save
+Status: RULED 2026-11-11; the build began 2026-11-11 and §11 records it. RD9 RULED A and the safe save
 through a picked file (§4.1) RULED; every other ruling (RD1-RD8, RD10, RD11,
 RD13-RD16) RULED as recommended ("I like all the recommendations except
 rd12"); RD12 RULED as amended: no Markdown and no DOCX, the clipboard's RTF
@@ -879,6 +879,140 @@ corroboration wall (`expect_runs` fails when an arm's own runs disagree with
 the core), a scene read of the drawn markers and the drawn ink, the codec's
 negatives, and check-verbs' clauses for each arm's marker and colour paths.
 
+## §11. The build as designed (2026-11-11)
+
+What the build settled while implementing the rulings, so every arm and
+binding follows one account. Code: crates/kaya/src/richdoc.rs (the model),
+richdoc/kdoc.rs (the file), richdoc/clip.rs (RTF and HTML), the colour map in
+crates/kaya/src/brand.rs, and the mirror in crates/kaya/src/scene.rs.
+
+**The vocabulary on the wire.** `rich_attr` grows `list` 8, `indent` 9,
+`checked` 10, `start` 11, `align` 12 and `color` 13; the spec enums
+`list_kind` (`none`, `bullet`, `numbered`, `check`) and `paragraph_align`
+(`start`, `center`, `end`, `justify`) give the values; the `command` enum
+grows `text_color` 4. Every value has ONE spelling and the core answers it
+(`richdoc::canonical_value`): `#c4554d` is stored `#C4554D`, and `body`,
+`none`, `0` and `start` are the attribute's absence, never a run. A name with
+a dot is an app's extension (RD8): carried through every edit and drawn as
+nothing; it grows at neither edge.
+
+**Paragraph attributes and the newline.** A paragraph is its text bytes plus
+its terminator, the newline after it. Its attributes are read from its first
+text byte; an EMPTY paragraph's from its terminator; the EMPTY FINAL
+paragraph's from the newline before it (that newline is the final
+paragraph's carrier, `richdoc::final_state`), or from the pending arm when the
+text is empty. A non-empty paragraph's terminator carries nothing that
+matters except as that carrier.
+
+**Typing (RD7 and R10, generalized).** Inline marks come from the byte before
+the insertion by each mark's expand rule: bold, italic, underline, strike and
+color grow at their end; code, link and extensions never. Paragraph
+attributes come from the paragraph the text lands in. From the inserted
+text's first newline on, a Return at a paragraph's END carries what
+CONTINUES (`richdoc::continuing`: a heading ends, `checked` and `start` do
+not carry; a list, an indent, an alignment, a quote and a code block do), and
+a Return inside a paragraph splits it with both halves keeping everything but
+`start`.
+
+**The core resolves paragraph acts.** `format_text` over the SELECTION for
+`list`, `indent` (a level, or `+1`/`-1`), `checked`, `start` and `align` never
+reaches the arm as a selection act: the core finds the selection's paragraphs
+in its mirror, moves the mirror, sends the arm one RANGED act per change and
+publishes `text_formatted` per change itself. A list replaces a heading or a
+code block (one style per paragraph, as Notes keeps it) and drops a `checked`
+or `start` its kind cannot carry; a heading or code block act reported by the
+arm drops the list the same way. A ranged act (`format_range`) names a level,
+never `+1`, and is refused when it breaks RD2's scope. `block` keeps its arm
+path.
+
+**Keys.** The arm offers Return, Backspace, Tab, Shift+Tab and a click on a
+checklist box to the core before the platform acts
+(`kaya_text_key(widget, key, start, end)`, the selection in bytes, read when
+the key arrives); 1 means the core took it and the arm swallows the key.
+Return in an EMPTY list item ends the list (list, checked, start and indent
+off); Backspace at an item's first byte takes the list off; Tab and Shift+Tab
+step the level when every selected paragraph is a list item (a plain
+paragraph's Tab stays a tab character); the box click toggles `checked`.
+
+**The repair after a user edit.** Every paragraph a user edit touched is made
+uniform from its first byte, which is AppKit's own paragraph-style rule, so a
+join takes the first paragraph's attributes. The repair reaches the arm as
+ranged acts and the app as `text_formatted` after the `text_edited`. The
+app's own `apply_edit` is its write and is not repaired.
+
+**Ranged acts the core makes outside a transaction** (a key, the repair) wait
+in `Scene::take_rich_ops`; the capi paths queue them for the pump, the Rust
+backends apply them, after sending the edit's own occurrences.
+
+**Markers.** One numbering in the core (`richdoc::markers`), read by every arm
+through `kaya_text_markers` as `start:level marker|…` (start in bytes): a
+numbered item counts from the previous numbered item at its level in the
+same unbroken run of list paragraphs, or from its `start`; a non-list
+paragraph ends every run; a shallower item ends the deeper counts. Bullets
+`•`, `◦`, `▪` and numbers `1.`, `a.`, `i.` by level, round again; a checklist
+item is `[ ]` or `[x]`, drawn as the platform's own box. `expect_markers`
+reads the ARM's record of what it drew and fails, naming both, when it
+disagrees with the core's.
+
+**Colour (RD5) as built.** `brand::ink_for_dark` maps a stored colour (as it
+reads on the light reference page `#FFFFFF`) to the dark reference page
+`#1E1E1E` at the same WCAG contrast it had, never below 4.5:1: Oklab
+lightness moves, the hue stays, chroma is kept as far as sRGB allows.
+`ink_from_dark` is its inverse for a colour picked while the page is dark:
+a pick that reads at 4.5:1 there draws back within one unit per channel
+(measured: `#A86AFF` stores `#8D4DE0` and draws `#A86BFF`), and the forward
+map is many-to-one where the gamut clips chroma, so a light colour does not
+come back exactly from the dark side. ONE CORRECTION TO §5: §5 also
+said a colour that already reads on both pages within a small tolerance is
+drawn unchanged. No colour can: 4.5:1 against both pages needs a relative
+luminance at most 0.183 for the white page and at least 0.233 for the dark
+one. So the floor wins and every colour moves; mid-tones move by a few
+lightness points. The Format menu's eight presets (red `#DD1F24`, orange
+`#BA5600`, brown `#976814`, green `#0D8501`, teal `#097E7E`, blue `#016FEF`,
+purple `#8F4BE4`, pink `#D12387`; `richdoc::COLOR_PRESETS`) read at 4.6:1 to
+4.9:1 on the white page and at the same on the dark one through the map.
+Every arm draws `ink_for_dark` of the stored colour on a dark page, through
+`kaya_ink_for_dark`.
+
+**The file.** `richdoc::kdoc` writes §4's layout byte for byte (one paragraph
+per line, paragraph keys in the order block, list, indent, checked, start,
+align; marks in the order bold, italic, underline, strike, code, link, color,
+then extensions by name) and reads it back into the canonical runs: a newline
+between two paragraphs carries a paragraph attribute both hold, or the empty
+final paragraph's; an inline mark the bytes on both sides hold. An
+extension's value is its JSON (a string stays a string). The binding door is
+the C pair `kaya_kdoc_read` and `kaya_kdoc_write` (values lists; the
+document in a document field's encoding), and Rust's `Document::from_kdoc`
+answers a `Kdoc { document, read_only }`.
+
+**RD8's interim (RD17 asks the rest).** A file whose paragraphs or top level
+carry a key this kaya does not know, or whose spans carry an unknown mark
+without a dot, or which `requires` anything, opens READ-ONLY with a sentence
+naming each; `history` is dropped, as §4 says.
+
+**The clipboard (RD12 as amended).** Copy puts RTF and HTML beside the plain
+text, written from the core's mirror (`kaya_text_copy`); paste reads RTF
+first, then HTML, through one normaliser (`kaya_text_paste`), which arms the
+runs for the edit the arm reports next and answers the plain text the arm
+inserts as a paste. Explicit black and Apple's text colours read as
+automatic ink; a link's own colour and underline are dropped; a quote and a
+code block ride RTF as a `{\*\kayablock}` group other readers skip; a
+heading is `\outlinelevel` (and its bold is the heading's, not a mark).
+Measured on this Mac (macOS 26.6.2, textutil): Cocoa ends paragraphs with a
+backslash-newline, writes lists through `\listtable` with `\listtext`, and
+keeps a colour's sRGB in `{\*\expandedcolortbl}` (`\cssrgb`) beside a
+calibrated `\colortbl` entry; the reader prefers the expanded entry. Cocoa
+reads kaya's RTF back with its lists, nesting, colour and link
+(richdoc/clip.rs holds both directions as unit tests).
+
+**The text colour picker.** `pick_text_color` is the widget command
+`text_color`: the arm presents its platform's picker over the selection, and
+each colour the user commits is the widget's own `color` act, reported as
+`text_formatted` like a Bold. A colour picked while the page is dark is stored
+through `kaya_ink_from_dark`. On the Mac the picker is NSColorPanel and
+`changeColor:` on the text view is that act, so AppKit never writes
+`.foregroundColor` behind the run table.
+
 ## §10. The rulings
 
 Each is the maintainer's. The mechanism of each was explained in §0 to §8;
@@ -1173,3 +1307,34 @@ through a fresh open before it deletes the backup.
 RECOMMEND A. Documents are small, the read is needed for the length anyway,
 and a length check passes a provider that wrote the right number of wrong
 bytes. The hash is kaya's own and never leaves the device.
+
+### RD17. How a reader keeps unknown paragraph and document keys through an edit (ASKED 2026-11-11)
+
+The mechanism, short: RD8 says every kaya reader keeps names it does not
+know. An unknown MARK with an app's dotted name is easy: it is a run like any
+other, the widget carries it through every edit, and the `.kdoc` writes it
+back (built, §11). Two other places a file can carry a name have no home in
+kaya's run model: a key on a PARAGRAPH (`{"com.example.pinned": true,
+"spans": …}`, or a newer kaya's paragraph key), and a key at the DOCUMENT's
+top level (a newer kaya's `embeds` table, an app's own settings). A run
+cannot say "this belongs to the paragraph", because a mark that happens to
+cover a whole paragraph looks the same, and the Document every binding holds
+is only text and runs. The first build opens such a file READ-ONLY with a
+sentence naming each key, so nothing is lost and nothing is silently kept
+wrong.
+
+- A. Paragraph keys become runs under a reserved prefix, `para:` before the
+  key (`para:com.example.pinned`), which the core treats as a paragraph
+  attribute (whole paragraphs, continuing across Return); document keys ride
+  one more field on every binding's Document, `extra`, the unknown top-level
+  members as JSON text the writer puts back.
+- B. Every binding's Document grows a per-paragraph side table and a
+  document table, kept in step through edits by the binding's fold.
+- C. Keep the interim: such a file opens read-only.
+
+RECOMMEND A. It keeps the Document's shape (text and runs, plus one string)
+in nine bindings, it reuses the paragraph machinery the core already has, and
+the prefix makes the run's scope its spelling, so a mark that covers a whole
+paragraph and a paragraph key never collide. B is nine folds of a second
+structure; C makes a newer kaya's file uneditable in an older one, which RD8
+ruled against.

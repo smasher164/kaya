@@ -341,9 +341,114 @@ fn search_oklab(rgb: u32, target: f64) -> u32 {
     best
 }
 
+/// The reference pages a document colour is judged against
+/// (docs/rich-document-plan.md §5, RD5): one pair for every platform, so five
+/// arms draw one colour for one run whatever their own page is.
+pub const INK_LIGHT_PAGE: u32 = 0xFF_FFFF;
+pub const INK_DARK_PAGE: u32 = 0x1E_1E1E;
+const INK_FLOOR: f64 = 4.5;
+
+/// RD5's map (docs/rich-document-plan.md §11 records why every colour moves):
+/// a run's stored colour, as it reads on the light page, drawn on the dark
+/// one at the same contrast, never below 4.5:1.
+pub fn ink_for_dark(rgb: u32) -> u32 {
+    let rgb = rgb & 0xFF_FFFF;
+    let target = contrast_ratio(rgb, INK_LIGHT_PAGE).max(INK_FLOOR);
+    contrast_matched(rgb, INK_DARK_PAGE, target)
+}
+
+/// The inverse, for a colour picked while the page is dark: exact for a pick
+/// that reads at 4.5:1 or more there, and a pick below that is drawn at the
+/// floor.
+pub fn ink_from_dark(rgb: u32) -> u32 {
+    let rgb = rgb & 0xFF_FFFF;
+    contrast_matched(rgb, INK_LIGHT_PAGE, contrast_ratio(rgb, INK_DARK_PAGE))
+}
+
+/// `rgb`'s hue at the Oklab lightness whose contrast against `page` is
+/// `target`, on the side of the page away from it; the nearest reachable
+/// when the gamut ends first.
+fn contrast_matched(rgb: u32, page: u32, target: f64) -> u32 {
+    let (_, a, b) = oklab(rgb);
+    let at = |l: f64| -> u32 {
+        let full = oklab_linear(l, a, b);
+        let lin = if in_gamut(full) {
+            full
+        } else {
+            let (mut lo, mut hi) = (0.0f64, 1.0f64);
+            for _ in 0..40 {
+                let mid = (lo + hi) / 2.0;
+                if in_gamut(oklab_linear(l, a * mid, b * mid)) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            oklab_linear(l, a * lo, b * lo)
+        };
+        pack(delinearize(lin.0.max(0.0)), delinearize(lin.1.max(0.0)), delinearize(lin.2.max(0.0)))
+    };
+    let lighter = rel_luminance(page) < 0.5;
+    let (mut lo, mut hi) = if lighter { (oklab_l(page), 1.0f64) } else { (0.0f64, oklab_l(page)) };
+    for _ in 0..48 {
+        let mid = (lo + hi) / 2.0;
+        let enough = contrast_ratio(at(mid), page) >= target;
+        if enough == lighter {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    at(if lighter { hi } else { lo })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RD5 over the whole sweep: every mapped colour reads at 4.5:1 or more
+    /// on the dark page, at the light page's own contrast when that is
+    /// higher, and a pick on the dark page round-trips through the inverse.
+    #[test]
+    fn ink_for_dark_keeps_contrast_and_inverts() {
+        for rgb in sweep() {
+            let light = contrast_ratio(rgb, INK_LIGHT_PAGE);
+            let dark = ink_for_dark(rgb);
+            let drawn = contrast_ratio(dark, INK_DARK_PAGE);
+            let want = light.max(INK_FLOOR).min(contrast_ratio(0xFF_FFFF, INK_DARK_PAGE));
+            assert!(
+                drawn >= want - 0.08,
+                "kaya: {rgb:06x} ({light:.2}:1 on the light page) drew {dark:06x} at {drawn:.2}:1 \
+                 on the dark page, under {want:.2}:1"
+            );
+            if drawn >= INK_FLOOR + 0.1 {
+                let back = ink_from_dark(dark);
+                let again = ink_for_dark(back);
+                let (_, a1, b1) = oklab(dark);
+                let (_, a2, b2) = oklab(again);
+                let spread = ((oklab_l(dark) - oklab_l(again)).powi(2)
+                    + (a1 - a2).powi(2)
+                    + (b1 - b2).powi(2))
+                .sqrt();
+                assert!(
+                    spread < 0.03,
+                    "kaya: picked {dark:06x} on the dark page, stored {back:06x}, drawn {again:06x} \
+                     (Oklab distance {spread:.3})"
+                );
+            }
+        }
+    }
+
+    /// The Format menu's eight presets (docs/rich-document-plan.md §11) pass
+    /// 4.5:1 on both pages, the dark one through the map.
+    #[test]
+    fn the_text_colour_presets_read_on_both_pages() {
+        for (name, rgb) in crate::richdoc::COLOR_PRESETS {
+            let light = contrast_ratio(*rgb, INK_LIGHT_PAGE);
+            let dark = contrast_ratio(ink_for_dark(*rgb), INK_DARK_PAGE);
+            assert!(light >= INK_FLOOR && dark >= INK_FLOOR, "kaya: preset {name} {rgb:06x}: {light:.2}:1 light, {dark:.2}:1 dark");
+        }
+    }
 
     /// No fill, in either appearance, from any seed, rests inside the
     /// danger band. Swept over the whole hue circle: the failure mode is a

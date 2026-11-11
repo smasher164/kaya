@@ -163,6 +163,12 @@ public final class KayaRing {
      * (docs/media-player-plan.md M15). */
     public static native double[] imagePalette(byte[] bytes, int n);
 
+    /** kaya_kdoc_read's and kaya_kdoc_write's values lists, as their bytes
+     * (docs/rich-document-plan.md RD13). */
+    public static native byte[] kdocRead(byte[] bytes);
+
+    public static native byte[] kdocWrite(byte[] doc);
+
     /** kaya_reader_peaks: a finished peaks read's pairs, pair-major i16
      * (min then max per channel); null for none. */
     public static native short[] readerPeaks(long reader, long read);

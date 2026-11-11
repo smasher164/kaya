@@ -308,6 +308,66 @@ static class BlockKinds
     };
 }
 
+/// A list item's kind, the `list` attribute's value
+/// (docs/rich-document-plan.md RD2); None is its absence, as Body is a
+/// block's.
+enum ListKind { None, Bullet, Numbered, Check }
+
+static class ListKinds
+{
+    internal static string Name(this ListKind kind) => kind switch
+    {
+        ListKind.None => "none",
+        ListKind.Bullet => "bullet",
+        ListKind.Numbered => "numbered",
+        ListKind.Check => "check",
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(kind), $"kaya: {kind} is no list kind"),
+    };
+}
+
+/// A paragraph's alignment, the `align` attribute's value; Start is its
+/// absence. Not Align, which places a container's children.
+enum ParagraphAlign { Start, Center, End, Justify }
+
+static class ParagraphAligns
+{
+    internal static string Name(this ParagraphAlign align) => align switch
+    {
+        ParagraphAlign.Start => "start",
+        ParagraphAlign.Center => "center",
+        ParagraphAlign.End => "end",
+        ParagraphAlign.Justify => "justify",
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(align), $"kaya: {align} is no paragraph alignment"),
+    };
+}
+
+/// The rich document's attribute rules a binding's own fold applies before
+/// the core sees an act (crates/kaya/src/richdoc.rs).
+static class RichAttrs
+{
+    /// The attributes that cover whole paragraphs (RD1).
+    internal static bool IsParagraph(string name) =>
+        name is "block" or "list" or "indent" or "checked" or "start" or "align";
+
+    /// A value's one spelling: a colour in upper case.
+    internal static string Canonical(string name, string value) =>
+        name == "color" ? value.ToUpperInvariant() : value;
+
+    /// Whether value spells the attribute's absence.
+    internal static bool IsAbsence(string name, string value) => (name, value) switch
+    {
+        ("block", "body") or ("list", "none") or ("indent", "0") or ("align", "start") => true,
+        _ => false,
+    };
+}
+
+/// A `.kdoc` file read (docs/rich-document-plan.md §4): the document, and
+/// ReadOnly naming why it may only be read when it carries a name this
+/// kaya cannot keep through an edit (RD8); null when editable.
+sealed record Kdoc(Document Document, string? ReadOnly);
+
 /// What provoked an edit the widget reports (docs/rich-text-plan.md §2;
 /// the review page's ruling 3).
 enum EditSource { User, ImeCommit, Paste, NativeUndo, Drop }
@@ -389,6 +449,34 @@ sealed record Selection(TextRange Range, IReadOnlyList<TextRun> Attrs)
                     if (kind.Name() == a.Value) return kind;
         return BlockKind.Body;
     }
+
+    /// The list kind every touched paragraph shares; None otherwise.
+    public ListKind List()
+    {
+        foreach (var a in Attrs)
+            if (a.Name == "list")
+                foreach (var kind in Enum.GetValues<ListKind>())
+                    if (kind.Name() == a.Value) return kind;
+        return ListKind.None;
+    }
+
+    /// The alignment every touched paragraph shares; Start otherwise.
+    public ParagraphAlign ParagraphAlign()
+    {
+        foreach (var a in Attrs)
+            if (a.Name == "align")
+                foreach (var align in Enum.GetValues<global::ParagraphAlign>())
+                    if (align.Name() == a.Value) return align;
+        return global::ParagraphAlign.Start;
+    }
+
+    /// The colour holding over the whole selection, `#RRGGBB`, or null.
+    public string? Color()
+    {
+        foreach (var a in Attrs)
+            if (a.Name == "color") return a.Value;
+        return null;
+    }
 }
 
 /// A `rich` textarea's text and runs, kept current by the binding from
@@ -438,6 +526,56 @@ sealed class Document
     /// refuses it, naming the byte.
     public Document Block(TextRange range, BlockKind kind) =>
         Mark(range, "block", kind.Name());
+
+    /// A list item over whole paragraphs (docs/rich-document-plan.md RD2).
+    public Document List(TextRange range, ListKind kind) =>
+        Mark(range, "list", kind.Name());
+
+    /// An indent level, 1 to 8, over whole paragraphs (RD3).
+    public Document Indent(TextRange range, int level) =>
+        Mark(range, "indent", level.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    /// A checklist item checked, over whole paragraphs.
+    public Document Checked(TextRange range) => Mark(range, "checked", MarkValue.Flag);
+
+    /// A numbered list's first number, on its first item.
+    public Document Start(TextRange range, long first) =>
+        Mark(range, "start", first.ToString(System.Globalization.CultureInfo.InvariantCulture));
+
+    public Document Align(TextRange range, ParagraphAlign align) =>
+        Mark(range, "align", align.Name());
+
+    /// A text colour, `#RRGGBB` as it reads on a light page (RD4, RD5).
+    public Document Color(TextRange range, string rgb) =>
+        Mark(range, "color", rgb.ToUpperInvariant());
+
+    /// A `.kdoc` file's bytes read (docs/rich-document-plan.md §4); throws
+    /// ArgumentException carrying the core's one sentence when they are not
+    /// one, or name a newer major version.
+    public static Kdoc FromKdoc(byte[] bytes)
+    {
+        List<object> values = Kaya.KdocRead(bytes);
+        if ((string)values[0] != "")
+            throw new ArgumentException((string)values[0]);
+        var runs = new List<TextRun>();
+        for (int i = 3; i + 3 < values.Count; i += 4)
+            runs.Add(new TextRun(
+                TextRange.Bytes((long)values[i], (long)values[i + 1]),
+                (string)values[i + 2], (string)values[i + 3]));
+        string why = (string)values[1];
+        return new Kdoc(new Document((string)values[2], runs), why == "" ? null : why);
+    }
+
+    /// The document as a `.kdoc` file, the same bytes in nine bindings
+    /// (RD13); throws InvalidOperationException naming the run when it
+    /// breaks a wall Tx.SetDocument holds.
+    public byte[] ToKdoc()
+    {
+        List<object> values = Kaya.KdocWrite(KayaApp.DocumentBlob(this));
+        if ((string)values[0] != "")
+            throw new InvalidOperationException("kaya: ToKdoc: " + (string)values[0]);
+        return System.Text.Encoding.UTF8.GetBytes((string)values[1]);
+    }
 
     /// The attribute covering one UTF-8 byte offset, or null.
     public string? AttrAt(long byteOffset, string name)
@@ -2996,12 +3134,12 @@ sealed class KayaApp
     static bool Boundary(byte[] utf8, long at) =>
         at == utf8.Length || (utf8[at] & 0xC0) != 0x80;
 
-    /// A ranged act's range in the fold's text: a "block" covers the whole
-    /// paragraphs it touches, as the core snaps it
-    /// (docs/rich-text-plan.md §17).
+    /// A ranged act's range in the fold's text: a paragraph attribute covers
+    /// the whole paragraphs it touches, as the core snaps it
+    /// (docs/rich-text-plan.md §17, docs/rich-document-plan.md §11).
     internal TextRange RangedActBounds(ulong widget, TextRange range, string name)
     {
-        if (name != "block") return range;
+        if (!RichAttrs.IsParagraph(name)) return range;
         byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(
             documents.TryGetValue(widget, out var doc) ? doc.Text : "");
         long start = Math.Min((long)range.Start, utf8.Length);
@@ -5202,14 +5340,16 @@ sealed class Tx : IDisposable
 
     /// One attribute over a BYTE RANGE of the document, the selection
     /// left where it is: a document write, echoed by nothing, legal on a
-    /// rich label (docs/rich-text-plan.md §17). A "block" name covers the
-    /// range's whole paragraphs.
+    /// rich label (docs/rich-text-plan.md §17). A paragraph attribute covers
+    /// the range's whole paragraphs, and its absence (body, none, 0, start)
+    /// removes (docs/rich-document-plan.md §11).
     public void FormatRange(Widget w, TextRange range, string name, string value)
     {
         // A silent document write moves the fold, as ApplyEdit does
         // (docs/rich-text-plan.md §17).
         TextRange at = App.RangedActBounds(w.Id, range, name);
-        string? mark = name == "block" && value == "body" ? null : value;
+        value = RichAttrs.Canonical(name, value);
+        string? mark = RichAttrs.IsAbsence(name, value) ? null : value;
         App.AbsorbFormat(w.Id, new Format(at, name, mark));
         Records.Add(KayaWire.TxFormatText(
             w.Id, mark == null ? 1u : 0u, 1, at.Start, at.Stop,
@@ -5231,6 +5371,37 @@ sealed class Tx : IDisposable
 
     /// Make the selection's paragraphs `kind`; BlockKind.Body clears.
     public void SetBlock(Widget w, BlockKind kind) => Format(w, "block", kind.Name());
+
+    /// Make the selection's paragraphs list items of `kind` (a heading or a
+    /// code block becomes body); ListKind.None ends the list. The core
+    /// answers through KayaApp.OnFormat (docs/rich-document-plan.md §6, §11).
+    public void SetList(Widget w, ListKind kind) => Format(w, "list", kind.Name());
+
+    /// One level deeper for each of the selection's paragraphs, to 8.
+    public void Indent(Widget w) => Format(w, "indent", "+1");
+
+    /// One level shallower for each of the selection's paragraphs.
+    public void Outdent(Widget w) => Format(w, "indent", "-1");
+
+    public void SetParagraphAlign(Widget w, ParagraphAlign align) =>
+        Format(w, "align", align.Name());
+
+    /// Check or uncheck the selection's checklist items.
+    public void CheckItems(Widget w, bool on)
+    {
+        if (on) Format(w, "checked", MarkValue.Flag);
+        else Unformat(w, "checked");
+    }
+
+    /// The selection's text in `#RRGGBB` as it reads on a light page;
+    /// automatic ink is Unformat of "color" (RD4).
+    public void Color(Widget w, string rgb) => Format(w, "color", rgb.ToUpperInvariant());
+
+    /// Present the platform's own colour picker over the selection; each
+    /// colour the user commits arrives as a "color" act through
+    /// KayaApp.OnFormat (docs/rich-document-plan.md §5).
+    public void PickTextColor(Widget w) =>
+        Records.Add(KayaWire.TxWidgetCommand(w.Id, KayaWire.CommandTextColor));
 
     /// What an `ownUndo` textarea's app answers for Edit>Undo: true
     /// enables the item and routes its activation here

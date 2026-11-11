@@ -195,6 +195,22 @@ module KayaApp
     codeRun,
     linkRun,
     blockRun,
+    -- The rich document (docs\/rich-document-plan.md §11): its paragraph
+    -- vocabularies prefixed as 'Align''s constructors are, its runs
+    -- suffixed as 'blockRun' is.
+    ListKind (..),
+    listKindName,
+    ParagraphAlign (..),
+    paragraphAlignName,
+    listRun,
+    indentRun,
+    checkedRun,
+    startRun,
+    alignRun,
+    colorRun,
+    Kdoc (..),
+    fromKdoc,
+    toKdoc,
     attrAt,
     insertEdit,
     deleteEdit,
@@ -219,6 +235,13 @@ module KayaApp
     formatTextRange,
     unformatRange,
     setBlock,
+    setList,
+    indent,
+    outdent,
+    setParagraphAlign,
+    checkItems,
+    color,
+    pickTextColor,
     canUndo,
     canRedo,
     document,
@@ -233,6 +256,9 @@ module KayaApp
     onSelectionNode,
     selectionHas,
     selectionBlock,
+    selectionList,
+    selectionParagraphAlign,
+    selectionColor,
     onNeeded,
     onReleased,
     RowImages,
@@ -600,7 +626,7 @@ import Data.ByteString.Builder (Builder)
 import Data.Int (Int16, Int32, Int64)
 import Foreign.C.Types (CChar)
 import Foreign.Marshal.Array (peekArray)
-import Foreign.Ptr (Ptr, ptrToWordPtr)
+import Foreign.Ptr (Ptr, castPtr, ptrToWordPtr)
 import Foreign.Storable (peekByteOff)
 import Data.IORef
 import Data.List (elemIndex)
@@ -2597,6 +2623,108 @@ linkRun r url = mark r "link" (Spelled url)
 blockRun :: (Int, Int) -> Block -> Document -> Document
 blockRun r kind = mark r "block" (Spelled (blockName kind))
 
+-- | A list item's kind, the @list@ attribute's value
+-- (docs\/rich-document-plan.md RD2); 'ListNone' is its absence, as 'Body'
+-- is a block's.
+data ListKind = ListNone | ListBullet | ListNumbered | ListCheck
+  deriving (Eq, Show)
+
+listKindName :: ListKind -> Text
+listKindName k = case k of
+  ListNone -> "none"
+  ListBullet -> "bullet"
+  ListNumbered -> "numbered"
+  ListCheck -> "check"
+
+-- | A paragraph's alignment, the @align@ attribute's value;
+-- 'ParagraphStart' is its absence.
+data ParagraphAlign = ParagraphStart | ParagraphCenter | ParagraphEnd | ParagraphJustify
+  deriving (Eq, Show)
+
+paragraphAlignName :: ParagraphAlign -> Text
+paragraphAlignName a = case a of
+  ParagraphStart -> "start"
+  ParagraphCenter -> "center"
+  ParagraphEnd -> "end"
+  ParagraphJustify -> "justify"
+
+-- | A list item over whole paragraphs.
+listRun :: (Int, Int) -> ListKind -> Document -> Document
+listRun r kind = mark r "list" (Spelled (listKindName kind))
+
+-- | An indent level, 1 to 8, over whole paragraphs (RD3).
+indentRun :: (Int, Int) -> Int -> Document -> Document
+indentRun r level = mark r "indent" (Spelled (T.pack (show level)))
+
+-- | A checklist item checked, over whole paragraphs.
+checkedRun :: (Int, Int) -> Document -> Document
+checkedRun r = mark r "checked" (Flag True)
+
+-- | A numbered list's first number, on its first item.
+startRun :: (Int, Int) -> Int -> Document -> Document
+startRun r first = mark r "start" (Spelled (T.pack (show first)))
+
+alignRun :: (Int, Int) -> ParagraphAlign -> Document -> Document
+alignRun r align = mark r "align" (Spelled (paragraphAlignName align))
+
+-- | A text colour, @#RRGGBB@ as it reads on a light page (RD4, RD5).
+colorRun :: (Int, Int) -> Text -> Document -> Document
+colorRun r rgb = mark r "color" (Spelled (T.toUpper rgb))
+
+-- | A @.kdoc@ file read (docs\/rich-document-plan.md §4): the document,
+-- and why it may only be read when it carries a name this kaya cannot
+-- keep through an edit (RD8).
+data Kdoc = Kdoc
+  { document :: !Document,
+    readOnly :: !(Maybe Text)
+  }
+  deriving (Eq, Show)
+
+-- | A @.kdoc@ file's bytes read; 'Left' the core's one sentence when they
+-- are not one, or name a newer major version. A pure read refuses by
+-- value here, as 'imageDominant' answers 'Nothing'.
+fromKdoc :: BS.ByteString -> Either Text Kdoc
+fromKdoc bytes = case kdocValues (R.kdocReadRaw bytes) of
+  (W.VStr refusal : W.VStr why : W.VStr txt : runs)
+    | null refusal ->
+        Right (Kdoc (Document (T.pack txt) (runsOfValues runs)) (if null why then Nothing else Just (T.pack why)))
+    | otherwise -> Left (T.pack refusal)
+  vs -> errorWithoutStackTrace ("kaya: kaya_kdoc_read answered " ++ show (length vs) ++ " values out of shape")
+
+-- | The document as a @.kdoc@ file, the same bytes in nine bindings
+-- (RD13); an error naming the run when it breaks a wall 'setDocument'
+-- holds.
+toKdoc :: Document -> BS.ByteString
+toKdoc doc = case kdocValues (R.kdocWriteRaw (documentBlob doc)) of
+  [W.VStr "", W.VStr file] -> TE.encodeUtf8 (T.pack file)
+  (W.VStr refusal : _) -> errorWithoutStackTrace ("kaya: toKdoc: " ++ refusal)
+  vs -> errorWithoutStackTrace ("kaya: kaya_kdoc_write answered " ++ show (length vs) ++ " values out of shape")
+
+kdocValues :: BS.ByteString -> [W.Value]
+kdocValues bytes = unsafePerformIO $
+  BS.useAsCStringLen bytes $ \(p, _) -> do
+    count <- peekByteOff p 0 :: IO Word32
+    let walk :: Int -> Int -> IO [W.Value]
+        walk _ 0 = return []
+        walk at n = do
+          (v, next) <- W.parseValue (castPtr p) at
+          (v :) <$> walk next (n - 1)
+    walk 8 (fromIntegral count)
+
+-- | The attributes that cover whole paragraphs (RD1).
+paragraphAttr :: Text -> Bool
+paragraphAttr n = n `elem` ["block", "list", "indent", "checked", "start", "align"]
+
+-- | A value's one spelling (crates\/kaya\/src\/richdoc.rs,
+-- @canonical_value@): a colour in upper case.
+canonicalValue :: Text -> MarkValue -> MarkValue
+canonicalValue "color" (Spelled v) = Spelled (T.toUpper v)
+canonicalValue _ v = v
+
+-- | Whether the value spells the attribute's absence.
+absentValue :: Text -> MarkValue -> Bool
+absentValue n v = (n, markSpelling v) `elem` [("block", "body"), ("list", "none"), ("indent", "0"), ("align", "start")]
+
 attrAt :: Document -> Int -> Text -> Maybe MarkValue
 attrAt doc byte n =
   (.value)
@@ -2861,11 +2989,12 @@ unformat :: Widget -> Text -> Build ()
 unformat (Widget n) name =
   emitB (W.txFormatText n 1 0 0 0 [W.VStr (T.unpack name), W.VStr ""])
 
--- A ranged act's range in the fold's text: a @block@ covers the whole
--- paragraphs it touches, as the core snaps it.
+-- A ranged act's range in the fold's text: a paragraph attribute covers
+-- the whole paragraphs it touches, as the core snaps it
+-- (docs\/rich-document-plan.md §11).
 rangedActBounds :: App -> Word64 -> (Int, Int) -> Text -> IO (Int, Int)
 rangedActBounds app n (start, stop) name
-  | name /= "block" = return (start, stop)
+  | not (paragraphAttr name) = return (start, stop)
   | otherwise = do
       docs <- readIORef (app.appDocuments)
       let bytes = utf8Bytes (maybe "" (.text) (Map.lookup n docs))
@@ -2879,13 +3008,14 @@ rangedActBounds app n (start, stop) name
 -- | One attribute over a BYTE RANGE of the document, the selection left
 -- where it is: a document write, echoed by nothing, legal on a rich
 -- label, and the fold moves here as 'applyEdit' moves it
--- (docs\/rich-text-plan.md §17). A @block@ covers the range's whole
--- paragraphs, and @block@ with @\"body\"@ takes the kind off.
+-- (docs\/rich-text-plan.md §17). A paragraph attribute covers the
+-- range's whole paragraphs, and its absence (@body@, @none@, @0@, @start@)
+-- takes it off (docs\/rich-document-plan.md §11).
 formatTextRange :: App -> Widget -> (Int, Int) -> Text -> MarkValue -> Build ()
 formatTextRange app (Widget n) at name value = emitBIO $ do
   (start, stop) <- rangedActBounds app n at name
-  let painted =
-        if name == "block" && value == Spelled "body" then Nothing else Just value
+  let canonical = canonicalValue name value
+      painted = if absentValue name canonical then Nothing else Just canonical
   absorbFormat app (Widget n) (Format (start, stop) name painted)
   return
     ( W.txFormatText
@@ -2912,6 +3042,39 @@ unformatRange app (Widget n) at name = emitBIO $ do
 -- | Make the selection's paragraphs @kind@; 'Body' clears.
 setBlock :: Widget -> Block -> Build ()
 setBlock w kind = formatText w "block" (Spelled (blockName kind))
+
+-- | Make the selection's paragraphs list items of @kind@ (a heading or a
+-- code block becomes body); 'ListNone' ends the list. The core answers
+-- through 'onFormat' (docs\/rich-document-plan.md §6, §11).
+setList :: Widget -> ListKind -> Build ()
+setList w kind = formatText w "list" (Spelled (listKindName kind))
+
+-- | One level deeper for each of the selection's paragraphs, to 8.
+indent :: Widget -> Build ()
+indent w = formatText w "indent" (Spelled "+1")
+
+-- | One level shallower for each of the selection's paragraphs.
+outdent :: Widget -> Build ()
+outdent w = formatText w "indent" (Spelled "-1")
+
+setParagraphAlign :: Widget -> ParagraphAlign -> Build ()
+setParagraphAlign w align = formatText w "align" (Spelled (paragraphAlignName align))
+
+-- | Check or uncheck the selection's checklist items.
+checkItems :: Widget -> Bool -> Build ()
+checkItems w True = formatText w "checked" (Flag True)
+checkItems w False = unformat w "checked"
+
+-- | The selection's text in @#RRGGBB@ as it reads on a light page;
+-- automatic ink is 'unformat' of @color@ (RD4).
+color :: Widget -> Text -> Build ()
+color w rgb = formatText w "color" (Spelled (T.toUpper rgb))
+
+-- | Present the platform's own colour picker over the selection; each
+-- colour the user commits arrives as a @color@ act through 'onFormat'
+-- (docs\/rich-document-plan.md §5).
+pickTextColor :: Widget -> Build ()
+pickTextColor (Widget n) = emitB (W.txWidgetCommand n W.commandTextColor)
 
 -- | What an 'OwnUndo' textarea's app can take back right now, and put
 -- back: the route reads these (docs\/rich-text-plan.md §14), so a write
@@ -2976,6 +3139,27 @@ selectionBlock sel =
     (Spelled kind : _) ->
       fromMaybe Body (List.find (\b -> blockName b == kind) [Heading1, Heading2, Heading3, Quote, CodeBlock])
     _ -> Body
+
+-- | The list kind every touched paragraph shares; 'ListNone' otherwise.
+selectionList :: Selection -> ListKind
+selectionList sel =
+  case [r.value | r <- sel.attrs, r.name == "list"] of
+    (Spelled kind : _) ->
+      fromMaybe ListNone (List.find (\k -> listKindName k == kind) [ListBullet, ListNumbered, ListCheck])
+    _ -> ListNone
+
+-- | The alignment every touched paragraph shares; 'ParagraphStart'
+-- otherwise.
+selectionParagraphAlign :: Selection -> ParagraphAlign
+selectionParagraphAlign sel =
+  case [r.value | r <- sel.attrs, r.name == "align"] of
+    (Spelled a : _) ->
+      fromMaybe ParagraphStart (List.find (\k -> paragraphAlignName k == a) [ParagraphCenter, ParagraphEnd, ParagraphJustify])
+    _ -> ParagraphStart
+
+-- | The colour holding over the whole selection, @#RRGGBB@.
+selectionColor :: Selection -> Maybe Text
+selectionColor sel = listToMaybe [markSpelling r.value | r <- sel.attrs, r.name == "color"]
 
 selectionOfTail :: [W.Value] -> Selection
 selectionOfTail tail_ = case tail_ of

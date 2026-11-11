@@ -5221,7 +5221,23 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("code", 5),
                 ("link", 6),
                 ("block", 7),
+                ("list", 8),
+                ("indent", 9),
+                ("checked", 10),
+                ("start", 11),
+                ("align", 12),
+                ("color", 13),
             ],
+        },
+        EnumSpec {
+            // docs/rich-document-plan.md RD2: a `list` run's value.
+            name: "list_kind",
+            variants: &[("none", 0), ("bullet", 1), ("numbered", 2), ("check", 3)],
+        },
+        EnumSpec {
+            // docs/rich-document-plan.md RD1: an `align` run's value.
+            name: "paragraph_align",
+            variants: &[("start", 0), ("center", 1), ("end", 2), ("justify", 3)],
         },
         EnumSpec {
             name: "block_kind",
@@ -5421,7 +5437,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         },
         EnumSpec {
             name: "command",
-            variants: &[("clear", 1), ("focus", 2), ("emoji_picker", 3)],
+            variants: &[("clear", 1), ("focus", 2), ("emoji_picker", 3), ("text_color", 4)],
         },
     ],
 };
@@ -6098,6 +6114,8 @@ mod tests {
                     ("size_policy", _) => canvas_pin(wire::SIZE_POLICIES, name),
                     ("rich_attr", _) => canvas_pin(wire::RICH_ATTRS, name),
                     ("block_kind", _) => canvas_pin(wire::BLOCK_KINDS, name),
+                    ("list_kind", _) => canvas_pin(wire::LIST_KINDS, name),
+                    ("paragraph_align", _) => canvas_pin(wire::PARAGRAPH_ALIGNS, name),
                     ("edit_source", _) => canvas_pin(wire::EDIT_SOURCES, name),
                     ("prop", "text") => wire::PROP_TEXT,
                     ("prop", "checked") => wire::PROP_CHECKED,
@@ -6261,6 +6279,7 @@ mod tests {
                     ("command", "clear") => wire::COMMAND_CLEAR,
                     ("command", "focus") => wire::COMMAND_FOCUS,
                     ("command", "emoji_picker") => wire::COMMAND_EMOJI_PICKER,
+                    ("command", "text_color") => wire::COMMAND_TEXT_COLOR,
                     ("source", "const") => wire::SOURCE_CONST,
                     ("source", "signal") => wire::SOURCE_SIGNAL,
                     ("source", "element") => wire::SOURCE_ELEMENT,
@@ -6386,6 +6405,8 @@ mod tests {
             ("size_policy", wire::SIZE_POLICIES),
             ("rich_attr", wire::RICH_ATTRS),
             ("block_kind", wire::BLOCK_KINDS),
+            ("list_kind", wire::LIST_KINDS),
+            ("paragraph_align", wire::PARAGRAPH_ALIGNS),
             ("edit_source", wire::EDIT_SOURCES),
             ("player_state", wire::PLAYER_STATES),
             ("media_failure", wire::MEDIA_FAILURES),
@@ -6432,7 +6453,9 @@ mod tests {
             (wire::TEXT_ALIGNS, &[-1, 3, 4]),
             (wire::TEXT_BASELINES, &[-1, 4, 5]),
             (wire::SIZE_POLICIES, &[-1, 4, 5]),
-            (wire::RICH_ATTRS, &[-1, 0, 8]),
+            (wire::RICH_ATTRS, &[-1, 0, 14]),
+            (wire::LIST_KINDS, &[-1, 4, 5]),
+            (wire::PARAGRAPH_ALIGNS, &[-1, 4, 5]),
             (wire::BLOCK_KINDS, &[-1, 6, 7]),
             (wire::EDIT_SOURCES, &[-1, 5, 6]),
         ] {

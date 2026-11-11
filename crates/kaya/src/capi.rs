@@ -1072,10 +1072,12 @@ const _: () = assert!(
 pub const KAYA_COMMAND_CLEAR: u32 = 1;
 pub const KAYA_COMMAND_FOCUS: u32 = 2;
 pub const KAYA_COMMAND_EMOJI_PICKER: u32 = 3;
+pub const KAYA_COMMAND_TEXT_COLOR: u32 = 4;
 const _: () = assert!(
     KAYA_COMMAND_CLEAR == wire::COMMAND_CLEAR
         && KAYA_COMMAND_FOCUS == wire::COMMAND_FOCUS
         && KAYA_COMMAND_EMOJI_PICKER == wire::COMMAND_EMOJI_PICKER
+        && KAYA_COMMAND_TEXT_COLOR == wire::COMMAND_TEXT_COLOR
 );
 
 /// Value types.
@@ -1910,6 +1912,12 @@ pub const KAYA_RICH_ATTR_STRIKE: u32 = 4;
 pub const KAYA_RICH_ATTR_CODE: u32 = 5;
 pub const KAYA_RICH_ATTR_LINK: u32 = 6;
 pub const KAYA_RICH_ATTR_BLOCK: u32 = 7;
+pub const KAYA_RICH_ATTR_LIST: u32 = 8;
+pub const KAYA_RICH_ATTR_INDENT: u32 = 9;
+pub const KAYA_RICH_ATTR_CHECKED: u32 = 10;
+pub const KAYA_RICH_ATTR_START: u32 = 11;
+pub const KAYA_RICH_ATTR_ALIGN: u32 = 12;
+pub const KAYA_RICH_ATTR_COLOR: u32 = 13;
 /// One kind per paragraph, the value of a `block` run.
 pub const KAYA_BLOCK_BODY: u32 = 0;
 pub const KAYA_BLOCK_HEADING1: u32 = 1;
@@ -1917,6 +1925,16 @@ pub const KAYA_BLOCK_HEADING2: u32 = 2;
 pub const KAYA_BLOCK_HEADING3: u32 = 3;
 pub const KAYA_BLOCK_QUOTE: u32 = 4;
 pub const KAYA_BLOCK_CODE_BLOCK: u32 = 5;
+/// A `list` run's value (docs/rich-document-plan.md RD2); `none` is no run.
+pub const KAYA_LIST_NONE: u32 = 0;
+pub const KAYA_LIST_BULLET: u32 = 1;
+pub const KAYA_LIST_NUMBERED: u32 = 2;
+pub const KAYA_LIST_CHECK: u32 = 3;
+/// An `align` run's value; `start` is no run.
+pub const KAYA_PARAGRAPH_ALIGN_START: u32 = 0;
+pub const KAYA_PARAGRAPH_ALIGN_CENTER: u32 = 1;
+pub const KAYA_PARAGRAPH_ALIGN_END: u32 = 2;
+pub const KAYA_PARAGRAPH_ALIGN_JUSTIFY: u32 = 3;
 /// What provoked a text_edited, in its `source` slot.
 pub const KAYA_EDIT_SOURCE_USER: u32 = 0;
 pub const KAYA_EDIT_SOURCE_IME_COMMIT: u32 = 1;
@@ -1931,6 +1949,20 @@ const _: () = assert!(
         && KAYA_RICH_ATTR_CODE as i64 == wire::RICH_ATTR_CODE
         && KAYA_RICH_ATTR_LINK as i64 == wire::RICH_ATTR_LINK
         && KAYA_RICH_ATTR_BLOCK as i64 == wire::RICH_ATTR_BLOCK
+        && KAYA_RICH_ATTR_LIST as i64 == wire::RICH_ATTR_LIST
+        && KAYA_RICH_ATTR_INDENT as i64 == wire::RICH_ATTR_INDENT
+        && KAYA_RICH_ATTR_CHECKED as i64 == wire::RICH_ATTR_CHECKED
+        && KAYA_RICH_ATTR_START as i64 == wire::RICH_ATTR_START
+        && KAYA_RICH_ATTR_ALIGN as i64 == wire::RICH_ATTR_ALIGN
+        && KAYA_RICH_ATTR_COLOR as i64 == wire::RICH_ATTR_COLOR
+        && KAYA_LIST_NONE as i64 == wire::LIST_NONE
+        && KAYA_LIST_BULLET as i64 == wire::LIST_BULLET
+        && KAYA_LIST_NUMBERED as i64 == wire::LIST_NUMBERED
+        && KAYA_LIST_CHECK as i64 == wire::LIST_CHECK
+        && KAYA_PARAGRAPH_ALIGN_START as i64 == wire::PARAGRAPH_ALIGN_START
+        && KAYA_PARAGRAPH_ALIGN_CENTER as i64 == wire::PARAGRAPH_ALIGN_CENTER
+        && KAYA_PARAGRAPH_ALIGN_END as i64 == wire::PARAGRAPH_ALIGN_END
+        && KAYA_PARAGRAPH_ALIGN_JUSTIFY as i64 == wire::PARAGRAPH_ALIGN_JUSTIFY
         && KAYA_BLOCK_BODY as i64 == wire::BLOCK_BODY
         && KAYA_BLOCK_HEADING1 as i64 == wire::BLOCK_HEADING1
         && KAYA_BLOCK_HEADING2 as i64 == wire::BLOCK_HEADING2
@@ -1958,7 +1990,7 @@ const fn spec_enum_variants(want: &str) -> usize {
 }
 const _: () = {
     assert!(
-        spec_enum_variants("rich_attr") == 7,
+        spec_enum_variants("rich_attr") == 13,
         "the spec rich_attr enum grew: export the new KAYA_RICH_ATTR_* above, extend the \
          pin, and bump this count"
     );
@@ -1966,6 +1998,16 @@ const _: () = {
         spec_enum_variants("block_kind") == 6,
         "the spec block_kind enum grew: export the new KAYA_BLOCK_* above, extend the pin, \
          and bump this count"
+    );
+    assert!(
+        spec_enum_variants("list_kind") == 4,
+        "the spec list_kind enum grew: export the new KAYA_LIST_* above, extend the pin, \
+         and bump this count"
+    );
+    assert!(
+        spec_enum_variants("paragraph_align") == 4,
+        "the spec paragraph_align enum grew: export the new KAYA_PARAGRAPH_ALIGN_* above, \
+         extend the pin, and bump this count"
     );
     assert!(
         spec_enum_variants("edit_source") == 5,
@@ -6747,6 +6789,7 @@ fn rich_edit_of(
         return (None, Vec::new());
     };
     let edit = scene.text_field_of_tag(tag).and_then(|field| scene.note_rich_text(field, text));
+    queue_presentation_ops(&mut PRESENTATION_PENDING.lock().unwrap(), scene.take_rich_ops());
     (edit, scene.take_asks())
 }
 
@@ -6880,6 +6923,7 @@ pub unsafe extern "C" fn kaya_text_formatted(
                     Some(field) => scene.note_text_formatted(field, range, name, want),
                     None => None,
                 };
+                queue_presentation_ops(&mut PRESENTATION_PENDING.lock().unwrap(), scene.take_rich_ops());
                 (published, scene.take_asks())
             }
             None => (None, Vec::new()),
@@ -6897,6 +6941,163 @@ pub unsafe extern "C" fn kaya_text_formatted(
     }
     // docs/phone-format-plan.md §3: after the act it describes.
     send_occurrences(asks);
+}
+
+/// The keys a rich textarea's arm offers the core before the platform acts
+/// on them (kaya_text_key; docs/rich-document-plan.md §6): Return, Backspace,
+/// Tab and Shift+Tab, and a click on a checklist item's box.
+pub const KAYA_TEXT_KEY_RETURN: u32 = 1;
+pub const KAYA_TEXT_KEY_BACKSPACE: u32 = 2;
+pub const KAYA_TEXT_KEY_TAB: u32 = 3;
+pub const KAYA_TEXT_KEY_SHIFT_TAB: u32 = 4;
+pub const KAYA_TEXT_KEY_CHECK: u32 = 5;
+
+/// Presentation side: a key on a `rich` textarea, over the selection
+/// `start..end` in UTF-8 bytes (the arm's own, read when the key arrives).
+/// Answers 1 when the core took it as a paragraph act, which the arm then
+/// swallows; the act arrives as ranged format applies and the app hears
+/// text_formatted. 0 leaves the key to the platform.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_text_key(widget: u64, key: u32, start: u64, end: u64) -> u8 {
+    with_window_scene("offering a key to a rich textarea", |scene| {
+        let took = scene.rich_key(crate::protocol::WidgetId(widget), key, start, end);
+        (scene.take_rich_ops(), u8::from(took))
+    })
+}
+
+/// Presentation side: the list markers a `rich` textarea draws, from the
+/// core's one numbering, as `start:level marker` joined by `|` (start in
+/// UTF-8 bytes; a checklist item's marker is `[ ]` or `[x]`, drawn as the
+/// platform's box). kaya_text_runs' contract.
+///
+/// # Safety
+/// `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_text_markers(widget: u64, out: *mut u8, cap: usize) -> usize {
+    let answer = with_window_scene("reading a rich textarea's list markers", |scene| {
+        (Vec::new(), scene.rich_markers_string(crate::protocol::WidgetId(widget)))
+    });
+    match answer {
+        Some(s) => unsafe { fill(s.as_bytes(), out, cap) },
+        None => 0,
+    }
+}
+
+/// Presentation side: the rich flavour a copy of `start..end` (UTF-8 bytes)
+/// puts on the clipboard beside the plain text: RTF, or HTML when `html` is
+/// 1. kaya_text_runs' contract; 0 for an empty range.
+///
+/// # Safety
+/// `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_text_copy(widget: u64, start: u64, end: u64, html: u8, out: *mut u8, cap: usize) -> usize {
+    let answer = with_window_scene("writing a rich copy", |scene| {
+        (Vec::new(), scene.rich_copy(crate::protocol::WidgetId(widget), start, end, html != 0))
+    });
+    match answer {
+        Some(s) => unsafe { fill(s.as_bytes(), out, cap) },
+        None => 0,
+    }
+}
+
+/// Presentation side: a paste's rich flavours as the clipboard holds them
+/// (either may be NULL), read by the core's one normaliser and armed for the
+/// edit the arm reports next; answers the plain text the arm inserts, in
+/// UTF-8, or 0 when neither reads as text and the paste stays plain.
+/// kaya_text_runs' contract; asking again with a larger buffer re-arms the
+/// same paste.
+///
+/// # Safety
+/// `rtf`/`html` must describe valid byte ranges or be NULL/0; `out` must
+/// point at `cap` writable bytes, or be NULL with `cap` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_text_paste(
+    widget: u64,
+    rtf: *const u8,
+    rtf_len: usize,
+    html: *const u8,
+    html_len: usize,
+    out: *mut u8,
+    cap: usize,
+) -> usize {
+    let rtf = (!rtf.is_null() && rtf_len > 0).then(|| unsafe { std::slice::from_raw_parts(rtf, rtf_len) });
+    let html = (!html.is_null() && html_len > 0)
+        .then(|| String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(html, html_len) }).into_owned());
+    let answer = with_window_scene("reading a rich paste", |scene| {
+        (Vec::new(), scene.rich_paste(crate::protocol::WidgetId(widget), rtf, html.as_deref()))
+    });
+    match answer {
+        Some(s) => unsafe { fill(s.as_bytes(), out, cap) },
+        None => 0,
+    }
+}
+
+/// Either side: a document colour (packed 0xRRGGBB, as it reads on the light
+/// page) as the dark page draws it (docs/rich-document-plan.md RD5).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_ink_for_dark(rgb: u32) -> u32 {
+    crate::brand::ink_for_dark(rgb)
+}
+
+/// Either side: the inverse, for a colour picked while the page is dark.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_ink_from_dark(rgb: u32) -> u32 {
+    crate::brand::ink_from_dark(rgb)
+}
+
+/// Guest side: a `.kdoc` file's bytes read (docs/rich-document-plan.md §4,
+/// RD13). Answers a values list: Str refusal ("" when it read), Str
+/// read-only reason ("" when the document can be edited), then the document
+/// as a document field carries it (Str text, then I64 start, I64 end, Str
+/// name, Str value per run, UTF-8 bytes). kaya_text_runs' contract.
+///
+/// # Safety
+/// `bytes` must describe a valid byte range or be NULL/0; `out` must point at
+/// `cap` writable bytes, or be NULL with `cap` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_kdoc_read(bytes: *const u8, len: usize, out: *mut u8, cap: usize) -> usize {
+    let input = if bytes.is_null() || len == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(bytes, len) } };
+    let mut values = Vec::new();
+    match crate::richdoc::kdoc::read(input) {
+        Ok(read) => {
+            values.push(crate::protocol::Value::Str(String::new()));
+            values.push(crate::protocol::Value::Str(read.read_only.unwrap_or_default()));
+            values.push(crate::protocol::Value::Str(read.text));
+            for run in read.runs {
+                values.push(crate::protocol::Value::I64(run.range.start as i64));
+                values.push(crate::protocol::Value::I64(run.range.end as i64));
+                values.push(crate::protocol::Value::Str(run.name));
+                values.push(crate::protocol::Value::Str(run.value));
+            }
+        }
+        Err(why) => {
+            values.push(crate::protocol::Value::Str(why));
+            values.push(crate::protocol::Value::Str(String::new()));
+            values.push(crate::protocol::Value::Str(String::new()));
+        }
+    }
+    unsafe { fill(&wire::values_bytes(&values), out, cap) }
+}
+
+/// Guest side: a document (a document field's encoding, as kaya_kdoc_read
+/// answers it after its two strings) written as a `.kdoc`. Answers a values
+/// list: Str refusal ("" when it wrote), Str the file's UTF-8 text.
+/// kaya_text_runs' contract.
+///
+/// # Safety
+/// `doc` must describe a valid byte range; `out` must point at `cap`
+/// writable bytes, or be NULL with `cap` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_kdoc_write(doc: *const u8, len: usize, out: *mut u8, cap: usize) -> usize {
+    let input = if doc.is_null() || len == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(doc, len) } };
+    let written = crate::fault::guard("reading a document to write as a .kdoc", || wire::read_document_blob(input))
+        .ok_or_else(|| "the document is not a document field's encoding".to_owned())
+        .and_then(|(text, runs)| crate::richdoc::kdoc::write(&text, &runs));
+    let values = match written {
+        Ok(json) => vec![crate::protocol::Value::Str(String::new()), crate::protocol::Value::Str(json)],
+        Err(why) => vec![crate::protocol::Value::Str(why), crate::protocol::Value::Str(String::new())],
+    };
+    unsafe { fill(&wire::values_bytes(&values), out, cap) }
 }
 
 /// One borrowed UTF-8 attribute word; NULL or zero length is the empty string.
@@ -7569,6 +7770,8 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
             | crate::protocol::Occurrence::FontFaces { .. }
             | crate::protocol::Occurrence::TextSelected { .. }
             | crate::protocol::Occurrence::InstanceTextSelected { .. }
+            | crate::protocol::Occurrence::TextFormatted { .. }
+            | crate::protocol::Occurrence::InstanceTextFormatted { .. }
             | crate::protocol::Occurrence::CaptureOverrun { .. }
             | crate::protocol::Occurrence::ToastResult { .. }
             | crate::protocol::Occurrence::ImageNeeded { .. }
@@ -7594,8 +7797,6 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
             | crate::protocol::Occurrence::InstanceSubmitted { .. }
             | crate::protocol::Occurrence::TextEdited { .. }
             | crate::protocol::Occurrence::InstanceTextEdited { .. }
-            | crate::protocol::Occurrence::TextFormatted { .. }
-            | crate::protocol::Occurrence::InstanceTextFormatted { .. }
             | crate::protocol::Occurrence::Toggled { .. }
             | crate::protocol::Occurrence::CloseRequested { .. }
             | crate::protocol::Occurrence::WindowClosed { .. }

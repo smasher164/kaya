@@ -1,0 +1,104 @@
+# THE RICH DOCUMENT (docs/rich-document-plan.md §9 step 2, §11): a heading,
+# a body paragraph with a preset colour, a bullet list with a nested item, a
+# numbered list and a checklist. expect_runs reads the CORE's document and
+# fails when the widget's own runs disagree; label#1 is the binding's own
+# Document. expect_markers reads what the ARM DREW, never the core's
+# numbering, and fails naming both when they disagree. Every offset is UTF-8.
+expect_title "richdoc"
+expect_runs textarea#0 "0:9 block=heading1|25:31 color=#016FEF|33:56 list=bullet|40:50 indent=1|57:67 list=numbered|68:72 checked|68:77 list=check"
+expect label#1 "0:9 block=heading1|25:31 color=#016FEF|33:56 list=bullet|40:50 indent=1|57:67 list=numbered|68:72 checked|68:77 list=check"
+expect_markers textarea#0 "33:0 •|40:1 ◦|51:0 •|57:0 1.|62:0 2.|68:0 [x]|73:0 [ ]"
+# A COLOUR IS STORED AS IT READS ON A LIGHT PAGE and drawn on a dark one
+# through the core's map (RD5): one spelling, both appearances.
+expect_text_ink textarea#0 25:31 "light 016FEF dark 2C84FF"
+# THE FILE: written and read back by the guest, then declared again.
+click button#4
+expect label#2 "kdoc 570 bytes, read_only none, same true"
+expect_runs textarea#0 "0:9 block=heading1|25:31 color=#016FEF|33:56 list=bullet|40:50 indent=1|57:67 list=numbered|68:72 checked|68:77 list=check"
+expect_markers textarea#0 "33:0 •|40:1 ◦|51:0 •|57:0 1.|62:0 2.|68:0 [x]|73:0 [ ]"
+
+# ---- the keys the core is offered first ----------------------------
+# Tab and Shift+Tab in a list item step its level; the key never reaches
+# the text.
+select_text textarea#0 51:51
+press tab
+expect label#0 "format 51:56 indent=1"
+expect_runs textarea#0 "0:9 block=heading1|25:31 color=#016FEF|33:56 list=bullet|40:56 indent=1|57:67 list=numbered|68:72 checked|68:77 list=check"
+expect_markers textarea#0 "33:0 •|40:1 ◦|51:1 ◦|57:0 1.|62:0 2.|68:0 [x]|73:0 [ ]"
+press shift+tab
+expect label#0 "format 51:56 indent=off"
+expect_markers textarea#0 "33:0 •|40:1 ◦|51:0 •|57:0 1.|62:0 2.|68:0 [x]|73:0 [ ]"
+expect textarea#0 "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs"
+# A click on a checklist item's drawn box toggles it.
+click_marker textarea#0 73
+expect label#0 "format 73:77 checked=true"
+expect_markers textarea#0 "33:0 •|40:1 ◦|51:0 •|57:0 1.|62:0 2.|68:0 [x]|73:0 [x]"
+# Return at an item's end starts the next item, unchecked; Return in that
+# empty item ends the list.
+press return
+expect_edit textarea#0 "77:77 <\\n> user [0:1 list=check]"
+expect_runs textarea#0 "0:9 block=heading1|25:31 color=#016FEF|33:56 list=bullet|40:50 indent=1|57:67 list=numbered|68:77 checked|68:78 list=check"
+expect_markers textarea#0 "33:0 •|40:1 ◦|51:0 •|57:0 1.|62:0 2.|68:0 [x]|73:0 [x]|78:0 [ ]"
+press return
+expect label#0 "format 77:78 list=off"
+expect_markers textarea#0 "33:0 •|40:1 ◦|51:0 •|57:0 1.|62:0 2.|68:0 [x]|73:0 [x]"
+expect textarea#0 "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs\n"
+# Backspace at an item's first byte takes the list off before it joins.
+select_text textarea#0 62:62
+press backspace
+expect label#0 "format 62:67 list=off"
+expect_markers textarea#0 "33:0 •|40:1 ◦|51:0 •|57:0 1.|68:0 [x]|73:0 [x]"
+expect textarea#0 "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs\n"
+
+# ---- the app's acts over the widget's selection --------------------
+select_text textarea#0 33:56
+click button#0
+expect label#0 "format 51:56 list=numbered"
+expect_markers textarea#0 "33:0 1.|40:1 a.|51:0 2.|57:0 3.|68:0 [x]|73:0 [x]"
+click button#1
+expect label#0 "format 51:56 indent=1"
+expect_markers textarea#0 "33:1 a.|40:2 i.|51:1 b.|57:0 1.|68:0 [x]|73:0 [x]"
+select_text textarea#0 0:9
+click button#2
+expect label#0 "format 0:9 color=#DD1F24"
+select_text textarea#0 9:9
+expect_text_ink textarea#0 0:9 "light DD1F24 dark FE4741"
+
+# ---- the platform's colour picker ----------------------------------
+# A pick made on a dark page is stored as the light colour that maps to it,
+# so a user who picks A86AFF there and one who picks 8D4DE0 on a light page
+# store one colour.
+select_text textarea#0 10:15
+click button#3
+pick_text_color textarea#0 "light 8D4DE0 dark A86AFF"
+expect label#0 "format 10:15 color=#8D4DE0"
+select_text textarea#0 9:9
+expect_text_ink textarea#0 10:15 "light 8D4DE0 dark A86BFF"
+
+# ---- the clipboard, both ways --------------------------------------
+# An html string spells a double quote \q (a .steps string cannot carry one).
+select_text textarea#0 10:39
+menu_activate "Edit>Copy"
+expect_clipboard text "Fresh from the market.\nApples"
+expect_clipboard html "<meta charset=\qutf-8\q><p><span style=\qcolor:#8D4DE0\q>Fresh</span> from the <span style=\qcolor:#016FEF\q>market</span>.</p><ol><ol><li>Apples</li></ol></ol>"
+clipboard_seed html "<p>Buy <b>oat</b> <span style=\qcolor:#0D8501\q>milk</span></p>"
+select_text textarea#0 78:78
+menu_activate "Edit>Paste"
+expect_edit textarea#0 "78:78 <Buy oat milk> paste [4:7 bold|8:12 color=#0D8501]"
+expect_runs textarea#0 "0:9 block=heading1|0:9 color=#DD1F24|10:15 color=#8D4DE0|25:31 color=#016FEF|33:39 indent=1|33:61 list=numbered|40:50 indent=2|51:56 indent=1|68:77 checked|68:77 list=check|82:85 bold|86:90 color=#0D8501"
+expect label#1 "0:9 block=heading1|0:9 color=#DD1F24|10:15 color=#8D4DE0|25:31 color=#016FEF|33:39 indent=1|33:61 list=numbered|40:50 indent=2|51:56 indent=1|68:77 checked|68:77 list=check|82:85 bold|86:90 color=#0D8501"
+expect_markers textarea#0 "33:1 a.|40:2 i.|51:1 b.|57:0 1.|68:0 [x]|73:0 [x]"
+# A colour grows over text typed at its end (RD7).
+expect_focused textarea#0
+type "!"
+expect_edit textarea#0 "90:90 <!> user [0:1 color=#0D8501]"
+
+# ---- the file, round trip after the edits --------------------------
+# The core keeps its document in the file's canonical form (§11), so the
+# runs read back exactly as they were.
+click button#4
+expect label#2 "kdoc 741 bytes, read_only none, same true"
+expect_runs textarea#0 "0:9 block=heading1|0:9 color=#DD1F24|10:15 color=#8D4DE0|25:31 color=#016FEF|33:39 indent=1|33:61 list=numbered|40:50 indent=2|51:56 indent=1|68:77 checked|68:77 list=check|82:85 bold|86:91 color=#0D8501"
+expect label#1 "0:9 block=heading1|0:9 color=#DD1F24|10:15 color=#8D4DE0|25:31 color=#016FEF|33:39 indent=1|33:61 list=numbered|40:50 indent=2|51:56 indent=1|68:77 checked|68:77 list=check|82:85 bold|86:91 color=#0D8501"
+expect_markers textarea#0 "33:1 a.|40:2 i.|51:1 b.|57:0 1.|68:0 [x]|73:0 [x]"
+expect textarea#0 "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs\nBuy oat milk!"

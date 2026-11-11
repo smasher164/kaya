@@ -1326,6 +1326,23 @@ pub enum Step {
     /// break is a COMMAND whose meaning the widget decides, so it is not
     /// `type`'s to carry (tools/check-steps.py).
     Press(String),
+    /// `select_text <target> <start:end>` — bytes; the widget takes the
+    /// keyboard and that selection as a user's click would leave them.
+    SelectText(Target, TextRange),
+    /// `expect_markers <target> "<start:level marker|...>"` — the list
+    /// markers the ARM drew (docs/rich-document-plan.md §11), refused naming
+    /// both when its record disagrees with the core's numbering.
+    ExpectMarkers(Target, String),
+    /// `click_marker <target> <start>` — a real click on the drawn marker of
+    /// the paragraph starting at that byte (a checklist item's box).
+    ClickMarker(Target, u64),
+    /// `pick_text_color <target> "<RRGGBB | light RRGGBB dark RRGGBB>"` — the
+    /// presented text colour picker driven as a user's pick, the colour the
+    /// user picks in each appearance.
+    PickTextColor(Target, String),
+    /// `expect_text_ink <target> <start:end> "light RRGGBB dark RRGGBB"` — a
+    /// run's glyphs as the window drew them in the current appearance.
+    ExpectTextInk(Target, TextRange, String),
 }
 
 /// A range in a harness assertion, in the same UTF-8 byte offsets the
@@ -1449,7 +1466,12 @@ impl Step {
             | Step::Compose(t, _)
             | Step::Format(t, ..)
             | Step::ExpectRuns(t, _)
-            | Step::ExpectEdit(t, _) => vec![t],
+            | Step::ExpectEdit(t, _)
+            | Step::SelectText(t, _)
+            | Step::ExpectMarkers(t, _)
+            | Step::ClickMarker(t, _)
+            | Step::PickTextColor(t, _)
+            | Step::ExpectTextInk(t, ..) => vec![t],
             // BOTH ENDS OF A DRAG NORMALIZE. Handing the loop above the
             // source alone left `drag label#0 to label@row[a]` reaching every
             // rust-native backend as index 0 with the id still on it —
@@ -1831,6 +1853,8 @@ impl Step {
             Step::ExpectRuns { .. } => true,
             Step::ExpectEdit { .. } => true,
             Step::Press { .. } => false,
+            Step::SelectText(..) | Step::ClickMarker(..) | Step::PickTextColor(..) => false,
+            Step::ExpectMarkers(..) | Step::ExpectTextInk(..) => true,
             Step::Hover(_) | Step::RestPointer(_) => false,
             Step::PointerDown(_) | Step::PointerUp => false,
             Step::ExpectBackHelp(..) => true,
@@ -3710,6 +3734,28 @@ pub trait Stage: Send + 'static {
     /// widget decides what the key means (a newline in a textarea,
     /// activation in an entry), which is why `type` never carries it.
     fn press(&self, key: &str);
+    /// `select_text`: the selection placed as a user would leave it.
+    fn select_text(&self, _target: Target, _range: TextRange) -> Result<(), String> {
+        Err(not_built_yet("select_text"))
+    }
+    /// The list markers the arm drew, `start:level marker|...`, and the
+    /// core's own numbering beside it.
+    fn drawn_markers(&self, _target: Target) -> Result<(String, String), String> {
+        Err(not_built_yet("expect_markers"))
+    }
+    /// A real click on a paragraph's drawn marker.
+    fn click_marker(&self, _target: Target, _start: u64) -> Result<(), String> {
+        Err(not_built_yet("click_marker"))
+    }
+    /// Drive the presented text colour picker; `want` is the step's colour
+    /// spelling, one colour or one per appearance.
+    fn pick_text_color(&self, _target: Target, _want: &str) -> Result<(), String> {
+        Err(not_built_yet("pick_text_color"))
+    }
+    /// A run's drawn ink as `<light|dark> RRGGBB`.
+    fn text_ink(&self, _target: Target, _range: TextRange) -> Result<String, String> {
+        Err(not_built_yet("expect_text_ink"))
+    }
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
     /// the Activity, ...).
@@ -4919,7 +4965,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 })?;
                 // QUOTED like an expect's string, because seeded content
                 // is content: it may hold spaces, and a path may not.
-                Step::ClipboardSeed(kind.to_owned(), parse_string(arg)?)
+                Step::ClipboardSeed(kind.to_owned(), clip_argument(kind, parse_string(arg)?))
             }
             "expect_clipboard" => {
                 // `expect_clipboard <kind> <expected>`: the content for
@@ -4930,7 +4976,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 let (kind, want) = rest.trim().split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_clipboard wants a kind and the expected content: {line:?}")
                 })?;
-                Step::ExpectClipboard(kind.to_owned(), parse_string(want)?)
+                Step::ExpectClipboard(kind.to_owned(), clip_argument(kind, parse_string(want)?))
             }
             "file_choose" => {
                 let arg = rest.trim();
@@ -5926,10 +5972,61 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 let key = rest.trim();
                 if !PRESS_KEYS.contains(&key) {
                     return Err(format!(
-                        "press wants one of the named keys (return, tab, space, up, down), got {key:?}: {line:?}"
+                        "press wants one of the named keys ({}), got {key:?}: {line:?}",
+                        PRESS_KEYS.join(", ")
                     ));
                 }
                 Step::Press(key.to_owned())
+            }
+            "select_text" => {
+                let (target, range) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("select_text wants a target and a start:end byte range: {line:?}")
+                })?;
+                Step::SelectText(parse_target(target)?, parse_range(range.trim()).map_err(|e| format!("{e}: {line:?}"))?)
+            }
+            "expect_markers" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_markers wants a target and a quoted marker list: {line:?}")
+                })?;
+                Step::ExpectMarkers(parse_target(target)?, parse_string(text)?)
+            }
+            "click_marker" => {
+                let (target, start) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("click_marker wants a target and a paragraph's start byte: {line:?}")
+                })?;
+                let start = start
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("click_marker wants a byte offset, got {start:?}: {line:?}"))?;
+                Step::ClickMarker(parse_target(target)?, start)
+            }
+            "pick_text_color" => {
+                let (target, want) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("pick_text_color wants a target and a quoted colour: {line:?}")
+                })?;
+                let want = parse_string(want)?;
+                let hex = |w: &str| w.len() == 6 && w.chars().all(|c| c.is_ascii_hexdigit());
+                let words: Vec<&str> = want.split(' ').collect();
+                let per_mode = words.len() == 4 && words[0] == "light" && words[2] == "dark" && hex(words[1]) && hex(words[3]);
+                if !(hex(&want) || per_mode) {
+                    return Err(format!(
+                        "pick_text_color wants \"RRGGBB\" or \"light RRGGBB dark RRGGBB\": {line:?}"
+                    ));
+                }
+                Step::PickTextColor(parse_target(target)?, want)
+            }
+            "expect_text_ink" => {
+                let mut parts = rest.splitn(3, char::is_whitespace);
+                let (Some(target), Some(range), Some(want)) = (parts.next(), parts.next(), parts.next()) else {
+                    return Err(format!(
+                        "expect_text_ink wants a target, a start:end byte range and \"light RRGGBB dark RRGGBB\": {line:?}"
+                    ));
+                };
+                Step::ExpectTextInk(
+                    parse_target(target)?,
+                    parse_range(range).map_err(|e| format!("{e}: {line:?}"))?,
+                    parse_string(want)?,
+                )
             }
             other => return Err(format!("unknown step {other:?}")),
         };
@@ -6645,6 +6742,29 @@ fn ink_for_mode<'a>(want: &'a str, mode: &str) -> Option<&'a str> {
         }
     }
     None
+}
+
+/// `expect_text_ink`'s per-channel tolerance: the six scene colours read
+/// within 2 of the run's colour off glyph pixels, light and dark (measured
+/// 2026-11-11); KayaSwiftUI.swift's `kayaTextInkTolerance` is the other copy.
+const TEXT_INK_TOLERANCE: i32 = 3;
+
+/// `<mode> RRGGBB` against the per-mode expectation, within
+/// [`TEXT_INK_TOLERANCE`].
+fn text_ink_matches(got: &str, want: &str) -> bool {
+    let Some((mode, ink)) = got.split_once(' ') else {
+        return false;
+    };
+    let (Some(wanted), Ok(g)) = (ink_for_mode(want, mode), u32::from_str_radix(ink, 16)) else {
+        return false;
+    };
+    let Ok(w) = u32::from_str_radix(wanted, 16) else {
+        return false;
+    };
+    ink.len() == 6
+        && [16, 8, 0].iter().all(|shift| {
+            (((g >> shift) & 0xFF) as i32 - ((w >> shift) & 0xFF) as i32).abs() <= TEXT_INK_TOLERANCE
+        })
 }
 
 /// The reported mode's colours, every channel within [`INK_TOLERANCE`].
@@ -9393,6 +9513,43 @@ fn run_with_log(
                 await_answer(answered);
                 None
             }
+            Step::SelectText(target, range) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                let done = stage.select_text(*target, *range);
+                await_answer(answered);
+                done.err().map(|why| Err(format!("select_text: {why}")))
+            }
+            Step::ClickMarker(target, start) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                let done = stage.click_marker(*target, *start);
+                await_answer(answered);
+                done.err().map(|why| Err(format!("click_marker: {why}")))
+            }
+            Step::PickTextColor(target, want) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                let done = stage.pick_text_color(*target, want);
+                await_answer(answered);
+                done.err().map(|why| Err(format!("pick_text_color: {why}")))
+            }
+            Step::ExpectMarkers(target, want) => Some(poll(|| match stage.drawn_markers(*target) {
+                Err(why) => Err(format!("markers: {why}")),
+                Ok((drawn, core)) if drawn != core => {
+                    Err(format!("markers drawn {drawn:?} — but the core numbers {core:?}, wanted {want:?}"))
+                }
+                Ok((drawn, _)) if drawn == *want => Ok(format!("markers {want:?}")),
+                Ok((drawn, _)) => Err(format!("markers {drawn:?}, wanted {want:?}")),
+            })),
+            Step::ExpectTextInk(target, range, want) => Some(poll(|| {
+                let got = stage.text_ink(*target, *range).map_err(|why| format!("text ink: {why}"))?;
+                if text_ink_matches(&got, want) {
+                    Ok(format!("text ink {}:{} {want}", range.start, range.stop))
+                } else {
+                    Err(format!("text ink {got} at {}:{}, wanted {want}", range.start, range.stop))
+                }
+            })),
             Step::ExpectRuns(target, want) => Some(poll(|| {
                 let got = stage.rich_runs(*target);
                 if got == *want {
@@ -10120,7 +10277,19 @@ fn await_quiet() {
 /// bytes in the SwiftUI harness.
 /// The keys `press` names: Return, Tab and Space for keyboard reach
 /// (docs/reveal-plan.md V10), and the arrows (docs/styling-pass-plan.md Y4).
-pub const PRESS_KEYS: [&str; 5] = ["return", "tab", "space", "up", "down"];
+pub const PRESS_KEYS: [&str; 7] = ["return", "tab", "space", "up", "down", "shift+tab", "backspace"];
+
+/// A rich document verb this backend's arm has not built yet
+/// (docs/rich-document-plan.md §9: the Mac first, the rest in step 4).
+fn not_built_yet(verb: &str) -> String {
+    format!("{verb} is not built on this backend yet (docs/rich-document-plan.md §9 step 4)")
+}
+
+/// An `html` clipboard string spells a double quote `\q`, since a `.steps`
+/// string cannot carry one; the interpreters' copies are `kayaClipArgument`.
+fn clip_argument(kind: &str, text: String) -> String {
+    if kind == "html" { text.replace("\\q", "\"") } else { text }
+}
 pub const SECURE_EXPECT: &str = "expect never reads a secure field's text; expect_masked reads how many characters it masks";
 pub const SECURE_SET_TEXT: &str = "set_text never writes a secure field; type_secret types into one";
 pub const TYPE_INTO_SECURE: &str =
@@ -11717,6 +11886,56 @@ mod tests {
         assert!(parse("expect_expanded checkbox#0 on").is_err());
         assert!(parse("expect_expanded expander#0 maybe").is_err());
         MOCK_EXPANDED.with(|e| e.set((false, false)));
+    }
+
+    /// docs/rich-document-plan.md §9 step 2: the rich document's verbs parse
+    /// as the Mac runs them, an html clipboard string's `\q` is a quote, the
+    /// ink matcher tells a colour from its dark map, and a backend whose arm
+    /// is not built refuses each verb in one sentence.
+    #[test]
+    fn rich_document_verbs_parse_and_refuse_where_unbuilt() {
+        let t = parse_target("textarea#0").unwrap();
+        assert_eq!(parse("select_text textarea#0 3:5").unwrap()[0], Step::SelectText(t, TextRange { start: 3, stop: 5 }));
+        assert!(parse("select_text textarea#0 5:3").is_err());
+        assert_eq!(parse("click_marker textarea#0 12").unwrap()[0], Step::ClickMarker(t, 12));
+        assert!(parse("click_marker textarea#0 twelve").is_err());
+        assert_eq!(
+            parse(r#"expect_markers textarea#0 "0:0 •|2:1 [x]""#).unwrap()[0],
+            Step::ExpectMarkers(t, "0:0 •|2:1 [x]".into())
+        );
+        assert_eq!(
+            parse(r#"pick_text_color textarea#0 "light 8D4DE0 dark A86AFF""#).unwrap()[0],
+            Step::PickTextColor(t, "light 8D4DE0 dark A86AFF".into())
+        );
+        assert!(parse(r#"pick_text_color textarea#0 "8D4DE0""#).is_ok());
+        assert!(parse(r#"pick_text_color textarea#0 "8D4DE""#).is_err());
+        assert!(parse(r#"pick_text_color textarea#0 "dark A86AFF light 8D4DE0""#).is_err());
+        assert_eq!(
+            parse(r#"expect_text_ink textarea#0 25:31 "light 016FEF dark 2C84FF""#).unwrap()[0],
+            Step::ExpectTextInk(t, TextRange { start: 25, stop: 31 }, "light 016FEF dark 2C84FF".into())
+        );
+        assert_eq!(parse("press shift+tab").unwrap()[0], Step::Press("shift+tab".into()));
+        assert_eq!(parse("press backspace").unwrap()[0], Step::Press("backspace".into()));
+        assert_eq!(
+            parse(r#"clipboard_seed html "<p style=\qx\q>a</p>""#).unwrap()[0],
+            Step::ClipboardSeed("html".into(), "<p style=\"x\">a</p>".into())
+        );
+        assert_eq!(
+            parse(r#"expect_clipboard text "a\qb""#).unwrap()[0],
+            Step::ExpectClipboard("text".into(), "a\\qb".into())
+        );
+        assert!(text_ink_matches("dark 2D85FF", "light 016FEF dark 2C84FF"));
+        assert!(text_ink_matches("light 006FEE", "light 016FEF dark 2C84FF"));
+        assert!(!text_ink_matches("dark 016FEF", "light 016FEF dark 2C84FF"));
+        assert!(!text_ink_matches("light 016FEF", "dark 2C84FF"));
+        assert!(!text_ink_matches("<no text view>", "light 016FEF dark 2C84FF"));
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let stage = MockStage { seen: &SEEN, verdict: tx };
+        assert!(stage.select_text(t, TextRange { start: 0, stop: 0 }).unwrap_err().contains("select_text is not built"));
+        assert!(stage.drawn_markers(t).unwrap_err().contains("expect_markers is not built on this backend yet"));
+        assert!(stage.text_ink(t, TextRange { start: 0, stop: 1 }).unwrap_err().contains("expect_text_ink is not built"));
+        assert!(stage.click_marker(t, 0).unwrap_err().contains("click_marker is not built"));
+        assert!(stage.pick_text_color(t, "8D4DE0").unwrap_err().contains("pick_text_color is not built"));
     }
 
     /// docs/safe-area-plan.md A3, A9: the desktops' expect_safe, the frame

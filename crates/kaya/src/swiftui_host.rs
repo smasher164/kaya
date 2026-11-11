@@ -450,6 +450,13 @@ pub struct KayaHostApi {
     pub font_faces: unsafe extern "C" fn(*const u8, usize, *const u8, usize),
     /// docs/font-picker-plan.md §4.2: the picker's one answer.
     pub emit_font_dialog_result: unsafe extern "C" fn(u64, *const u8, usize, u32, u32, u32),
+    /// docs/rich-document-plan.md §11: the rich document's presentation side.
+    pub text_key: extern "C" fn(u64, u32, u64, u64) -> u8,
+    pub text_markers: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
+    pub text_copy: unsafe extern "C" fn(u64, u64, u64, u8, *mut u8, usize) -> usize,
+    pub text_paste: unsafe extern "C" fn(u64, *const u8, usize, *const u8, usize, *mut u8, usize) -> usize,
+    pub ink_for_dark: extern "C" fn(u32) -> u32,
+    pub ink_from_dark: extern "C" fn(u32) -> u32,
 }
 
 /// # Safety
@@ -771,6 +778,12 @@ pub(crate) fn run() -> i32 {
         font_families: crate::capi::kaya_font_families,
         font_faces: crate::capi::kaya_font_faces,
         emit_font_dialog_result: crate::capi::kaya_emit_font_dialog_result,
+        text_key: crate::capi::kaya_text_key,
+        text_markers: crate::capi::kaya_text_markers,
+        text_copy: crate::capi::kaya_text_copy,
+        text_paste: crate::capi::kaya_text_paste,
+        ink_for_dark: crate::capi::kaya_ink_for_dark,
+        ink_from_dark: crate::capi::kaya_ink_from_dark,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

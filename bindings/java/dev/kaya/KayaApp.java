@@ -5950,6 +5950,69 @@ public final class KayaApp {
         }
     }
 
+    /** A list item's kind, the {@code list} attribute's value
+     * (docs/rich-document-plan.md RD2); NONE is its absence, as BODY is a
+     * block's. */
+    public enum ListKind {
+        NONE("none"),
+        BULLET("bullet"),
+        NUMBERED("numbered"),
+        CHECK("check");
+
+        final String kind;
+
+        ListKind(String kind) {
+            this.kind = kind;
+        }
+    }
+
+    /** A paragraph's alignment, the {@code align} attribute's value; START
+     * is its absence. Not {@link Align}, which places a container's
+     * children. */
+    public enum ParagraphAlign {
+        START("start"),
+        CENTER("center"),
+        END("end"),
+        JUSTIFY("justify");
+
+        final String kind;
+
+        ParagraphAlign(String kind) {
+            this.kind = kind;
+        }
+    }
+
+    /** The attributes that cover whole paragraphs (RD1). */
+    static boolean paragraphAttr(String name) {
+        return switch (name) {
+            case "block", "list", "indent", "checked", "start", "align" -> true;
+            default -> false;
+        };
+    }
+
+    /** A value's one spelling (crates/kaya/src/richdoc.rs,
+     * canonical_value): a colour in upper case. */
+    static String canonicalValue(String name, String value) {
+        return name.equals("color") ? value.toUpperCase(java.util.Locale.ROOT) : value;
+    }
+
+    /** Whether {@code value} spells the attribute's absence. */
+    static boolean absentValue(String name, String value) {
+        return switch (name) {
+            case "block" -> value.equals("body");
+            case "list" -> value.equals("none");
+            case "indent" -> value.equals("0");
+            case "align" -> value.equals("start");
+            default -> false;
+        };
+    }
+
+    /** A {@code .kdoc} file read (docs/rich-document-plan.md §4): the
+     * document, and why it may only be read when it carries a name this
+     * kaya cannot keep through an edit (RD8); empty when editable. */
+    public record Kdoc(Document document, Optional<String> readOnly) {
+    }
+
     /** What provoked an edit the widget reports
      * (docs/rich-text-plan.md §2; the review page's ruling 3). */
     public enum EditSource {
@@ -6044,6 +6107,44 @@ public final class KayaApp {
             }
             return Block.BODY;
         }
+
+        /** The list kind every touched paragraph shares; NONE otherwise. */
+        public ListKind list() {
+            for (TextRun a : attrs) {
+                if (a.name().equals("list")) {
+                    for (ListKind kind : ListKind.values()) {
+                        if (kind.kind.equals(a.value())) {
+                            return kind;
+                        }
+                    }
+                }
+            }
+            return ListKind.NONE;
+        }
+
+        /** The alignment every touched paragraph shares; START otherwise. */
+        public ParagraphAlign paragraphAlign() {
+            for (TextRun a : attrs) {
+                if (a.name().equals("align")) {
+                    for (ParagraphAlign align : ParagraphAlign.values()) {
+                        if (align.kind.equals(a.value())) {
+                            return align;
+                        }
+                    }
+                }
+            }
+            return ParagraphAlign.START;
+        }
+
+        /** The colour holding over the whole selection, {@code #RRGGBB}. */
+        public Optional<String> color() {
+            for (TextRun a : attrs) {
+                if (a.name().equals("color")) {
+                    return Optional.of(a.value());
+                }
+            }
+            return Optional.empty();
+        }
     }
 
     /**
@@ -6113,6 +6214,79 @@ public final class KayaApp {
          * refuses it, naming the byte. */
         public Document block(TextRange range, Block kind) {
             return mark(range, "block", kind.kind);
+        }
+
+        /** A list item over whole paragraphs (docs/rich-document-plan.md
+         * RD2). */
+        public Document list(TextRange range, ListKind kind) {
+            return mark(range, "list", kind.kind);
+        }
+
+        /** An indent level, 1 to 8, over whole paragraphs (RD3). */
+        public Document indent(TextRange range, int level) {
+            return mark(range, "indent", Integer.toString(level));
+        }
+
+        /** A checklist item checked, over whole paragraphs. */
+        public Document checked(TextRange range) {
+            return mark(range, "checked", "true");
+        }
+
+        /** A numbered list's first number, on its first item. */
+        public Document start(TextRange range, long first) {
+            return mark(range, "start", Long.toString(first));
+        }
+
+        public Document align(TextRange range, ParagraphAlign align) {
+            return mark(range, "align", align.kind);
+        }
+
+        /** A text colour, {@code #RRGGBB} as it reads on a light page
+         * (RD4, RD5). */
+        public Document color(TextRange range, String rgb) {
+            return mark(range, "color", rgb.toUpperCase(java.util.Locale.ROOT));
+        }
+
+        /** A {@code .kdoc} file's bytes read (docs/rich-document-plan.md
+         * §4); throws IllegalArgumentException carrying the core's one
+         * sentence when they are not one, or name a newer major version. */
+        public static Kdoc fromKdoc(byte[] bytes) {
+            List<Object> values = kdocValues(KayaRing.kdocRead(bytes));
+            if (!"".equals(values.get(0))) {
+                throw new IllegalArgumentException((String) values.get(0));
+            }
+            List<TextRun> runs = new ArrayList<>();
+            for (int i = 3; i + 3 < values.size(); i += 4) {
+                runs.add(new TextRun(
+                        decodedSpan("kdoc run", (Long) values.get(i), (Long) values.get(i + 1)),
+                        (String) values.get(i + 2), (String) values.get(i + 3)));
+            }
+            String why = (String) values.get(1);
+            return new Kdoc(new Document((String) values.get(2), runs),
+                    why.isEmpty() ? Optional.empty() : Optional.of(why));
+        }
+
+        /** The document as a {@code .kdoc} file, the same bytes in nine
+         * bindings (RD13); throws IllegalStateException naming the run when
+         * it breaks a wall {@link Tx#setDocument} holds. */
+        public byte[] toKdoc() {
+            List<Object> values = kdocValues(KayaRing.kdocWrite(documentBlob(this)));
+            if (!"".equals(values.get(0))) {
+                throw new IllegalStateException("kaya: toKdoc: " + values.get(0));
+            }
+            return ((String) values.get(1)).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        }
+
+        private static List<Object> kdocValues(byte[] bytes) {
+            java.nio.ByteBuffer b = java.nio.ByteBuffer.wrap(bytes)
+                    .order(java.nio.ByteOrder.LITTLE_ENDIAN);
+            int count = b.getInt(0);
+            List<Object> values = new ArrayList<>(count);
+            int[] cursor = {8};
+            for (int i = 0; i < count; i++) {
+                values.add(KayaWire.parseValue(bytes, b, cursor));
+            }
+            return values;
         }
 
         /** The attribute covering one UTF-8 byte offset, or null. */
@@ -9464,8 +9638,9 @@ public final class KayaApp {
         /**
          * One attribute over a BYTE RANGE of the document, the selection
          * left where it is: a document write, echoed by nothing, legal on
-         * a rich label (docs/rich-text-plan.md §17). A {@code "block"}
-         * name covers the range's whole paragraphs.
+         * a rich label (docs/rich-text-plan.md §17). A paragraph attribute
+         * covers the range's whole paragraphs, and its absence (body, none,
+         * 0, start) removes (docs/rich-document-plan.md §11).
          */
         /** A flag attribute over a byte range, on or off. */
         public void formatRange(Widget w, TextRange range, String name, boolean on) {
@@ -9476,7 +9651,8 @@ public final class KayaApp {
             // A silent document write moves the fold, as applyEdit does
             // (docs/rich-text-plan.md §17).
             TextRange at = rangedActBounds(w.id, range, name);
-            String mark = name.equals("block") && "body".equals(value) ? null : value;
+            String canonical = canonicalValue(name, value);
+            String mark = absentValue(name, canonical) ? null : canonical;
             absorbFormat(w.id, new Format(at, name, mark));
             emit(KayaWire.txFormatText(w.id, mark == null ? 1 : 0, 1, at.start, at.stop,
                     new Object[] { name, mark == null ? "" : mark }));
@@ -9494,6 +9670,50 @@ public final class KayaApp {
          * {@link Block#BODY} clears. */
         public void setBlock(Widget w, Block kind) {
             format(w, "block", kind.kind);
+        }
+
+        /** Make the selection's paragraphs list items of {@code kind} (a
+         * heading or a code block becomes body); {@link ListKind#NONE}
+         * ends the list. The core answers through the app's format handler
+         * (docs/rich-document-plan.md §6, §11). */
+        public void setList(Widget w, ListKind kind) {
+            format(w, "list", kind.kind);
+        }
+
+        /** One level deeper for each of the selection's paragraphs, to 8. */
+        public void indent(Widget w) {
+            format(w, "indent", "+1");
+        }
+
+        /** One level shallower for each of the selection's paragraphs. */
+        public void outdent(Widget w) {
+            format(w, "indent", "-1");
+        }
+
+        public void setParagraphAlign(Widget w, ParagraphAlign align) {
+            format(w, "align", align.kind);
+        }
+
+        /** Check or uncheck the selection's checklist items. */
+        public void checkItems(Widget w, boolean on) {
+            if (on) {
+                format(w, "checked", "true");
+            } else {
+                unformat(w, "checked");
+            }
+        }
+
+        /** The selection's text in {@code #RRGGBB} as it reads on a light
+         * page; automatic ink is {@link #unformat} of "color" (RD4). */
+        public void color(Widget w, String rgb) {
+            format(w, "color", rgb.toUpperCase(java.util.Locale.ROOT));
+        }
+
+        /** Present the platform's own colour picker over the selection;
+         * each colour the user commits arrives as a "color" act through
+         * the app's format handler (docs/rich-document-plan.md §5). */
+        public void pickTextColor(Widget w) {
+            emit(KayaWire.txWidgetCommand(w.id, KayaWire.COMMAND_TEXT_COLOR));
         }
 
         /** What an {@code ownUndo} textarea's app answers for Edit>Undo:
@@ -12355,11 +12575,11 @@ public final class KayaApp {
         return at == utf8.length || (utf8[(int) at] & 0xC0) != 0x80;
     }
 
-    /** A ranged act's range in the fold's text: a {@code block} covers the
-     * whole paragraphs it touches, as the core snaps it
-     * (docs/rich-text-plan.md §17). */
+    /** A ranged act's range in the fold's text: a paragraph attribute
+     * covers the whole paragraphs it touches, as the core snaps it
+     * (docs/rich-text-plan.md §17, docs/rich-document-plan.md §11). */
     private TextRange rangedActBounds(long widget, TextRange range, String name) {
-        if (!name.equals("block")) {
+        if (!paragraphAttr(name)) {
             return range;
         }
         Document doc = documents.get(widget);

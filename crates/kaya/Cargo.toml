@@ -51,6 +51,10 @@ zune-jpeg = { version = "0.5.15", default-features = false, features = ["std"] }
 # THE EXAMPLES' FEATURES, NAMED HERE TOO (docs/traps.md, the android pool's
 # lib/example rebuild): rusqlite and automerge turn these on, and a library
 # graph without them recompiled kaya on every --lib/--example switch.
+# The rich document's `.kdoc` reader (docs/rich-document-plan.md §4, RD13):
+# a file from outside is parsed by the one JSON reader the ecosystem trusts;
+# the writer is richdoc/kdoc.rs's own, for one byte order in nine bindings.
+serde_json = "1.0.145"
 either = { version = "1", features = ["use_std"] }
 flate2 = { version = "1.1", features = ["zlib-rs"] }
 once_cell = { version = "1", features = ["std"] }
@@ -565,6 +569,10 @@ path = "../../guests/rust/richrows.rs"
 [[example]]
 name = "notes"
 path = "../../guests/rust/notes.rs"
+
+[[example]]
+name = "richdoc"
+path = "../../guests/rust/richdoc.rs"
 
 [[example]]
 name = "typeface"

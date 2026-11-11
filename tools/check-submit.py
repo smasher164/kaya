@@ -113,7 +113,8 @@ def swift_findings(source):
         out.append(f"{SWIFT}: the mac textarea's doCommandBy arm is gone — Return on a "
                    f"submitting textarea inserts a newline")
     else:
-        if "guard let node, node.submits else { return false }" not in mac:
+        guard_at = mac.find("guard node.submits else { return false }")
+        if guard_at < 0 or guard_at > mac.find(emit):
             out.append(f"{SWIFT}: the mac textarea's Return emit is not dominated by submits — "
                        f"a plain textarea would submit (S2)")
         if "#selector(NSResponder.insertNewline(_:))" not in mac or emit not in mac:
@@ -596,9 +597,9 @@ n2 = gate.doctor("an emit planted on the text-change path", REAL[SWIFT],
 watched("a SwiftUI text change echoing as a submit", {**REAL, SWIFT: n2},
         "outside a gesture door")
 n3 = gate.doctor("the mac doCommandBy submits guard cut", REAL[SWIFT],
-                 r"guard let node, node\.submits else \{ return false \}\n"
+                 r"guard node\.submits else \{ return false \}\n"
                  r"(\s*if selector == #selector\(NSResponder\.insertNewline)",
-                 r"guard let node else { return false }\n\1")
+                 r"\1")
 watched("a SwiftUI mac textarea submitting whether or not it asked to", {**REAL, SWIFT: n3},
         "mac textarea's Return emit is not dominated by submits")
 n4 = gate.doctor("the mac insertLineBreak arm cut", REAL[SWIFT],

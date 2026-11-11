@@ -106,6 +106,11 @@ val image_dominant : bytes -> int option
    (docs/media-player-plan.md M15). *)
 val image_palette : bytes -> int -> (int * float) list option
 
+(* kaya_kdoc_read and kaya_kdoc_write: the C pair's values list, as its
+   bytes (docs/rich-document-plan.md RD13). *)
+val kdoc_read : string -> string
+val kdoc_write : string -> string
+
 (* Register this asset's bytes into the pending table and answer with
    the handle the record carries. *)
 val asset_blob : asset -> int64

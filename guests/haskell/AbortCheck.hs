@@ -222,6 +222,92 @@ main = do
       ("the fold after the two removals holds " ++ show runs
          ++ ", wanted nothing")
 
+  -- THE RICH DOCUMENT (docs/rich-document-plan.md §11, RD13): the .kdoc is
+  -- the core's bytes, the ranged fold snaps every paragraph attribute and
+  -- folds its absence as a removal, and the acts are 'formatText' under a
+  -- name.
+  let kdocFile =
+        BC.pack
+          ( "{\n  \"kaya\": \"document\",\n  \"version\": 1,\n  \"requires\": [],\n"
+              ++ "  \"paragraphs\": [\n"
+              ++ "    {\"block\": \"heading1\", \"spans\": [[\"Walks\"]]},\n"
+              ++ "    {\"list\": \"bullet\", \"spans\": [[\"map\"]]},\n"
+              ++ "    {\"list\": \"bullet\", \"indent\": 1, \"spans\": [[\"water\", {\"color\": \"#C4554D\"}]]}\n"
+              ++ "  ]\n}\n"
+          )
+      walks =
+        colorRun (10, 15) "#c4554d" . indentRun (10, 15) 1 . listRun (6, 15) ListBullet
+          . blockRun (0, 5) Heading1 $ documentOf "Walks\nmap\nwater"
+      walksFile = toKdoc walks
+  check (walksFile == kdocFile)
+    ("toKdoc wrote\n" ++ BC.unpack walksFile ++ "\nand Rust writes\n" ++ BC.unpack kdocFile)
+  case fromKdoc walksFile of
+    Right back -> do
+      check (back.readOnly == Nothing) ("a kaya-written .kdoc read back read-only: " ++ show back.readOnly)
+      check (toKdoc back.document == kdocFile) "a .kdoc read back wrote different bytes"
+    Left why -> failWith ("a kaya-written .kdoc was refused: " ++ show why)
+  case fromKdoc (BC.pack "{\"kaya\": \"document\", \"version\": 2, \"paragraphs\": []}") of
+    Left said ->
+      check (said == "the document is version 2, newer than the version 1 this kaya reads")
+        ("a version-2 .kdoc was refused with " ++ show said)
+    Right _ -> failWith "a version-2 .kdoc was read"
+
+  let Widget wid = editor
+      record = BL.toStrict . toLazyByteString
+      selAct name value = record (W.txFormatText wid 0 0 0 0 [VStr name, VStr value])
+      showRuns = map (\r -> (r.range, r.name, r.value))
+  buildTx app (setDocument app editor (documentOf "Walks\nmap\nwater"))
+  ranged <- stagedBytes $ do
+    formatTextRange app editor (7, 8) "list" (Spelled (listKindName ListBullet))
+    formatTextRange app editor (0, 2) "color" (Spelled "#abcdef")
+  check
+    ( ranged
+        == record (W.txFormatText wid 0 1 6 9 [VStr "list", VStr "bullet"])
+          <> record (W.txFormatText wid 0 1 0 2 [VStr "color", VStr "#ABCDEF"])
+    )
+    "a ranged list act did not snap to its paragraph, or a ranged colour was not upper-cased"
+  runsNow >>= \runs ->
+    check (runs == [Run (0, 2) "color" (Spelled "#ABCDEF"), Run (6, 9) "list" (Spelled "bullet")])
+      ("the fold after a ranged list act holds " ++ show (showRuns runs))
+  removal <- stagedBytes (formatTextRange app editor (7, 8) "list" (Spelled (listKindName ListNone)))
+  runsNow >>= \runs ->
+    check
+      ( removal == record (W.txFormatText wid 1 1 6 9 [VStr "list", VStr ""])
+          && runs == [Run (0, 2) "color" (Spelled "#ABCDEF")]
+      )
+      ("a ranged list act with none did not fold as the removal: " ++ show (showRuns runs))
+  acts <- stagedBytes $ do
+    setList editor ListCheck
+    indent editor
+    outdent editor
+    setParagraphAlign editor ParagraphCenter
+    checkItems editor True
+    checkItems editor False
+    color editor "#c4554d"
+    pickTextColor editor
+  check
+    ( acts
+        == BS.concat
+          [ selAct "list" "check",
+            selAct "indent" "+1",
+            selAct "indent" "-1",
+            selAct "align" "center",
+            selAct "checked" "true",
+            record (W.txFormatText wid 1 0 0 0 [VStr "checked", VStr ""]),
+            selAct "color" "#C4554D",
+            record (W.txWidgetCommand wid W.commandTextColor)
+          ]
+    )
+    "the rich document's acts staged other bytes than the seven format acts and the picker command"
+  let docSel = Selection (0, 3) [Run (0, 3) "list" (Spelled "numbered"), Run (0, 3) "color" (Spelled "#C4554D")]
+  check
+    ( selectionList docSel == ListNumbered
+        && selectionParagraphAlign docSel == ParagraphStart
+        && selectionColor docSel == Just "#C4554D"
+        && selectionColor (Selection (0, 0) []) == Nothing
+    )
+    "a selection misread its list kind, alignment or colour"
+
   -- THE DOCUMENT AS A ROW FIELD (docs/rich-text-plan.md §19). NOTHING
   -- ELSE READS THESE BYTES: the richrows scene asserts what the CORE
   -- renders, so a field encoding the core happens to tolerate would be

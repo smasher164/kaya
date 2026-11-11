@@ -1350,14 +1350,15 @@ export class Widget extends Handle {
    * exactly where the user put it (docs/rich-text-plan.md §17). A DOCUMENT
    * WRITE like applyEdit rather than a toolbar act: nothing is echoed and
    * `onFormat` hears nothing, so the app's own Document takes it HERE, as
-   * it is sent. A rich LABEL takes it too. A `block` act covers the range's
-   * whole paragraphs, and `block` with `body` removes. */
+   * it is sent. A rich LABEL takes it too. A paragraph attribute covers the
+   * range's whole paragraphs, and its absence (`body`, `none`, `0`,
+   * `start`) removes (docs/rich-document-plan.md §11). */
   formatRange(span: Span, name: string, value: string | boolean = true): this {
     this._live("formatRange()");
     const attr = String(name);
-    const text = markValue("format value", value);
     const at = app()._rangedActBounds(this.id, textRange("formatRange", span), attr);
-    const removed = attr === "block" && text === "body";
+    const text = canonicalValue(attr, markValue("format value", value));
+    const removed = ABSENT_VALUES.get(attr) === text;
     app()._absorbFormat(this.id, at, attr, removed ? null : text);
     records().push(wire.tx_format_text(this.id, removed ? 1 : 0, 1, at[0], at[1], [attr, removed ? "" : text]));
     return this;
@@ -1378,6 +1379,47 @@ export class Widget extends Handle {
    * clears. */
   setBlock(kind: BlockName): this {
     return this.format("block", blockValue(kind));
+  }
+
+  /** Make the selection's paragraphs list items of `kind` (a heading or a
+   * code block becomes body); ListKind.NONE ends the list. The core
+   * answers through `onFormat` (docs/rich-document-plan.md §6, §11). */
+  setList(kind: ListKindName): this {
+    return this.format("list", oneOf<ListKindName>("list kind", LIST_NAMES, kind));
+  }
+
+  /** One level deeper for each of the selection's paragraphs, to 8. */
+  indent(): this {
+    return this.format("indent", "+1");
+  }
+
+  /** One level shallower for each of the selection's paragraphs. */
+  outdent(): this {
+    return this.format("indent", "-1");
+  }
+
+  setParagraphAlign(align: ParagraphAlignName): this {
+    return this.format("align", oneOf<ParagraphAlignName>("paragraph alignment", PARAGRAPH_ALIGN_NAMES, align));
+  }
+
+  /** Check or uncheck the selection's checklist items. */
+  checkItems(on: boolean): this {
+    return on ? this.format("checked") : this.unformat("checked");
+  }
+
+  /** The selection's text in `#RRGGBB` as it reads on a light page;
+   * automatic ink is `unformat("color")` (RD4). */
+  color(rgb: string): this {
+    return this.format("color", String(rgb).toUpperCase());
+  }
+
+  /** Present the platform's own colour picker over the selection; each
+   * colour the user commits arrives as a `color` act through `onFormat`
+   * (docs/rich-document-plan.md §5). */
+  pickTextColor(): this {
+    this._live("pickTextColor()");
+    records().push(wire.tx_widget_command(this.id, wire.COMMAND_TEXT_COLOR));
+    return this;
   }
 
   /** Whether this `ownUndo` textarea's app has something to undo — what
@@ -3139,6 +3181,55 @@ function blockValue(kind: unknown): BlockName {
   return kind as BlockName;
 }
 
+/** A list item's kind, the `list` attribute's value
+ * (docs/rich-document-plan.md RD2); NONE is its absence, as BODY is a
+ * block's. */
+export const ListKind = Object.freeze({
+  NONE: "none",
+  BULLET: "bullet",
+  NUMBERED: "numbered",
+  CHECK: "check",
+} as const);
+export type ListKindName = (typeof ListKind)[keyof typeof ListKind];
+const LIST_NAMES: readonly string[] = Object.values(ListKind);
+
+/** A paragraph's alignment, the `align` attribute's value; START is its
+ * absence. */
+export const ParagraphAlign = Object.freeze({
+  START: "start",
+  CENTER: "center",
+  END: "end",
+  JUSTIFY: "justify",
+} as const);
+export type ParagraphAlignName = (typeof ParagraphAlign)[keyof typeof ParagraphAlign];
+const PARAGRAPH_ALIGN_NAMES: readonly string[] = Object.values(ParagraphAlign);
+
+function oneOf<T extends string>(noun: string, names: readonly string[], kind: unknown): T {
+  if (typeof kind !== "string" || !names.includes(kind)) {
+    throw new Error(`kaya: ${typeof kind === "string" ? JSON.stringify(kind) : runtime.describe(kind)} is not a ${noun} — one of ${JSON.stringify(names)} (docs/rich-document-plan.md RD1)`);
+  }
+  return kind as T;
+}
+
+const PARAGRAPH_ATTRS: readonly string[] = ["block", "list", "indent", "checked", "start", "align"];
+const ABSENT_VALUES: ReadonlyMap<string, string> = new Map([
+  ["block", "body"],
+  ["list", "none"],
+  ["indent", "0"],
+  ["align", "start"],
+]);
+
+/** The core's one spelling of a value the fold takes before the core sees
+ * it (crates/kaya/src/richdoc.rs, canonical_value). */
+function canonicalValue(name: string, value: string): string {
+  return name === "color" ? value.toUpperCase() : value;
+}
+
+/** A `.kdoc` file read (docs/rich-document-plan.md §4): the document, and
+ * `readOnly` naming why it may only be read when it carries a name this
+ * kaya cannot keep through an edit (RD8); null when editable. */
+export type Kdoc = { readonly document: Document; readonly readOnly: string | null };
+
 /** A half-open span in kaya's unit — UTF-8 BYTE offsets
  * (docs/ranges-units.md §7). The `[start, stop]` pair every write side
  * already takes, on the read side too: JS has no range type, and a
@@ -3200,6 +3291,25 @@ export class Selection {
   block(): BlockName {
     const found = this.attrs.find((a) => a.name === "block" && BLOCK_NAMES.includes(a.value));
     return found === undefined ? Block.BODY : (found.value as BlockName);
+  }
+
+  /** The list kind every touched paragraph shares; ListKind.NONE
+   * otherwise. */
+  list(): ListKindName {
+    const found = this.attrs.find((a) => a.name === "list" && LIST_NAMES.includes(a.value));
+    return found === undefined ? ListKind.NONE : (found.value as ListKindName);
+  }
+
+  /** The alignment every touched paragraph shares; ParagraphAlign.START
+   * otherwise. */
+  paragraphAlign(): ParagraphAlignName {
+    const found = this.attrs.find((a) => a.name === "align" && PARAGRAPH_ALIGN_NAMES.includes(a.value));
+    return found === undefined ? ParagraphAlign.START : (found.value as ParagraphAlignName);
+  }
+
+  /** The colour holding over the whole selection, `#RRGGBB`, or null. */
+  color(): string | null {
+    return this.attrs.find((a) => a.name === "color")?.value ?? null;
   }
 }
 
@@ -3264,6 +3374,58 @@ export class Document {
    * refuses it, naming the byte. */
   block(span: readonly [number, number], kind: BlockName): this {
     return this.mark(span, "block", blockValue(kind));
+  }
+
+  /** A list item over whole paragraphs (docs/rich-document-plan.md RD2). */
+  list(span: readonly [number, number], kind: ListKindName): this {
+    return this.mark(span, "list", oneOf<ListKindName>("list kind", LIST_NAMES, kind));
+  }
+
+  /** An indent level, 1 to 8, over whole paragraphs (RD3). */
+  indent(span: readonly [number, number], level: number): this {
+    return this.mark(span, "indent", String(level));
+  }
+
+  /** A checklist item checked, over whole paragraphs. */
+  checked(span: readonly [number, number]): this {
+    return this.mark(span, "checked", true);
+  }
+
+  /** A numbered list's first number, on its first item. */
+  start(span: readonly [number, number], first: number): this {
+    return this.mark(span, "start", String(first));
+  }
+
+  align(span: readonly [number, number], align: ParagraphAlignName): this {
+    return this.mark(span, "align", oneOf<ParagraphAlignName>("paragraph alignment", PARAGRAPH_ALIGN_NAMES, align));
+  }
+
+  /** A text colour, `#RRGGBB` as it reads on a light page (RD4, RD5). */
+  color(span: readonly [number, number], rgb: string): this {
+    return this.mark(span, "color", String(rgb).toUpperCase());
+  }
+
+  /** A `.kdoc` file's bytes read; throws the core's one sentence when they
+   * are not one, or name a newer major version
+   * (docs/rich-document-plan.md §4). */
+  static fromKdoc(bytes: Uint8Array): Kdoc {
+    const values = runtime.kdocRead(bytes);
+    if (values[0] !== "") throw new Error(String(values[0]));
+    const runs: Run[] = [];
+    for (let at = 3; at + 3 < values.length; at += 4) {
+      const range = decodedSpan("kdoc run", Number(values[at]), Number(values[at + 1]));
+      runs.push(makeRun(range, String(values[at + 2]), String(values[at + 3])));
+    }
+    return { document: new Document(String(values[2]), runs), readOnly: values[1] === "" ? null : String(values[1]) };
+  }
+
+  /** The document as a `.kdoc` file, the same bytes in nine bindings
+   * (RD13); throws naming the run when it breaks a wall setDocument
+   * holds. */
+  toKdoc(): Uint8Array {
+    const values = runtime.kdocWrite(documentBytes(this));
+    if (values[0] !== "") throw new Error(`kaya: toKdoc: ${String(values[0])}`);
+    return new Uint8Array(Buffer.from(String(values[1]), "utf8"));
   }
 
   /** The value `name` carries at a byte offset, or null. */
@@ -7808,11 +7970,11 @@ export class App {
     (entry as Record<string, unknown>)[name] = doc;
   }
 
-  /** @internal A ranged act's range in the fold's text: a `block` covers
-   * the whole paragraphs it touches, as the core snaps it
-   * (docs/rich-text-plan.md §17). */
+  /** @internal A ranged act's range in the fold's text: a paragraph
+   * attribute covers the whole paragraphs it touches, as the core snaps it
+   * (docs/rich-text-plan.md §17, docs/rich-document-plan.md §11). */
   _rangedActBounds(widget: number, span: Span, name: string): Span {
-    if (name !== "block") return span;
+    if (!PARAGRAPH_ATTRS.includes(name)) return span;
     const data = Buffer.from(this._documents.get(widget)?.text ?? "", "utf8");
     const from = Math.min(span[0], data.length);
     const to = Math.min(span[1], data.length);

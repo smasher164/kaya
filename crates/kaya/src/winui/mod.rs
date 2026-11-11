@@ -20334,6 +20334,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // TryShow(Emoji) answered Ok(true) with the guest in the
                 // foreground and opened nothing for a WinUI TextBox, while it
                 // opened the panel for a Win32 edit (measured 2026-09-26).
+                CommandKind::TextColor => crate::depth_stub("richdoc"),
                 CommandKind::EmojiPicker => {
                     let element = widget.identity_element()?;
                     let _ = element.Focus(FocusState::Programmatic)?;
@@ -25643,6 +25644,21 @@ impl crate::harness::Stage for WinUiStage {
     /// table read beside it, and a KAYA_DIAG naming both when they disagree.
     /// The two are kept by independent code, which is the only reason the
     /// comparison can fail.
+    fn select_text(&self, _: crate::harness::Target, _: crate::harness::TextRange) -> Result<(), String> {
+        crate::depth_stub("richdoc")
+    }
+    fn drawn_markers(&self, _: crate::harness::Target) -> Result<(String, String), String> {
+        crate::depth_stub("richdoc")
+    }
+    fn click_marker(&self, _: crate::harness::Target, _: u64) -> Result<(), String> {
+        crate::depth_stub("richdoc")
+    }
+    fn pick_text_color(&self, _: crate::harness::Target, _: &str) -> Result<(), String> {
+        crate::depth_stub("richdoc")
+    }
+    fn text_ink(&self, _: crate::harness::Target, _: crate::harness::TextRange) -> Result<String, String> {
+        crate::depth_stub("richdoc")
+    }
     fn rich_runs(&self, t: crate::harness::Target) -> String {
         let (answer, held) = Self::on_ui_read(move |core| {
             let Some(widget) = rich_target_id(core, t) else {

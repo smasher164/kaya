@@ -1202,6 +1202,12 @@ pub(crate) const RICH_ATTR_STRIKE: i64 = 4;
 pub(crate) const RICH_ATTR_CODE: i64 = 5;
 pub(crate) const RICH_ATTR_LINK: i64 = 6;
 pub(crate) const RICH_ATTR_BLOCK: i64 = 7;
+pub(crate) const RICH_ATTR_LIST: i64 = 8;
+pub(crate) const RICH_ATTR_INDENT: i64 = 9;
+pub(crate) const RICH_ATTR_CHECKED: i64 = 10;
+pub(crate) const RICH_ATTR_START: i64 = 11;
+pub(crate) const RICH_ATTR_ALIGN: i64 = 12;
+pub(crate) const RICH_ATTR_COLOR: i64 = 13;
 
 pub(crate) const RICH_ATTRS: &[(i64, &str)] = &[
     (RICH_ATTR_BOLD, "bold"),
@@ -1211,6 +1217,36 @@ pub(crate) const RICH_ATTRS: &[(i64, &str)] = &[
     (RICH_ATTR_CODE, "code"),
     (RICH_ATTR_LINK, "link"),
     (RICH_ATTR_BLOCK, "block"),
+    (RICH_ATTR_LIST, "list"),
+    (RICH_ATTR_INDENT, "indent"),
+    (RICH_ATTR_CHECKED, "checked"),
+    (RICH_ATTR_START, "start"),
+    (RICH_ATTR_ALIGN, "align"),
+    (RICH_ATTR_COLOR, "color"),
+];
+
+pub(crate) const LIST_NONE: i64 = 0;
+pub(crate) const LIST_BULLET: i64 = 1;
+pub(crate) const LIST_NUMBERED: i64 = 2;
+pub(crate) const LIST_CHECK: i64 = 3;
+
+pub(crate) const LIST_KINDS: &[(i64, &str)] = &[
+    (LIST_NONE, "none"),
+    (LIST_BULLET, "bullet"),
+    (LIST_NUMBERED, "numbered"),
+    (LIST_CHECK, "check"),
+];
+
+pub(crate) const PARAGRAPH_ALIGN_START: i64 = 0;
+pub(crate) const PARAGRAPH_ALIGN_CENTER: i64 = 1;
+pub(crate) const PARAGRAPH_ALIGN_END: i64 = 2;
+pub(crate) const PARAGRAPH_ALIGN_JUSTIFY: i64 = 3;
+
+pub(crate) const PARAGRAPH_ALIGNS: &[(i64, &str)] = &[
+    (PARAGRAPH_ALIGN_START, "start"),
+    (PARAGRAPH_ALIGN_CENTER, "center"),
+    (PARAGRAPH_ALIGN_END, "end"),
+    (PARAGRAPH_ALIGN_JUSTIFY, "justify"),
 ];
 
 pub(crate) const BLOCK_BODY: i64 = 0;
@@ -1803,6 +1839,7 @@ pub(crate) const SOURCE_ELEMENT: u32 = 2;
 pub(crate) const COMMAND_CLEAR: u32 = 1;
 pub(crate) const COMMAND_FOCUS: u32 = 2;
 pub(crate) const COMMAND_EMOJI_PICKER: u32 = 3;
+pub(crate) const COMMAND_TEXT_COLOR: u32 = 4;
 
 fn pad8(n: usize) -> usize {
     (n + 7) & !7
@@ -1940,6 +1977,7 @@ fn command_kind(raw: u32) -> CommandKind {
         COMMAND_CLEAR => CommandKind::Clear,
         COMMAND_FOCUS => CommandKind::Focus,
         COMMAND_EMOJI_PICKER => CommandKind::EmojiPicker,
+        COMMAND_TEXT_COLOR => CommandKind::TextColor,
         other => panic!("kaya: unknown command {other}"),
     }
 }
@@ -1949,6 +1987,7 @@ fn command_raw(command: CommandKind) -> u32 {
         CommandKind::Clear => COMMAND_CLEAR,
         CommandKind::Focus => COMMAND_FOCUS,
         CommandKind::EmojiPicker => COMMAND_EMOJI_PICKER,
+        CommandKind::TextColor => COMMAND_TEXT_COLOR,
     }
 }
 
@@ -3338,6 +3377,17 @@ pub(crate) fn document_blob(text: &str, runs: &[TextRun]) -> Arc<[u8]> {
     write_values(&mut b, &values, &mut blobs);
     assert!(blobs.is_empty(), "kaya: a document blob nests no blob");
     Arc::from(b)
+}
+
+/// A flat list of values in the wire's encoding, nothing nested: the
+/// answer shape of the C calls that hand a binding more than one value
+/// (docs/rich-document-plan.md RD13's `.kdoc` pair).
+pub(crate) fn values_bytes(values: &[Value]) -> Vec<u8> {
+    let mut b = Vec::new();
+    let mut blobs = Vec::new();
+    write_values(&mut b, values, &mut blobs);
+    assert!(blobs.is_empty(), "kaya: a values answer nests no blob");
+    b
 }
 
 /// `document_blob`'s inverse; a list that is not one is refused naming

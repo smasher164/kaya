@@ -6266,6 +6266,191 @@ if rich_seen["rust"] < len(RICH_PARTS):
           f"crates/kaya/src/app.rs does")
     status = 1
 
+# THE RICH DOCUMENT (docs/rich-document-plan.md §11, RD13): two
+# vocabularies and the file result, six Document builders, seven acts on
+# the transaction, three selection reads and the file pair. The builders
+# and the acts share words (`indent`, `color`, `align`), so each row is
+# anchored on what the call is ASKED WITH: a range for a builder, the
+# widget for an act, nothing for a read (the named acts' lesson, §18).
+# Names a binding spells its own way:
+RICHDOC_NAMES = {
+    # Go's builder as the reference landed (bindings/go/app.go).
+    "start": {"go": "ListStart"},
+    # OCaml's conversions are `of_` (edit_source_of_wire, color_of_packed).
+    "from_kdoc": {"ocaml": "of_kdoc"},
+}
+RICHDOC_GO_KDOC = "bindings/go/kdoc.go"
+
+
+def richdoc_type_rows(snake, pascal, camel):
+    """The vocabularies and the file result. OCaml wraps each vocabulary
+    in a module (`Op`'s precedent: the layout `align` owns Start/Center/
+    End, and a bare `None` would shadow the option's), and its file
+    result is a type inside Document; Haskell's sit beside `Block`."""
+    F = RICH_FILES
+    return [
+        ("rust", F["rust"], rf"^pub (struct|enum) {pascal}\b"),
+        ("python", F["python"], rf"^class {pascal}\b"),
+        ("go", RICHDOC_GO_KDOC if pascal == "Kdoc" else F["go"],
+         rf"^type {pascal}\b"),
+        ("csharp", F["csharp"], rf"\b(record|enum) {pascal}\b"),
+        ("java", F["java"], rf"\b(record|enum) {pascal}[ (<{{]"),
+        ("swift", F["swift"], rf"\b(struct|enum) Kaya{pascal}\b"),
+        ("haskell", F["haskell"], rf"^data {pascal}\b"),
+        ("ocaml", F["ocaml"],
+         r"^  type kdoc = " if pascal == "Kdoc"
+         else rf"^module {snake.capitalize()} = struct"),
+        ("js", F["js"], rf"^export (const|type) {pascal}\b"),
+    ]
+
+
+def richdoc_builder_rows(snake, pascal, camel):
+    """A Document builder, anchored on its RANGE argument."""
+    F = RICH_FILES
+    nm = RICHDOC_NAMES.get(snake, {})
+    return [
+        ("rust", F["rust"],
+         rf"pub fn {snake}\(self, range: std::ops::Range<usize>"),
+        ("python", F["python"], rf"^    def {snake}\(self, span: Span"),
+        ("go", F["go"],
+         rf"^func \(d Document\) {nm.get('go', pascal)}\(start, end int"),
+        ("csharp", F["csharp"], rf"public Document {pascal}\(TextRange range"),
+        ("java", F["java"], rf"public Document {camel}\(TextRange range"),
+        ("swift", F["swift"], rf"func {camel}\(_ range: Range<Int>"),
+        ("haskell", F["haskell"], rf"^{camel}Run :: \(Int, Int\) ->"),
+        ("ocaml", F["ocaml"], rf"^  let {snake} range "),
+        ("js", F["js"], rf"^  {camel}\(span: readonly \[number, number\]"),
+    ]
+
+
+def richdoc_act_rows(snake, pascal, camel):
+    """An act over the selection, anchored on the WIDGET: a transaction
+    method in seven, a method on the handle in the two ambient bindings
+    (the JS row's argument list admits no span, which is what tells it
+    from the builder of the same name)."""
+    F = RICH_FILES
+    return [
+        ("rust", F["rust"], rf"pub fn {snake}\(&mut self, widget: WidgetId"),
+        ("python", F["python"],
+         rf"^    def {snake}\(self(, [a-z]+: [a-z]+)?\) -> Widget:"),
+        ("go", F["go"], rf"^func \(tx \*Tx\) {pascal}\(w Widget"),
+        ("csharp", F["csharp"], rf"public void {pascal}\(Widget w"),
+        ("java", F["java"], rf"public void {camel}\(Widget w"),
+        ("swift", F["swift"], rf"func {camel}\(_ w: KayaWidget"),
+        ("haskell", F["haskell"], rf"^{camel} :: Widget ->"),
+        ("ocaml", F["ocaml"], rf"^let {snake} (widget|\(Widget id\))"),
+        ("js", F["js"], rf"^  {camel}\(([a-z]+: [A-Za-z]+)?\): this"),
+    ]
+
+
+def richdoc_read_rows(snake, pascal, camel):
+    """A Selection read, asked with nothing; Haskell's carry the
+    `selection` prefix `selectionBlock` does, Swift's are properties as
+    `block` is."""
+    F = RICH_FILES
+    return [
+        ("rust", F["rust"], rf"pub fn {snake}\(&self\) -> (ListKind|ParagraphAlign|Option<&str>)"),
+        ("python", F["python"], rf"^    def {snake}\(self\) -> str"),
+        ("go", F["go"], rf"^func \(s Selection\) {pascal}\(\)"),
+        ("csharp", F["csharp"], rf"public [A-Za-z]+\?? {pascal}\(\)"),
+        ("java", F["java"], rf"public (ListKind|ParagraphAlign|Optional<String>) {camel}\(\)"),
+        ("swift", F["swift"], rf"public var {camel}: (KayaListKind|KayaParagraphAlign|String\?)"),
+        ("haskell", F["haskell"], rf"^selection{pascal} :: Selection ->"),
+        ("ocaml", F["ocaml"], rf"^  let {snake} s ="),
+        ("js", F["js"], rf"^  {camel}\(\): (ListKindName|ParagraphAlignName|string \| null)"),
+    ]
+
+
+def richdoc_file_rows(snake, pascal, camel):
+    """The .kdoc pair: a static read that refuses in the binding's error
+    idiom, and the document's own write."""
+    F = RICH_FILES
+    nm = RICHDOC_NAMES.get(snake, {})
+    read = snake == "from_kdoc"
+    return [
+        ("rust", F["rust"],
+         r"pub fn from_kdoc\(bytes: &\[u8\]\) -> Result<Kdoc" if read
+         else r"pub fn to_kdoc\(&self\) -> Vec<u8>"),
+        ("python", F["python"],
+         r"^    def from_kdoc\(data: bytes\) -> Kdoc" if read
+         else r"^    def to_kdoc\(self\) -> bytes"),
+        ("go", RICHDOC_GO_KDOC,
+         r"^func FromKdoc\(data \[\]byte\) \(Kdoc, error\)" if read
+         else r"^func \(d Document\) ToKdoc\(\) \[\]byte"),
+        ("csharp", F["csharp"],
+         r"public static Kdoc FromKdoc\(byte\[\] bytes\)" if read
+         else r"public byte\[\] ToKdoc\(\)"),
+        ("java", F["java"],
+         r"public static Kdoc fromKdoc\(byte\[\] bytes\)" if read
+         else r"public byte\[\] toKdoc\(\)"),
+        ("swift", F["swift"],
+         r"static func fromKdoc\(_ bytes: Data\) throws -> KayaKdoc" if read
+         else r"func toKdoc\(\) -> Data"),
+        ("haskell", F["haskell"],
+         r"^fromKdoc :: BS\.ByteString -> Either Text Kdoc" if read
+         else r"^toKdoc :: Document -> BS\.ByteString"),
+        ("ocaml", F["ocaml"], rf"^  let {nm.get('ocaml', snake)} (bytes|doc) ="),
+        ("js", F["js"],
+         r"^  static fromKdoc\(bytes: Uint8Array\): Kdoc" if read
+         else r"^  toKdoc\(\): Uint8Array"),
+    ]
+
+
+RICHDOC_PARTS = [
+    ("ListKind", richdoc_type_rows, ("list_kind", "ListKind", "listKind")),
+    ("ParagraphAlign", richdoc_type_rows,
+     ("paragraph_align", "ParagraphAlign", "paragraphAlign")),
+    ("Kdoc", richdoc_type_rows, ("kdoc", "Kdoc", "kdoc")),
+    ("Document.list", richdoc_builder_rows, ("list", "List", "list")),
+    ("Document.indent", richdoc_builder_rows, ("indent", "Indent", "indent")),
+    ("Document.checked", richdoc_builder_rows, ("checked", "Checked", "checked")),
+    ("Document.start", richdoc_builder_rows, ("start", "Start", "start")),
+    ("Document.align", richdoc_builder_rows, ("align", "Align", "align")),
+    ("Document.color", richdoc_builder_rows, ("color", "Color", "color")),
+    ("set_list", richdoc_act_rows, ("set_list", "SetList", "setList")),
+    ("indent", richdoc_act_rows, ("indent", "Indent", "indent")),
+    ("outdent", richdoc_act_rows, ("outdent", "Outdent", "outdent")),
+    ("set_paragraph_align", richdoc_act_rows,
+     ("set_paragraph_align", "SetParagraphAlign", "setParagraphAlign")),
+    ("check_items", richdoc_act_rows, ("check_items", "CheckItems", "checkItems")),
+    ("color", richdoc_act_rows, ("color", "Color", "color")),
+    ("pick_text_color", richdoc_act_rows,
+     ("pick_text_color", "PickTextColor", "pickTextColor")),
+    ("Selection.list", richdoc_read_rows, ("list", "List", "list")),
+    ("Selection.paragraph_align", richdoc_read_rows,
+     ("paragraph_align", "ParagraphAlign", "paragraphAlign")),
+    ("Selection.color", richdoc_read_rows, ("color", "Color", "color")),
+    ("from_kdoc", richdoc_file_rows, ("from_kdoc", "FromKdoc", "fromKdoc")),
+    ("to_kdoc", richdoc_file_rows, ("to_kdoc", "ToKdoc", "toKdoc")),
+]
+
+richdoc_seen = {lang: 0 for lang in RICH_FILES}
+for _what, _rows_of, _names in RICHDOC_PARTS:
+    _rows = _rows_of(*_names)
+    for _msg in rich_findings(_what, _rows):
+        print(_msg)
+        status = 1
+    for _lang, _rel, _pattern in _rows:
+        if grep_e(_pattern, read_rel(_rel)):
+            richdoc_seen[_lang] += 1
+print(f"check-sugar-surface: rich document census ({len(RICHDOC_PARTS)} parts): "
+      + ", ".join(f"{lang} {n}/{len(RICHDOC_PARTS)}" for lang, n in richdoc_seen.items()))
+if richdoc_seen["rust"] < len(RICHDOC_PARTS):
+    print(f"check-sugar-surface: the rich document patterns are calibrated against "
+          f"the reference binding and it satisfies only {richdoc_seen['rust']}/"
+          f"{len(RICHDOC_PARTS)} of them")
+    status = 1
+for _fake_what, _fake_rows_of, _fake_names in (
+        ("builder", richdoc_builder_rows, ("kaya_fake_build", "KayaFakeBuild", "kayaFakeBuild")),
+        ("act", richdoc_act_rows, ("kaya_fake_act", "KayaFakeAct", "kayaFakeAct")),
+        ("read", richdoc_read_rows, ("kaya_fake_read", "KayaFakeRead", "kayaFakeRead")),
+):
+    fake = rich_findings(_fake_what, _fake_rows_of(*_fake_names))
+    fired = sum(1 for m in fake if "has no sugar for the rich" in m)
+    if fired != 9:
+        selftest_exit(f"check-sugar-surface: self-test failed ({fired}/9 rich document "
+                      f"'{_fake_what}' patterns fired for a spelling that exists nowhere)")
+
 # THEIR BUILT-IN NEGATIVES, the table and size-policy discipline: a part
 # spelled NOWHERE must fail in all nine, or the patterns have rotted into
 # rules that can only pass.

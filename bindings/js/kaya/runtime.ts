@@ -67,6 +67,10 @@ type Floor = {
   // kaya_image_palette (docs/media-player-plan.md M15): (0xRRGGBB, share)
   // pairs flat, null for bytes that do not decode.
   imagePalette?(bytes: Uint8Array, n: number): Float64Array | null;
+  // kaya_kdoc_read and kaya_kdoc_write (docs/rich-document-plan.md RD13):
+  // the C pair's values list, as its bytes.
+  kdocRead?(bytes: Uint8Array): Uint8Array;
+  kdocWrite?(doc: Uint8Array): Uint8Array;
   catalog(app: string): void;
   tr(key: string, args: [string, number, number, number, string][]): string;
   openPicked(handle: number, mode: number): { raw: number; seekable: boolean };
@@ -344,7 +348,7 @@ export function canPlay(mime: string, codecs: string): boolean {
   return lib.canPlay(mime, codecs);
 }
 
-function addonEntry<K extends "readerPeaks" | "imagePixels" | "imageDominant" | "imagePalette">(name: K, c: string): NonNullable<Floor[K]> {
+function addonEntry<K extends "readerPeaks" | "imagePixels" | "imageDominant" | "imagePalette" | "kdocRead" | "kdocWrite">(name: K, c: string): NonNullable<Floor[K]> {
   const f = lib[name];
   if (typeof f !== "function") {
     throw new Error(`kaya: this libkaya's node addon has no ${name} — crates/kaya/src/node.rs exports ${c} under that name, so rebuild the library from this tree`);
@@ -379,6 +383,28 @@ export function imagePalette(bytes: Uint8Array, n: number): [number, number][] |
   const out: [number, number][] = [];
   for (let i = 0; i + 1 < flat.length; i += 2) out.push([flat[i]!, flat[i + 1]!]);
   return out;
+}
+
+function valuesOf(bytes: Uint8Array): wire.Decoded[] {
+  const count = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true);
+  const values: wire.Decoded[] = [];
+  let at = 8;
+  for (let i = 0; i < count; i++) {
+    const [value, next] = wire.parse_value(bytes, at);
+    values.push(value);
+    at = next;
+  }
+  return values;
+}
+
+/** kaya_kdoc_read's values list (docs/rich-document-plan.md RD13). */
+export function kdocRead(bytes: Uint8Array): wire.Decoded[] {
+  return valuesOf(addonEntry("kdocRead", "kaya_kdoc_read")(bytes));
+}
+
+/** kaya_kdoc_write's values list: refusal, then the file's text. */
+export function kdocWrite(doc: Uint8Array): wire.Decoded[] {
+  return valuesOf(addonEntry("kdocWrite", "kaya_kdoc_write")(doc));
 }
 
 export function catalog(app: string): void {

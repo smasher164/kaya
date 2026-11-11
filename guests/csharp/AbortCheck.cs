@@ -327,6 +327,111 @@ static class AbortCheck
         return string.Join("|", parts);
     }
 
+    // THE RICH DOCUMENT (docs/rich-document-plan.md §11, RD13): the .kdoc is
+    // the core's bytes, the ranged fold snaps every paragraph attribute and
+    // folds its absence as a removal, and the acts are Format under a name.
+    const string KdocFile =
+        "{\n  \"kaya\": \"document\",\n  \"version\": 1,\n  \"requires\": [],\n"
+        + "  \"paragraphs\": [\n"
+        + "    {\"block\": \"heading1\", \"spans\": [[\"Walks\"]]},\n"
+        + "    {\"list\": \"bullet\", \"spans\": [[\"map\"]]},\n"
+        + "    {\"list\": \"bullet\", \"indent\": 1, \"spans\": [[\"water\", {\"color\": \"#C4554D\"}]]}\n"
+        + "  ]\n}\n";
+
+    static bool SameRecord(byte[] a, byte[] b) => a.AsSpan().SequenceEqual(b);
+
+    static void RichDocument(KayaApp app)
+    {
+        var walks = new Document("Walks\nmap\nwater")
+            .Block(TextRange.Bytes(0, 5), BlockKind.Heading1)
+            .List(TextRange.Bytes(6, 15), ListKind.Bullet)
+            .Indent(TextRange.Bytes(10, 15), 1)
+            .Color(TextRange.Bytes(10, 15), "#c4554d");
+        string file = System.Text.Encoding.UTF8.GetString(walks.ToKdoc());
+        Check(file == KdocFile, "ToKdoc wrote\n" + file + "\nand Rust writes\n" + KdocFile);
+        Kdoc back = Document.FromKdoc(System.Text.Encoding.UTF8.GetBytes(file));
+        Check(back.ReadOnly == null, "a kaya-written .kdoc read back read-only: " + back.ReadOnly);
+        Check(System.Text.Encoding.UTF8.GetString(back.Document.ToKdoc()) == KdocFile,
+            "a .kdoc read back wrote different bytes");
+        string said = "";
+        try
+        {
+            Document.FromKdoc(System.Text.Encoding.UTF8.GetBytes(
+                "{\"kaya\": \"document\", \"version\": 2, \"paragraphs\": []}"));
+        }
+        catch (ArgumentException e) { said = e.Message; }
+        Check(said == "the document is version 2, newer than the version 1 this kaya reads",
+            "a version-2 .kdoc was refused with \"" + said + "\"");
+
+        Widget editor = default;
+        app.Build(tx => editor = tx.Textarea(rich: true));
+        var sent = new List<byte[]>();
+        app.Build(tx =>
+        {
+            tx.SetDocument(editor, new Document("Walks\nmap\nwater"));
+            tx.FormatRange(editor, TextRange.Bytes(7, 8), "list", ListKind.Bullet.Name());
+            tx.FormatRange(editor, TextRange.Bytes(0, 2), "color", "#abcdef");
+            sent.AddRange(tx.Records);
+        });
+        Check(sent.Exists(r => SameRecord(r, KayaWire.TxFormatText(editor.Id, 0, 1, 6, 9,
+                new object[] { "list", "bullet" })))
+            && sent.Exists(r => SameRecord(r, KayaWire.TxFormatText(editor.Id, 0, 1, 0, 2,
+                new object[] { "color", "#ABCDEF" }))),
+            "a ranged list act did not snap to its paragraph, or a ranged colour was not upper-cased");
+        Check(Spell(app.Document(editor).Runs) == "0:2 color=#ABCDEF|6:9 list=bullet",
+            "the fold after a ranged list act reads " + Spell(app.Document(editor).Runs));
+        sent.Clear();
+        app.Build(tx =>
+        {
+            tx.FormatRange(editor, TextRange.Bytes(7, 8), "list", ListKind.None.Name());
+            sent.AddRange(tx.Records);
+        });
+        Check(sent.Exists(r => SameRecord(r, KayaWire.TxFormatText(editor.Id, 1, 1, 6, 9,
+                new object[] { "list", "" })))
+            && Spell(app.Document(editor).Runs) == "0:2 color=#ABCDEF",
+            "a ranged list act with none did not fold as the removal: "
+                + Spell(app.Document(editor).Runs));
+
+        sent.Clear();
+        app.Build(tx =>
+        {
+            tx.SetList(editor, ListKind.Check);
+            tx.Indent(editor);
+            tx.Outdent(editor);
+            tx.SetParagraphAlign(editor, ParagraphAlign.Center);
+            tx.CheckItems(editor, true);
+            tx.CheckItems(editor, false);
+            tx.Color(editor, "#c4554d");
+            tx.PickTextColor(editor);
+            sent.AddRange(tx.Records);
+        });
+        var want = new List<byte[]>
+        {
+            KayaWire.TxFormatText(editor.Id, 0, 0, 0, 0, new object[] { "list", "check" }),
+            KayaWire.TxFormatText(editor.Id, 0, 0, 0, 0, new object[] { "indent", "+1" }),
+            KayaWire.TxFormatText(editor.Id, 0, 0, 0, 0, new object[] { "indent", "-1" }),
+            KayaWire.TxFormatText(editor.Id, 0, 0, 0, 0, new object[] { "align", "center" }),
+            KayaWire.TxFormatText(editor.Id, 0, 0, 0, 0, new object[] { "checked", "true" }),
+            KayaWire.TxFormatText(editor.Id, 1, 0, 0, 0, new object[] { "checked", "" }),
+            KayaWire.TxFormatText(editor.Id, 0, 0, 0, 0, new object[] { "color", "#C4554D" }),
+            KayaWire.TxWidgetCommand(editor.Id, KayaWire.CommandTextColor),
+        };
+        bool same = sent.Count == want.Count;
+        for (int i = 0; same && i < want.Count; i++) same = SameRecord(sent[i], want[i]);
+        Check(same,
+            "the rich document's acts wrote " + sent.Count + " records, not the eight Format and the picker command");
+
+        var sel = new Selection(TextRange.Bytes(0, 3), new List<TextRun>
+        {
+            new TextRun(TextRange.Bytes(0, 3), "list", "numbered"),
+            new TextRun(TextRange.Bytes(0, 3), "color", "#C4554D"),
+        });
+        Check(sel.List() == ListKind.Numbered && sel.ParagraphAlign() == ParagraphAlign.Start
+            && sel.Color() == "#C4554D"
+            && new Selection(TextRange.Bytes(0, 0), new List<TextRun>()).Color() == null,
+            "a selection misread its list kind, alignment or colour");
+    }
+
     static void RowDocument(KayaApp app)
     {
         var doc = new Document("Hé")
@@ -797,6 +902,8 @@ static class AbortCheck
         NestedRecordTable(app);
 
         RowDocument(app);
+
+        RichDocument(app);
 
         WrongThread(app);
 

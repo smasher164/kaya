@@ -95,65 +95,36 @@ Things to remember
 
 Miles walked so far:`
 
-// The Writing Mode showcase: Markdown kept as text and drawn styled.
-const essayDoc = `# Notes on walking
-
-A good walk has *no plan* beyond the first turning. You set off, and the **day decides** the rest.
-
-## What to carry
-
-- a map you can fold with one hand
-- water, and more than you think
-- something to read at the top
-
-## Why it works
-
-> The legs keep time, and the mind follows.
-
-Walking is the one *slow* thing most of us still do every day. It asks for **nothing** but attention, and it gives back a clear head.
-`
-
-var (
-	mdStrong = regexp.MustCompile(`\*\*[^*\n]+\*\*`)
-	mdEmph   = regexp.MustCompile(`(^|[^*])(\*[^*\n]+\*)`)
-	mdCode   = regexp.MustCompile("`[^`\n]+`")
-)
-
-// markdownRuns is the styling Writing Mode draws over Markdown text: one
-// block per heading or quote line, and the inline marks over their spans,
-// the marks themselves included, as iA Writer keeps them.
-func markdownRuns(text string) []kaya.TextRun {
-	var runs []kaya.TextRun
-	at := 0
-	for _, line := range strings.SplitAfter(text, "\n") {
-		body := strings.TrimSuffix(line, "\n")
-		end := at + len(body)
-		kind := kaya.Block("")
-		switch {
-		case strings.HasPrefix(body, "### "):
-			kind = kaya.Heading3
-		case strings.HasPrefix(body, "## "):
-			kind = kaya.Heading2
-		case strings.HasPrefix(body, "# "):
-			kind = kaya.Heading1
-		case strings.HasPrefix(body, "> "):
-			kind = kaya.Quote
-		}
-		if kind != "" && end > at {
-			runs = append(runs, kaya.TextRun{Range: kaya.TextRange{Start: at, End: end}, Name: "block", Value: string(kind)})
-		}
-		at += len(line)
+// The rich document showcase (docs/rich-document-plan.md §8): written as a
+// .kdoc, so it opens as a rich tab.
+func essayDoc() kaya.Document {
+	text := "Notes on walking\n" +
+		"A good walk has no plan beyond the first turning.\n" +
+		"What to carry\n" +
+		"a map you can fold with one hand\n" +
+		"water, and more than you think\n" +
+		"something to read at the top\n" +
+		"The legs keep time, and the mind follows."
+	at := func(s string) (int, int) {
+		i := strings.Index(text, s)
+		return i, i + len(s)
 	}
-	for _, m := range mdStrong.FindAllStringIndex(text, -1) {
-		runs = append(runs, kaya.TextRun{Range: kaya.TextRange{Start: m[0], End: m[1]}, Name: "bold", Value: kaya.FlagValue})
-	}
-	for _, m := range mdEmph.FindAllStringSubmatchIndex(text, -1) {
-		runs = append(runs, kaya.TextRun{Range: kaya.TextRange{Start: m[4], End: m[5]}, Name: "italic", Value: kaya.FlagValue})
-	}
-	for _, m := range mdCode.FindAllStringIndex(text, -1) {
-		runs = append(runs, kaya.TextRun{Range: kaya.TextRange{Start: m[0], End: m[1]}, Name: "code", Value: kaya.FlagValue})
-	}
-	return runs
+	h1a, h1b := at("Notes on walking")
+	noa, nob := at("no plan")
+	h2a, h2b := at("What to carry")
+	la, _ := at("a map")
+	_, lb := at("at the top")
+	wa, wb := at("water, and more than you think")
+	ma, mb := at("more")
+	qa, qb := at("The legs keep time, and the mind follows.")
+	return kaya.NewDocument(text).
+		Block(h1a, h1b, kaya.Heading1).
+		Italic(noa, nob).
+		Block(h2a, h2b, kaya.Heading2).
+		List(la, lb, kaya.ListBullet).
+		Indent(wa, wb, 1).
+		Color(ma, mb, "#016FEF").
+		Block(qa, qb, kaya.Quote)
 }
 
 // readDoc reads a picked file whole.
@@ -261,6 +232,13 @@ type document struct {
 	numbers     bool
 	sel         kaya.Selection
 	buffer      kaya.Widget
+	// A RICH TAB is a .kdoc: the reading look, the Format menu, the document
+	// saved whole; a plain tab is a text file (docs/rich-document-plan.md
+	// RD11). renamed: the file type changed, so the next Save asks for a name.
+	rich     bool
+	renamed  bool
+	readOnly string
+	app      *kaya.App
 	status      kaya.Signal[string]
 	where       kaya.Signal[string]
 	count       kaya.Signal[string]
@@ -270,7 +248,15 @@ type document struct {
 	findRows kaya.Collection
 }
 
-func (d *document) dirty() bool { return d.text != d.saved }
+// body is what Save writes: the text, or the whole document as a .kdoc.
+func (d *document) body() string {
+	if d.rich {
+		return string(d.app.Document(d.buffer).ToKdoc())
+	}
+	return d.text
+}
+
+func (d *document) dirty() bool { return d.body() != d.saved }
 
 // A tab Open… may take over rather than sit beside (VS Code's and TextEdit's
 // rule): untitled, never saved, never typed in.
@@ -288,7 +274,7 @@ func App() *kaya.App {
 	if err := os.WriteFile(filepath.Join(dir, "notes"), []byte(notesDoc), 0o644); err != nil {
 		panic("kaya: the editor could not write its notes document: " + err.Error())
 	}
-	if err := os.WriteFile(filepath.Join(dir, "essay"), []byte(essayDoc), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "essay"), essayDoc().ToKdoc(), 0o644); err != nil {
 		panic("kaya: the editor could not write its essay: " + err.Error())
 	}
 	if err := os.WriteFile(filepath.Join(dir, "decoy"), []byte("decoy"), 0o644); err != nil {
@@ -305,9 +291,14 @@ func App() *kaya.App {
 		// The face every document wears: the app's preference, else the
 		// bundled coding face (docs/looks-plan.md §3.7).
 		font kaya.FontChoice
-		// Writing Mode, the app's (docs/looks-plan.md §3.7).
+		// Writing Mode: the look a rich tab wears, and the preference that new
+		// documents are rich (docs/rich-document-plan.md RD11).
 		writing   bool
 		writingOn kaya.Signal[bool]
+		// The Format menu acts on a rich tab only; Make Rich Text on a plain one.
+		richOn  kaya.Signal[bool]
+		plainOn kaya.Signal[bool]
+		lists   = map[kaya.ListKind]kaya.Signal[bool]{}
 		// The Format menu's check marks: what holds over the active buffer's
 		// selection (docs/phone-format-plan.md §3).
 		inline = map[string]kaya.Signal[bool]{}
@@ -372,17 +363,22 @@ func App() *kaya.App {
 		for kind, on := range styles {
 			tx.Write(on, d.sel.Block() == kind)
 		}
+		for kind, on := range lists {
+			tx.Write(on, d.sel.List() == kind)
+		}
 		tx.Write(numbersOn, d.numbers)
+		tx.Write(richOn, d.rich)
+		tx.Write(plainOn, !d.rich)
 	}
 
 	// The editors' zoom steps, a multiple of the platform's size.
 	zooms := []float64{0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3}
 
-	// Writing Mode wears the platform's own text face a zoom step up, no
-	// gutter, at the reading measure; off, the coding face, the document's
-	// gutter and zoom (docs/looks-plan.md §3.7).
+	// A rich tab wears Writing Mode: the platform's own text face a zoom step
+	// up, no gutter, at the reading measure; a plain one the coding face, the
+	// document's gutter and zoom (docs/looks-plan.md §3.7, RD11).
 	wear := func(tx *kaya.Tx, d *document) {
-		if writing {
+		if d.rich {
 			tx.SetFamily(d.buffer, "")
 			tx.SetMonospaced(d.buffer, false)
 			tx.SetFontWeight(d.buffer, 400)
@@ -403,23 +399,6 @@ func App() *kaya.App {
 		tx.SetMaxWidth(d.buffer, 0)
 	}
 
-	restyle := func(tx *kaya.Tx, d *document) {
-		if d.text == "" {
-			return
-		}
-		all := kaya.TextRange{Start: 0, End: len(d.text)}
-		for _, name := range []string{"bold", "italic", "code"} {
-			tx.UnformatRange(d.buffer, all, name)
-		}
-		tx.FormatRange(d.buffer, all, "block", string(kaya.Body))
-		if !writing {
-			return
-		}
-		for _, run := range markdownRuns(d.text) {
-			tx.FormatRange(d.buffer, run.Range, run.Name, run.Value)
-		}
-	}
-
 	activate := func(tx *kaya.Tx, d *document) {
 		active = d
 		marks(tx, d)
@@ -432,6 +411,7 @@ func App() *kaya.App {
 	retarget := func(tx *kaya.Tx, d *document, file *kaya.PickedFile, body string) {
 		d.dest = file
 		d.saved = body
+		d.renamed = false
 		tx.Document(d.id).Title(docName(d.dest))
 	}
 
@@ -532,19 +512,35 @@ func App() *kaya.App {
 				if d == nil || !d.pristine() {
 					d = newDocument(tx)
 				}
-				d.text = body
-				retarget(tx, d, &file, body)
+				// A .kdoc opens rich, anything else plain, read by its content so
+				// a picker's display name decides nothing (RD11).
+				kdoc, kerr := kaya.FromKdoc([]byte(body))
+				d.rich = kerr == nil
+				d.readOnly = ""
 				// A PROGRAMMATIC WRITE does not echo, so the fold is by hand;
 				// it also spends the field's native undo history.
-				tx.SetText(d.buffer, body)
+				if d.rich {
+					d.text = kdoc.Document.Text
+					d.readOnly = kdoc.ReadOnly
+					tx.SetDocument(d.buffer, kdoc.Document)
+				} else {
+					d.text = body
+					tx.SetText(d.buffer, body)
+				}
+				retarget(tx, d, &file, body)
+				wear(tx, d)
 				tx.Write(d.where, position(d.text, d.sel.Range))
 				tx.Write(d.words, wordCount(d.text))
 				tx.Focus(d.buffer)
-				tx.Write(d.status, fmt.Sprintf("opened, %d bytes", len(body)))
+				if d.readOnly != "" {
+					tx.Write(d.status, "read only: "+d.readOnly)
+				} else {
+					tx.Write(d.status, fmt.Sprintf("opened, %d bytes", len(body)))
+				}
 				mark(tx, d)
 				refind(tx, d)
-				if writing {
-					restyle(tx, d)
+				if active == d {
+					marks(tx, d)
 				}
 			})
 		}()
@@ -561,7 +557,7 @@ func App() *kaya.App {
 	// a11y id carrying the document's number so two tabs never share one.
 	newDocument = func(tx *kaya.Tx) *document {
 		made++
-		d := &document{id: uint64(made), n: made, zoom: 4, numbers: true}
+		d := &document{id: uint64(made), n: made, zoom: 4, numbers: true, rich: writing, app: app}
 		docs = append(docs, d)
 		d.status = tx.Signal("new file")
 		d.where = tx.Signal(position("", kaya.TextRange{}))
@@ -583,11 +579,11 @@ func App() *kaya.App {
 				d.text = s
 				tx.Write(d.where, position(d.text, d.sel.Range))
 				tx.Write(d.words, wordCount(d.text))
-				mark(tx, d)
-				refind(tx, d)
-				if writing {
-					restyle(tx, d)
+				// A rich tab's mark waits for the edit, which moves its document.
+				if !d.rich {
+					mark(tx, d)
 				}
+				refind(tx, d)
 			}).Grow(1).A11yID(id("buffer")).A11yLabel("Document").Rich()
 
 			// STAMPED AND TORN DOWN, not hidden, so each Find… starts empty
@@ -646,6 +642,26 @@ func App() *kaya.App {
 			refind(tx, d)
 			tx.Focus(d.buffer)
 		})
+		// A PLAIN TAB KEEPS NO FORMATTING: a paste's runs come off as they land.
+		d.buffer.OnEdit(func(tx *kaya.Tx, e kaya.Edit) {
+			if d.rich {
+				mark(tx, d)
+				return
+			}
+			landed := kaya.TextRange{Start: e.Range.Start, End: e.Range.Start + len(e.Inserted)}
+			names := map[string]bool{}
+			for _, run := range e.Runs {
+				if !names[run.Name] {
+					names[run.Name] = true
+					tx.UnformatRange(d.buffer, landed, run.Name)
+				}
+			}
+		})
+		d.buffer.OnFormat(func(tx *kaya.Tx, _ kaya.Format) {
+			if d.rich {
+				mark(tx, d)
+			}
+		})
 		d.buffer.OnSelection(func(tx *kaya.Tx, sel kaya.Selection) {
 			d.sel = sel
 			tx.Write(d.where, position(d.text, sel.Range))
@@ -702,11 +718,16 @@ func App() *kaya.App {
 			}).Show()
 		}
 
-		// The panel OPENS with the name the window is already showing.
+		// The panel OPENS with the name the window is already showing; a rich
+		// document whose type just changed proposes its .kdoc name.
 		saveAs := func(tx *kaya.Tx) {
 			d := active
-			body := d.text
-			tx.SaveFile(docName(d.dest)).OnResult(func(tx *kaya.Tx, file *kaya.PickedFile) {
+			body := d.body()
+			name := docName(d.dest)
+			if d.rich && d.renamed {
+				name = strings.TrimSuffix(name, filepath.Ext(name)) + ".kdoc"
+			}
+			tx.SaveFile(name).OnResult(func(tx *kaya.Tx, file *kaya.PickedFile) {
 				if file == nil {
 					tx.Write(d.status, "save cancelled")
 					return
@@ -715,13 +736,18 @@ func App() *kaya.App {
 			}).Show()
 		}
 
-		// No dialog: the handle the user chose the file with is writable.
+		// No dialog: the handle the user chose the file with is writable,
+		// unless the document's type changed since (RD11).
 		save := func(tx *kaya.Tx) {
-			if active.dest == nil {
+			if active.readOnly != "" {
+				tx.Write(active.status, "read only: "+active.readOnly)
+				return
+			}
+			if active.dest == nil || active.renamed {
 				saveAs(tx)
 				return
 			}
-			saveTo(active, *active.dest, active.text)
+			saveTo(active, *active.dest, active.body())
 		}
 
 		file := win.Menu("File")
@@ -766,11 +792,13 @@ func App() *kaya.App {
 		// style toggles: its check is what holds over the selection, and the
 		// toggle's new state picks the act. A phone carries the menu on the bar
 		// above its keyboard (docs/phone-format-plan.md §2).
+		richOn = tx.Signal(writing)
+		plainOn = tx.Signal(!writing)
 		format := win.Menu("Format").KeyboardBar(true)
 		flag := func(label, name, chord string, symbol kaya.Symbol) {
 			on := tx.Signal(false)
 			inline[name] = on
-			item := format.Toggle(label).BindChecked(on).OnToggle(func(tx *kaya.Tx, want bool) {
+			item := format.Toggle(label).BindChecked(on).BindEnabled(richOn).OnToggle(func(tx *kaya.Tx, want bool) {
 				tx.Write(on, want)
 				if want {
 					tx.FormatFlag(active.buffer, name, true)
@@ -788,7 +816,7 @@ func App() *kaya.App {
 		flag("Strikethrough", "strike", "primary+shift+x", kaya.SymbolStrikethrough)
 		flag("Code", "code", "primary+e", 0)
 		format.Separator()
-		style := format.Menu("Paragraph Style")
+		style := format.Menu("Paragraph Style").BindEnabled(richOn)
 		paragraph := func(label string, kind kaya.Block, chord string) {
 			on := tx.Signal(kind == kaya.Body)
 			styles[kind] = on
@@ -810,6 +838,80 @@ func App() *kaya.App {
 		paragraph("Heading 2", kaya.Heading2, "primary+alt+2")
 		paragraph("Quote", kaya.Quote, "")
 		paragraph("Body", kaya.Body, "primary+alt+0")
+		// Google Docs' chords; a list toggles as a style does, and the core
+		// answers over the selection's paragraphs (docs/rich-document-plan.md §6).
+		list := format.Menu("List").BindEnabled(richOn)
+		item := func(label string, kind kaya.ListKind, chord string) {
+			on := tx.Signal(false)
+			lists[kind] = on
+			list.Toggle(label).BindChecked(on).OnToggle(func(tx *kaya.Tx, want bool) {
+				tx.Write(on, want)
+				if want {
+					tx.SetList(active.buffer, kind)
+				} else {
+					tx.SetList(active.buffer, kaya.ListNone)
+				}
+			}).Shortcut(chord)
+		}
+		item("Bulleted", kaya.ListBullet, "primary+shift+8")
+		item("Numbered", kaya.ListNumbered, "primary+shift+7")
+		item("Checklist", kaya.ListCheck, "primary+shift+9")
+		// Notes' and Pages' chords.
+		format.Item("Indent").BindEnabled(richOn).Shortcut("primary+rightbracket").
+			OnActivate(func(tx *kaya.Tx) { tx.Indent(active.buffer) })
+		format.Item("Outdent").BindEnabled(richOn).Shortcut("primary+leftbracket").
+			OnActivate(func(tx *kaya.Tx) { tx.Outdent(active.buffer) })
+		// The eight presets read on both pages (docs/rich-document-plan.md §11);
+		// Other… is the platform's own picker.
+		colour := format.Menu("Text Colour").BindEnabled(richOn)
+		colour.Item("Automatic").OnActivate(func(tx *kaya.Tx) { tx.Unformat(active.buffer, "color") })
+		for _, preset := range []struct{ label, rgb string }{
+			{"Red", "#DD1F24"}, {"Orange", "#BA5600"}, {"Brown", "#976814"}, {"Green", "#0D8501"},
+			{"Teal", "#097E7E"}, {"Blue", "#016FEF"}, {"Purple", "#8F4BE4"}, {"Pink", "#D12387"},
+		} {
+			rgb := preset.rgb
+			colour.Item(preset.label).OnActivate(func(tx *kaya.Tx) { tx.Color(active.buffer, rgb) })
+		}
+		colour.Separator()
+		colour.Item("Other…").OnActivate(func(tx *kaya.Tx) { tx.PickTextColor(active.buffer) })
+		format.Separator()
+		// TextEdit's two conversions; the plain one asks before it drops
+		// formatting (RD11).
+		format.Item("Make Rich Text").BindEnabled(plainOn).OnActivate(func(tx *kaya.Tx) {
+			d := active
+			d.rich = true
+			d.renamed = true
+			wear(tx, d)
+			marks(tx, d)
+			mark(tx, d)
+		})
+		plain := func(tx *kaya.Tx, d *document) {
+			tx.SetText(d.buffer, d.text)
+			d.rich = false
+			d.renamed = true
+			wear(tx, d)
+			marks(tx, d)
+			mark(tx, d)
+		}
+		format.Item("Make Plain Text").BindEnabled(richOn).OnActivate(func(tx *kaya.Tx) {
+			d := active
+			if len(app.Document(d.buffer).Runs) == 0 {
+				plain(tx, d)
+				return
+			}
+			tx.ShowAlert().
+				Title("Make Plain Text").
+				Message("Converting this document to plain text will lose its formatting.").
+				Action("Convert").
+				Cancel("Cancel").
+				OnResult(func(tx *kaya.Tx, choice kaya.AlertChoice) {
+					if choice == kaya.AlertChoiceCancel {
+						return
+					}
+					plain(tx, d)
+				}).
+				Show()
+		})
 
 		// The code editors' View menu (Sublime Text, VS Code, Zed): the
 		// gutter, the zoom chords, and the face, each the active document's.
@@ -820,15 +922,13 @@ func App() *kaya.App {
 			tx.Write(numbersOn, on)
 			wear(tx, active)
 		})
+		// The preference that new documents are rich and wear Writing Mode
+		// (RD11); a tab already open keeps its kind.
 		writingOn = tx.Signal(writing)
 		view.Toggle("Writing Mode").BindChecked(writingOn).OnToggle(func(tx *kaya.Tx, on bool) {
 			writing = on
 			kaya.Prefs().SetBool("view.writing", on)
 			tx.Write(writingOn, on)
-			for _, d := range docs {
-				restyle(tx, d)
-				wear(tx, d)
-			}
 		})
 		view.Separator()
 		view.Item("Zoom In").Shortcut("primary+equal").OnActivate(func(tx *kaya.Tx) { setZoom(tx, active.zoom+1) })

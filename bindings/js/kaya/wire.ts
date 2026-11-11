@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x585cc259da5c8c75n;
+export const SPEC_HASH = 0x5f131b7e55fe0f95n;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -329,6 +329,20 @@ export const RICH_ATTR_STRIKE = 4;
 export const RICH_ATTR_CODE = 5;
 export const RICH_ATTR_LINK = 6;
 export const RICH_ATTR_BLOCK = 7;
+export const RICH_ATTR_LIST = 8;
+export const RICH_ATTR_INDENT = 9;
+export const RICH_ATTR_CHECKED = 10;
+export const RICH_ATTR_START = 11;
+export const RICH_ATTR_ALIGN = 12;
+export const RICH_ATTR_COLOR = 13;
+export const LIST_KIND_NONE = 0;
+export const LIST_KIND_BULLET = 1;
+export const LIST_KIND_NUMBERED = 2;
+export const LIST_KIND_CHECK = 3;
+export const PARAGRAPH_ALIGN_START = 0;
+export const PARAGRAPH_ALIGN_CENTER = 1;
+export const PARAGRAPH_ALIGN_END = 2;
+export const PARAGRAPH_ALIGN_JUSTIFY = 3;
 export const BLOCK_KIND_BODY = 0;
 export const BLOCK_KIND_HEADING1 = 1;
 export const BLOCK_KIND_HEADING2 = 2;
@@ -444,6 +458,7 @@ export const PPROP_CAPTIONS_LANGUAGE = 7;
 export const COMMAND_CLEAR = 1;
 export const COMMAND_FOCUS = 2;
 export const COMMAND_EMOJI_PICKER = 3;
+export const COMMAND_TEXT_COLOR = 4;
 
 export const TX_CREATE_SIGNAL = 1;
 export const TX_WRITE_SIGNAL = 2;

@@ -67,6 +67,8 @@ SCENES = [
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
+                # The rich document (docs/rich-document-plan.md §9 step 2), the Mac at depth.
+                "richdoc",
                 "format", "flexshrink", "listrow", "stampbefore", "mountfocus", "tints", "icons", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
                 "capture",
@@ -167,7 +169,9 @@ DARK_LEGS = (("canvasdark-rust-swiftui", "canvas", "rust"),
              # image ground read as none in the dark).
              ("music_artistdark-python-swiftui", "music_artist", "python"),
              # The dock in the dark (docs/media-player-plan.md M16 (22)).
-             ("music_dockdark-python-swiftui", "music_dock", "python"))
+             ("music_dockdark-python-swiftui", "music_dock", "python"),
+             # A document colour drawn through the dark map (docs/rich-document-plan.md RD5).
+             ("richdocdark-rust-swiftui", "richdoc", "rust"))
 
 # EXCLUSIVE and the idle wait are below, after legs() — the set is derived
 # from the queue rather than spelled.
@@ -402,6 +406,7 @@ ORDER = [
     ("richlabel", ("rust", "python", "js", "go", "csharp", "java", "swift",
                    "ocaml", "haskell")),
     ("notes", ("rust",)),
+    ("richdoc", ("rust",)),
     # THE RICH ROWS (docs/rich-text-plan.md §19): a rich textarea per stamped
     # row, its document a field. This lane carries every binding's template
     # sugar; the other four stay rust-only while richtext does.

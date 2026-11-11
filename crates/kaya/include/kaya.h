@@ -10,6 +10,15 @@
 
 #define RowImages_DEFAULT_LIMIT 6
 
+/**
+ * The reference pages a document colour is judged against
+ * (docs/rich-document-plan.md §5, RD5): one pair for every platform, so five
+ * arms draw one colour for one run whatever their own page is.
+ */
+#define INK_LIGHT_PAGE 16777215
+
+#define INK_DARK_PAGE 1973790
+
 #define MAX_TIMECODE_FRAMES 9007199254740991
 
 /**
@@ -1205,6 +1214,8 @@
 
 #define KAYA_COMMAND_EMOJI_PICKER 3
 
+#define KAYA_COMMAND_TEXT_COLOR 4
+
 /**
  * Value types.
  */
@@ -2051,6 +2062,18 @@
 
 #define KAYA_RICH_ATTR_BLOCK 7
 
+#define KAYA_RICH_ATTR_LIST 8
+
+#define KAYA_RICH_ATTR_INDENT 9
+
+#define KAYA_RICH_ATTR_CHECKED 10
+
+#define KAYA_RICH_ATTR_START 11
+
+#define KAYA_RICH_ATTR_ALIGN 12
+
+#define KAYA_RICH_ATTR_COLOR 13
+
 /**
  * One kind per paragraph, the value of a `block` run.
  */
@@ -2065,6 +2088,28 @@
 #define KAYA_BLOCK_QUOTE 4
 
 #define KAYA_BLOCK_CODE_BLOCK 5
+
+/**
+ * A `list` run's value (docs/rich-document-plan.md RD2); `none` is no run.
+ */
+#define KAYA_LIST_NONE 0
+
+#define KAYA_LIST_BULLET 1
+
+#define KAYA_LIST_NUMBERED 2
+
+#define KAYA_LIST_CHECK 3
+
+/**
+ * An `align` run's value; `start` is no run.
+ */
+#define KAYA_PARAGRAPH_ALIGN_START 0
+
+#define KAYA_PARAGRAPH_ALIGN_CENTER 1
+
+#define KAYA_PARAGRAPH_ALIGN_END 2
+
+#define KAYA_PARAGRAPH_ALIGN_JUSTIFY 3
 
 /**
  * What provoked a text_edited, in its `source` slot.
@@ -2389,6 +2434,21 @@
  * The most entries kaya_image_palette writes.
  */
 #define KAYA_PALETTE_MAX 16
+
+/**
+ * The keys a rich textarea's arm offers the core before the platform acts
+ * on them (kaya_text_key; docs/rich-document-plan.md §6): Return, Backspace,
+ * Tab and Shift+Tab, and a click on a checklist item's box.
+ */
+#define KAYA_TEXT_KEY_RETURN 1
+
+#define KAYA_TEXT_KEY_BACKSPACE 2
+
+#define KAYA_TEXT_KEY_TAB 3
+
+#define KAYA_TEXT_KEY_SHIFT_TAB 4
+
+#define KAYA_TEXT_KEY_CHECK 5
 
 /**
  * `kaya_scroll_to_row_*`'s no-answer: the scene is not up, or the target
@@ -3091,6 +3151,21 @@ typedef struct KayaHostApi {
    * docs/font-picker-plan.md §4.2: the picker's one answer.
    */
   void (*emit_font_dialog_result)(uint64_t, const uint8_t*, uintptr_t, uint32_t, uint32_t, uint32_t);
+  /**
+   * docs/rich-document-plan.md §11: the rich document's presentation side.
+   */
+  uint8_t (*text_key)(uint64_t, uint32_t, uint64_t, uint64_t);
+  uintptr_t (*text_markers)(uint64_t, uint8_t*, uintptr_t);
+  uintptr_t (*text_copy)(uint64_t, uint64_t, uint64_t, uint8_t, uint8_t*, uintptr_t);
+  uintptr_t (*text_paste)(uint64_t,
+                          const uint8_t*,
+                          uintptr_t,
+                          const uint8_t*,
+                          uintptr_t,
+                          uint8_t*,
+                          uintptr_t);
+  uint32_t (*ink_for_dark)(uint32_t);
+  uint32_t (*ink_from_dark)(uint32_t);
 } KayaHostApi;
 
 
@@ -4745,6 +4820,97 @@ void kaya_text_formatted(const uint8_t *tag,
                          const uint8_t *value,
                          uintptr_t value_len,
                          uint8_t removed);
+
+/**
+ * Presentation side: a key on a `rich` textarea, over the selection
+ * `start..end` in UTF-8 bytes (the arm's own, read when the key arrives).
+ * Answers 1 when the core took it as a paragraph act, which the arm then
+ * swallows; the act arrives as ranged format applies and the app hears
+ * text_formatted. 0 leaves the key to the platform.
+ */
+uint8_t kaya_text_key(uint64_t widget, uint32_t key, uint64_t start, uint64_t end);
+
+/**
+ * Presentation side: the list markers a `rich` textarea draws, from the
+ * core's one numbering, as `start:level marker` joined by `|` (start in
+ * UTF-8 bytes; a checklist item's marker is `[ ]` or `[x]`, drawn as the
+ * platform's box). kaya_text_runs' contract.
+ *
+ * # Safety
+ * `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+ */
+uintptr_t kaya_text_markers(uint64_t widget, uint8_t *out, uintptr_t cap);
+
+/**
+ * Presentation side: the rich flavour a copy of `start..end` (UTF-8 bytes)
+ * puts on the clipboard beside the plain text: RTF, or HTML when `html` is
+ * 1. kaya_text_runs' contract; 0 for an empty range.
+ *
+ * # Safety
+ * `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+ */
+uintptr_t kaya_text_copy(uint64_t widget,
+                         uint64_t start,
+                         uint64_t end,
+                         uint8_t html,
+                         uint8_t *out,
+                         uintptr_t cap);
+
+/**
+ * Presentation side: a paste's rich flavours as the clipboard holds them
+ * (either may be NULL), read by the core's one normaliser and armed for the
+ * edit the arm reports next; answers the plain text the arm inserts, in
+ * UTF-8, or 0 when neither reads as text and the paste stays plain.
+ * kaya_text_runs' contract; asking again with a larger buffer re-arms the
+ * same paste.
+ *
+ * # Safety
+ * `rtf`/`html` must describe valid byte ranges or be NULL/0; `out` must
+ * point at `cap` writable bytes, or be NULL with `cap` 0.
+ */
+uintptr_t kaya_text_paste(uint64_t widget,
+                          const uint8_t *rtf,
+                          uintptr_t rtf_len,
+                          const uint8_t *html,
+                          uintptr_t html_len,
+                          uint8_t *out,
+                          uintptr_t cap);
+
+/**
+ * Either side: a document colour (packed 0xRRGGBB, as it reads on the light
+ * page) as the dark page draws it (docs/rich-document-plan.md RD5).
+ */
+uint32_t kaya_ink_for_dark(uint32_t rgb);
+
+/**
+ * Either side: the inverse, for a colour picked while the page is dark.
+ */
+uint32_t kaya_ink_from_dark(uint32_t rgb);
+
+/**
+ * Guest side: a `.kdoc` file's bytes read (docs/rich-document-plan.md §4,
+ * RD13). Answers a values list: Str refusal ("" when it read), Str
+ * read-only reason ("" when the document can be edited), then the document
+ * as a document field carries it (Str text, then I64 start, I64 end, Str
+ * name, Str value per run, UTF-8 bytes). kaya_text_runs' contract.
+ *
+ * # Safety
+ * `bytes` must describe a valid byte range or be NULL/0; `out` must point at
+ * `cap` writable bytes, or be NULL with `cap` 0.
+ */
+uintptr_t kaya_kdoc_read(const uint8_t *bytes, uintptr_t len, uint8_t *out, uintptr_t cap);
+
+/**
+ * Guest side: a document (a document field's encoding, as kaya_kdoc_read
+ * answers it after its two strings) written as a `.kdoc`. Answers a values
+ * list: Str refusal ("" when it wrote), Str the file's UTF-8 text.
+ * kaya_text_runs' contract.
+ *
+ * # Safety
+ * `doc` must describe a valid byte range; `out` must point at `cap`
+ * writable bytes, or be NULL with `cap` 0.
+ */
+uintptr_t kaya_kdoc_write(const uint8_t *doc, uintptr_t len, uint8_t *out, uintptr_t cap);
 
 /**
  * Presentation side: a menu action fired — a bar/overflow click, a

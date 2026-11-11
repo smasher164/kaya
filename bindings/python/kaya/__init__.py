@@ -1271,14 +1271,16 @@ class Widget(_Handle):
         A DOCUMENT WRITE like `apply_edit` rather than a toolbar act: the
         widget echoes nothing and `on_format` hears nothing, so the app's
         own Document takes it HERE, as it is sent. A rich LABEL takes it
-        too. A `block` act covers the range's whole paragraphs, and `block`
-        with `body` removes. Returns the widget."""
+        too. A paragraph attribute covers the range's whole paragraphs, and
+        its absence (`body`, `none`, `0`, `start`) removes
+        (docs/rich-document-plan.md §11). Returns the widget."""
         start, stop = _text_range("format_range", span)
         if isinstance(value, bool):
             value = _flag_wire(value)
         name, value = str(name), _text_value("format value", value)
         start, stop = _app._ranged_act_bounds(self.id, start, stop, name)
-        removed = name == "block" and value == "body"
+        value = _canonical_value(name, value)
+        removed = _ABSENT_VALUES.get(name) == value
         _app._absorb_format(self.id, start, stop, name,
                             None if removed else value)
         _records().append(wire.tx_format_text(
@@ -1301,6 +1303,47 @@ class Widget(_Handle):
         """Make the selection's whole paragraphs `kind` (kaya.Block;
         plain names accepted). `body` clears. Returns the widget."""
         return self.format("block", _block_value(kind))
+
+    def set_list(self, kind: str) -> Widget:
+        """Make the selection's paragraphs list items of `kind`
+        (kaya.ListKind; a heading or a code block becomes body); NONE ends
+        the list. The core answers through `on_format`
+        (docs/rich-document-plan.md §6, §11). Returns the widget."""
+        return self.format("list", _one_of("list kind", _LIST_NAMES, kind))
+
+    def indent(self) -> Widget:
+        """One level deeper for each of the selection's paragraphs, to 8.
+        Returns the widget."""
+        return self.format("indent", "+1")
+
+    def outdent(self) -> Widget:
+        """One level shallower for each of the selection's paragraphs.
+        Returns the widget."""
+        return self.format("indent", "-1")
+
+    def set_paragraph_align(self, align: str) -> Widget:
+        """Align the selection's paragraphs (kaya.ParagraphAlign). Returns
+        the widget."""
+        return self.format("align",
+                           _one_of("paragraph alignment", _ALIGN_NAMES, align))
+
+    def check_items(self, on: bool) -> Widget:
+        """Check or uncheck the selection's checklist items. Returns the
+        widget."""
+        return self.format("checked") if on else self.unformat("checked")
+
+    def color(self, rgb: str) -> Widget:
+        """The selection's text in `#RRGGBB` as it reads on a light page;
+        automatic ink is `unformat("color")` (RD4). Returns the widget."""
+        return self.format("color", str(rgb).upper())
+
+    def pick_text_color(self) -> Widget:
+        """Present the platform's own colour picker over the selection;
+        each colour the user commits arrives as a `color` act through
+        `on_format` (docs/rich-document-plan.md §5). Returns the widget."""
+        _records().append(wire.tx_widget_command(self.id,
+                                                 wire.COMMAND_TEXT_COLOR))
+        return self
 
     def can_undo(self, on: bool) -> Widget:
         """Whether this `own_undo` textarea's app has something to undo —
@@ -3375,6 +3418,53 @@ def _block_value(kind: object) -> str:
     return name
 
 
+class ListKind:
+    """A list item's kind, the `list` attribute's value
+    (docs/rich-document-plan.md RD2); NONE is its absence, as BODY is a
+    block's. Plain names accepted too."""
+
+    NONE = "none"
+    BULLET = "bullet"
+    NUMBERED = "numbered"
+    CHECK = "check"
+
+
+_LIST_NAMES = ("none", "bullet", "numbered", "check")
+
+
+class ParagraphAlign:
+    """A paragraph's alignment, the `align` attribute's value; START is its
+    absence. Plain names accepted too."""
+
+    START = "start"
+    CENTER = "center"
+    END = "end"
+    JUSTIFY = "justify"
+
+
+_ALIGN_NAMES = ("start", "center", "end", "justify")
+
+
+def _one_of(noun: str, names: tuple[str, ...], kind: object) -> str:
+    name = str(kind)
+    if name not in names:
+        raise KayaValueError(
+            f"kaya: {kind!r} is not a {noun} — one of {list(names)} "
+            "(docs/rich-document-plan.md RD1)")
+    return name
+
+
+_PARAGRAPH_ATTRS = ("block", "list", "indent", "checked", "start", "align")
+_ABSENT_VALUES = {"block": "body", "list": "none", "indent": "0",
+                  "align": "start"}
+
+
+def _canonical_value(name: str, value: str) -> str:
+    """The core's one spelling of a value the fold takes before the core
+    sees it (crates/kaya/src/richdoc.rs, canonical_value)."""
+    return value.upper() if name == "color" else value
+
+
 #: The wire's own spelling of a flag attribute; `_flag_wire` coerces a
 #: bool to it at the boundary and `Run.is_flag` reads it back.
 FLAG_VALUE = "true"
@@ -3476,6 +3566,47 @@ class Document:
         core refuses it, naming the byte."""
         return self.mark(span, "block", _block_value(kind))
 
+    def indent(self, span: Span, level: int) -> Document:
+        """An indent level, 1 to 8, over whole paragraphs (RD3)."""
+        return self.mark(span, "indent", str(int(level)))
+
+    def checked(self, span: Span) -> Document:
+        """A checklist item checked, over whole paragraphs."""
+        return self.mark(span, "checked", "true")
+
+    def start(self, span: Span, first: int) -> Document:
+        """A numbered list's first number, on its first item."""
+        return self.mark(span, "start", str(int(first)))
+
+    def align(self, span: Span, align: str) -> Document:
+        return self.mark(span, "align",
+                         _one_of("paragraph alignment", _ALIGN_NAMES, align))
+
+    def color(self, span: Span, rgb: str) -> Document:
+        """A text colour, `#RRGGBB` as it reads on a light page (RD4, RD5)."""
+        return self.mark(span, "color", str(rgb).upper())
+
+    @staticmethod
+    def from_kdoc(data: bytes) -> Kdoc:
+        """A `.kdoc` file's bytes read; KayaValueError carrying the core's
+        one sentence when they are not one, or name a newer major version
+        (docs/rich-document-plan.md §4)."""
+        values = runtime.kdoc_read(bytes(data))
+        if values[0]:
+            raise KayaValueError(values[0])
+        runs = [Run(*values[i:i + 4])
+                for i in builtins.range(3, len(values) - 3, 4)]
+        return Kdoc(Document(values[2], runs), values[1] or None)
+
+    def to_kdoc(self) -> bytes:
+        """The document as a `.kdoc` file, the same bytes in nine bindings
+        (RD13); KayaValueError naming the run when it breaks a wall
+        set_document holds."""
+        values = runtime.kdoc_write(_document_bytes(self))
+        if values[0]:
+            raise KayaValueError(f"kaya: to_kdoc: {values[0]}")
+        return str(values[1]).encode("utf-8")
+
     def attr_at(self, byte: int, name: str) -> str | None:
         """The value `name` carries at a byte offset, or None."""
         for run in self.runs:
@@ -3489,6 +3620,31 @@ class Document:
 
     def __repr__(self) -> str:
         return f"Document(text={self.text!r}, runs={self.runs!r})"
+
+    def list(self, span: Span, kind: str) -> Document:
+        """A list item over whole paragraphs (docs/rich-document-plan.md
+        RD2)."""
+        return self.mark(span, "list", _one_of("list kind", _LIST_NAMES, kind))
+
+
+class Kdoc:
+    """A `.kdoc` file read (docs/rich-document-plan.md §4): the document,
+    and `read_only` naming why it may only be read when it carries a name
+    this kaya cannot keep through an edit (RD8); None when editable."""
+
+    __slots__ = ("document", "read_only")
+
+    def __init__(self, document: Document, read_only: str | None) -> None:
+        self.document: Document = document
+        self.read_only: str | None = read_only
+
+    def __eq__(self, other: object) -> bool:
+        return (isinstance(other, Kdoc)
+                and (self.document, self.read_only)
+                == (other.document, other.read_only))
+
+    def __repr__(self) -> str:
+        return f"Kdoc(document={self.document!r}, read_only={self.read_only!r})"
 
 
 def _document_bytes(document: Document) -> bytes:
@@ -3670,6 +3826,20 @@ class Selection:
                 return a.value
         return Block.BODY
 
+    def paragraph_align(self) -> str:
+        """The alignment every touched paragraph shares; START otherwise."""
+        for a in self.attrs:
+            if a.name == "align" and a.value in _ALIGN_NAMES:
+                return a.value
+        return ParagraphAlign.START
+
+    def color(self) -> str | None:
+        """The colour holding over the whole selection, `#RRGGBB`."""
+        for a in self.attrs:
+            if a.name == "color":
+                return a.value
+        return None
+
     def __eq__(self, other: object) -> bool:
         return (isinstance(other, Selection)
                 and (self.range, self.attrs) == (other.range, other.attrs))
@@ -3677,6 +3847,13 @@ class Selection:
     def __repr__(self) -> str:
         return (f"Selection(start={self.range.start!r}, "
                 f"end={self.range.stop!r}, attrs={self.attrs!r})")
+
+    def list(self) -> str:
+        """The list kind every touched paragraph shares; NONE otherwise."""
+        for a in self.attrs:
+            if a.name == "list" and a.value in _LIST_NAMES:
+                return a.value
+        return ListKind.NONE
 
 
 def _selection_of(tail: Sequence[Any]) -> Selection:
@@ -9118,10 +9295,10 @@ class App:
 
     def _ranged_act_bounds(self, widget: int, start: int, stop: int,
                            name: str) -> tuple[int, int]:
-        """A ranged act's range in the fold's text: a `block` covers the
-        whole paragraphs it touches, as the core snaps it
-        (docs/rich-text-plan.md §17)."""
-        if name != "block":
+        """A ranged act's range in the fold's text: a paragraph attribute
+        covers the whole paragraphs it touches, as the core snaps it
+        (docs/rich-text-plan.md §17, docs/rich-document-plan.md §11)."""
+        if name not in _PARAGRAPH_ATTRS:
             return start, stop
         doc = self._documents.get(widget)
         data = b"" if doc is None else doc.text.encode("utf-8")

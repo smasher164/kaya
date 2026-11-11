@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x585cc259da5c8c75
+let kayaSpecHash: UInt64 = 0x5f131b7e55fe0f95
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -234,6 +234,7 @@ func kayaContextSpec(_ items: [String?]) -> String {
 private let commandClear: UInt32 = 1
 private let commandFocus: UInt32 = 2
 private let commandEmojiPicker: UInt32 = 3
+private let commandTextColor: UInt32 = 4
 private let kindColumn: UInt32 = 1
 private let kindButton: UInt32 = 2
 private let kindLabel: UInt32 = 3
@@ -443,6 +444,12 @@ private let richAttrStrike: Int64 = 4
 private let richAttrCode: Int64 = 5
 private let richAttrLink: Int64 = 6
 private let richAttrBlock: Int64 = 7
+private let richAttrList: Int64 = 8
+private let richAttrIndent: Int64 = 9
+private let richAttrChecked: Int64 = 10
+private let richAttrStart: Int64 = 11
+private let richAttrAlign: Int64 = 12
+private let richAttrColor: Int64 = 13
 private let blockBody: Int64 = 0
 private let blockHeading1: Int64 = 1
 private let blockHeading2: Int64 = 2
@@ -618,7 +625,25 @@ struct KayaRichRun: Equatable {
 
 /// The v1 vocabulary (docs/rich-text-plan.md R3); each name is its own key
 /// on the storage, so a read-back never guesses from a font.
-let kayaRichNames = ["bold", "italic", "underline", "strike", "code", "link", "block"]
+let kayaRichNames = [
+    "bold", "italic", "underline", "strike", "code", "link", "block",
+    "list", "indent", "checked", "start", "align", "color",
+]
+
+/// docs/rich-document-plan.md §11: the attributes that cover whole paragraphs.
+let kayaParagraphNames: Set<String> = ["block", "list", "indent", "checked", "start", "align"]
+
+/// A name this arm keeps on the storage: kaya's, or an app's dotted one (RD8).
+func kayaRichNameKept(_ name: String) -> Bool {
+    kayaRichNames.contains(name) || name.contains(".")
+}
+
+/// RD7's table (richdoc::expands_at_end).
+func kayaRichExpandsAtEnd(_ name: String) -> Bool {
+    ["bold", "italic", "underline", "strike", "color"].contains(name)
+}
+
+let kayaRichPrefix = "kaya.rich."
 
 func kayaRichKey(_ name: String) -> NSAttributedString.Key {
     NSAttributedString.Key("kaya.rich." + name)
@@ -647,30 +672,156 @@ let kayaQuoteRuleWidth: CGFloat = 3
 let kayaCodeGroundRadius: CGFloat = 3
 let kayaCodeGroundPad: CGFloat = 2
 
+/// docs/rich-document-plan.md §6: one list level's indent, and the gap between
+/// a marker and its item's text.
+let kayaListIndentStep: CGFloat = 24
+let kayaMarkerGap: CGFloat = 6
+
+/// A list item's marker, derived onto its paragraph's first character from the
+/// core's numbering (`kaya_text_markers`) and drawn by KayaRichFragment; the
+/// empty final paragraph's rides the newline before it. Value: `level marker`.
+let kayaMarkerKey = NSAttributedString.Key("kaya.draw.marker")
+let kayaFinalMarkerKey = NSAttributedString.Key("kaya.draw.finalmarker")
+
+/// What a fragment drew, for expect_markers and the checklist box's hit test:
+/// per layout manager, the paragraph's UTF-16 start, its marker, and the
+/// marker's rect in text-container coordinates.
+struct KayaDrawnMarker {
+    let level: Int
+    let text: String
+    let box: CGRect
+}
+let kayaDrawnMarkersLock = NSLock()
+nonisolated(unsafe) var kayaDrawnMarkers: [ObjectIdentifier: [Int: KayaDrawnMarker]] = [:]
+
+func kayaDrawnMarkersOf(_ manager: NSTextLayoutManager) -> [Int: KayaDrawnMarker] {
+    kayaDrawnMarkersLock.lock()
+    defer { kayaDrawnMarkersLock.unlock() }
+    return kayaDrawnMarkers[ObjectIdentifier(manager)] ?? [:]
+}
+
+func kayaForgetDrawnMarkers(_ manager: NSTextLayoutManager) {
+    kayaDrawnMarkersLock.lock()
+    kayaDrawnMarkers[ObjectIdentifier(manager)] = [:]
+    kayaDrawnMarkersLock.unlock()
+}
+
+/// `level marker` as the storage carries it.
+func kayaMarkerParts(_ value: Any?) -> (level: Int, text: String)? {
+    guard let value = value as? String, let space = value.firstIndex(of: " ") else { return nil }
+    guard let level = Int(value[..<space]) else { return nil }
+    return (level, String(value[value.index(after: space)...]))
+}
+
+/// The marker's rect beside a first line, relative to the fragment's origin:
+/// right-aligned in the hanging gutter, a checklist box centred on the line.
+func kayaMarkerRect(_ line: NSTextLineFragment, _ text: String, _ font: KayaPlatformFont) -> CGRect {
+    let bounds = line.typographicBounds
+    if text == "[ ]" || text == "[x]" {
+        let side = min(14, max(10, bounds.height - 2))
+        return CGRect(
+            x: bounds.minX - kayaMarkerGap - side, y: bounds.minY + (bounds.height - side) / 2,
+            width: side, height: side)
+    }
+    let size = (text as NSString).size(withAttributes: [.font: font])
+    let baseline = bounds.minY + line.glyphOrigin.y
+    return CGRect(
+        x: bounds.minX - kayaMarkerGap - ceil(size.width), y: baseline - font.ascender,
+        width: ceil(size.width), height: ceil(font.ascender - font.descender))
+}
+
+#if os(macOS)
+    /// A cell drawn into a flipped context takes its flip from its view.
+    final class KayaFlippedView: NSView {
+        override var isFlipped: Bool { true }
+    }
+#endif
+
+/// How far a wide marker (`viii.`) may reach past its gutter.
+let kayaMarkerOverhang: CGFloat = 40
+
+/// One marker painted: the text in the line's font, a checklist item as the
+/// platform's own checkbox.
+func kayaPaintMarker(_ text: String, _ rect: CGRect, _ font: KayaPlatformFont, in context: CGContext) {
+    let checkbox = text == "[ ]" || text == "[x]"
+    #if os(macOS)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: true)
+        if checkbox {
+            let cell = NSButtonCell()
+            cell.setButtonType(.switch)
+            cell.title = ""
+            cell.controlSize = rect.height < 13 ? .small : .regular
+            cell.state = text == "[x]" ? .on : .off
+            let host = KayaFlippedView(frame: rect)
+            host.appearance = NSAppearance.currentDrawing()
+            cell.draw(withFrame: rect, in: host)
+        } else {
+            (text as NSString).draw(
+                at: rect.origin, withAttributes: [.font: font, .foregroundColor: NSColor.textColor])
+        }
+        NSGraphicsContext.restoreGraphicsState()
+    #else
+        UIGraphicsPushContext(context)
+        if checkbox {
+            let name = text == "[x]" ? "checkmark.square.fill" : "square"
+            UIImage(systemName: name)?.withTintColor(text == "[x]" ? .tintColor : .secondaryLabel)
+                .draw(in: rect)
+        } else {
+            (text as NSString).draw(
+                at: rect.origin, withAttributes: [.font: font, .foregroundColor: UIColor.label])
+        }
+        UIGraphicsPopContext()
+    #endif
+}
+
 /// The layout manager's background pass, TextKit 2's own hook and both Apple
-/// arms': the ground behind a code run's glyphs and the rule at a quote
-/// paragraph's leading edge, painted UNDER the fragment's text.
+/// arms': the ground behind a code run's glyphs, the rule at a quote
+/// paragraph's leading edge and a list item's marker in its hanging gutter.
 final class KayaRichFragment: NSTextLayoutFragment {
-    /// THE GUTTER IS OUTSIDE THE FRAGMENT: a quote's own frame starts AT its
+    /// THE GUTTER IS OUTSIDE THE FRAGMENT: a paragraph's frame starts AT its
     /// head indent (measured 2026-09-15 — frame.x 25 = the container's 5pt
     /// padding plus the 20pt indent, the line's own minX 0), and this is the
-    /// surface the layer is sized from, so a rule drawn left of it is clipped.
+    /// surface the layer is sized from, so a rule or marker drawn left of it
+    /// is clipped.
     override var renderingSurfaceBounds: CGRect {
-        super.renderingSurfaceBounds.insetBy(dx: -kayaQuoteIndent, dy: 0)
+        super.renderingSurfaceBounds.insetBy(dx: -(max(kayaQuoteIndent, kayaLeadIndent()) + kayaMarkerOverhang), dy: 0)
+    }
+
+    private func kayaLeadIndent() -> CGFloat {
+        guard let paragraph = textElement as? NSTextParagraph,
+            paragraph.attributedString.length > 0,
+            let style = paragraph.attributedString.attribute(.paragraphStyle, at: 0, effectiveRange: nil)
+                as? NSParagraphStyle
+        else { return 0 }
+        return style.headIndent
     }
 
     override func draw(at point: CGPoint, in context: CGContext) {
+        let lead = kayaLeadIndent()
         for line in textLineFragments {
             let bounds = line.typographicBounds
             let attributed = line.attributedString
             let range = line.characterRange
+            if range.location == 0, attributed.length > 0,
+                let mark = kayaMarkerParts(attributed.attribute(kayaMarkerKey, at: 0, effectiveRange: nil))
+            {
+                kayaDrawMarker(mark, line, at: point, in: context, font: kayaLineFont(attributed, 0), offset: 0)
+            } else if range.length == 0, range.location >= attributed.length, attributed.length > 0,
+                let mark = kayaMarkerParts(
+                    attributed.attribute(kayaFinalMarkerKey, at: attributed.length - 1, effectiveRange: nil))
+            {
+                kayaDrawMarker(
+                    mark, line, at: point, in: context, font: kayaLineFont(attributed, attributed.length - 1),
+                    offset: attributed.length)
+            }
             guard range.length > 0, NSMaxRange(range) <= attributed.length else { continue }
             attributed.enumerateAttribute(kayaRuleKey, in: range, options: []) { value, _, stop in
                 guard let colour = value as? KayaPlatformColor else { return }
                 context.setFillColor(colour.cgColor)
                 context.fill(
                     CGRect(
-                        x: point.x - kayaQuoteIndent + kayaQuoteRuleInset,
+                        x: point.x - lead + kayaQuoteRuleInset,
                         y: point.y + bounds.minY, width: kayaQuoteRuleWidth,
                         height: bounds.height))
                 stop.pointee = true
@@ -693,6 +844,27 @@ final class KayaRichFragment: NSTextLayoutFragment {
             }
         }
         super.draw(at: point, in: context)
+    }
+
+    private func kayaLineFont(_ attributed: NSAttributedString, _ at: Int) -> KayaPlatformFont {
+        (attributed.attribute(.font, at: at, effectiveRange: nil) as? KayaPlatformFont)
+            ?? KayaPlatformFont.systemFont(ofSize: 13)
+    }
+
+    private func kayaDrawMarker(
+        _ mark: (level: Int, text: String), _ line: NSTextLineFragment, at point: CGPoint,
+        in context: CGContext, font: KayaPlatformFont, offset: Int
+    ) {
+        let local = kayaMarkerRect(line, mark.text, font)
+        let rect = local.offsetBy(dx: point.x, dy: point.y)
+        kayaPaintMarker(mark.text, rect, font, in: context)
+        guard let manager = textLayoutManager, let content = manager.textContentManager else { return }
+        let start = content.offset(from: content.documentRange.location, to: rangeInElement.location) + offset
+        let origin = layoutFragmentFrame.origin
+        kayaDrawnMarkersLock.lock()
+        kayaDrawnMarkers[ObjectIdentifier(manager), default: [:]][start] = KayaDrawnMarker(
+            level: mark.level, text: mark.text, box: local.offsetBy(dx: origin.x, dy: origin.y))
+        kayaDrawnMarkersLock.unlock()
     }
 }
 
@@ -719,6 +891,99 @@ let kayaRichLayoutDelegate = KayaRichLayoutDelegate()
         guard let colour = value as? KayaPlatformColor else { return }
         doc.addAttribute(.backgroundColor, value: colour, range: sub)
     }
+}
+
+/// `#RRGGBB` as 0xRRGGBB, or nil.
+func kayaHexRGB(_ value: String) -> UInt32? {
+    guard value.count == 7, value.hasPrefix("#") else { return nil }
+    return UInt32(value.dropFirst(), radix: 16)
+}
+
+func kayaColorFromRGB(_ rgb: UInt32) -> KayaPlatformColor {
+    let r = CGFloat((rgb >> 16) & 0xFF) / 255, g = CGFloat((rgb >> 8) & 0xFF) / 255, b = CGFloat(rgb & 0xFF) / 255
+    #if os(macOS)
+        return NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
+    #else
+        return UIColor(red: r, green: g, blue: b, alpha: 1)
+    #endif
+}
+
+/// The colour as 0xRRGGBB in sRGB, or nil when it has no sRGB form.
+func kayaRGBOf(_ colour: KayaPlatformColor) -> UInt32? {
+    #if os(macOS)
+        guard let c = colour.usingColorSpace(.sRGB) else { return nil }
+        let (r, g, b) = (c.redComponent, c.greenComponent, c.blueComponent)
+    #else
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        guard colour.getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
+    #endif
+    func byte(_ v: CGFloat) -> UInt32 { UInt32(max(0, min(255, (v * 255).rounded()))) }
+    return (byte(r) << 16) | (byte(g) << 8) | byte(b)
+}
+
+/// docs/rich-document-plan.md RD5: a document colour drawn through the core's
+/// map, the stored colour on a light page and `kaya_ink_for_dark` of it on a
+/// dark one, so an appearance change redraws by itself.
+nonisolated(unsafe) var kayaDocumentInks: [UInt32: KayaPlatformColor] = [:]
+func kayaDocumentInk(_ value: String) -> KayaPlatformColor? {
+    guard let light = kayaHexRGB(value) else { return nil }
+    if let made = kayaDocumentInks[light] { return made }
+    let dark = KayaHost.inkForDark(light)
+    let lightInk = kayaColorFromRGB(light), darkInk = kayaColorFromRGB(dark)
+    #if os(macOS)
+        let made = NSColor(name: nil) { appearance in
+            kayaAppearanceIsDark(appearance) ? darkInk : lightInk
+        }
+    #else
+        let made = UIColor { traits in traits.userInterfaceStyle == .dark ? darkInk : lightInk }
+    #endif
+    kayaDocumentInks[light] = made
+    return made
+}
+
+#if os(macOS)
+    func kayaAppearanceIsDark(_ appearance: NSAppearance) -> Bool {
+        let best = appearance.bestMatch(from: [
+            .aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua,
+        ])
+        return best == .darkAqua || best == .accessibilityHighContrastDarkAqua
+    }
+#endif
+
+/// The first strong character's direction, Unicode's rule for a paragraph
+/// whose base direction is natural; `end` aligns to its trailing edge.
+func kayaParagraphIsRTL(_ text: Substring) -> Bool {
+    for scalar in text.unicodeScalars where scalar.properties.isAlphabetic {
+        switch scalar.value {
+        case 0x0590...0x08FF, 0xFB1D...0xFDFF, 0xFE70...0xFEFF, 0x10800...0x10FFF, 0x1E800...0x1EFFF:
+            return true
+        default:
+            return false
+        }
+    }
+    return false
+}
+
+/// A paragraph's style from its kaya attributes (docs/rich-document-plan.md
+/// §6): a list item's text one step in from its level, the marker in the
+/// hanging gutter; a plain paragraph's level; a quote's indent; alignment.
+func kayaRichParagraphStyle(
+    _ attrs: [NSAttributedString.Key: Any], paragraph: () -> Substring
+) -> NSMutableParagraphStyle {
+    let style = NSMutableParagraphStyle()
+    let level = CGFloat(Int(attrs[kayaRichKey("indent")] as? String ?? "") ?? 0)
+    let item = attrs[kayaRichKey("list")] != nil
+    var lead = level * kayaListIndentStep + (item ? kayaListIndentStep : 0)
+    if (attrs[kayaRichKey("block")] as? String) == "quote" { lead += kayaQuoteIndent }
+    style.headIndent = lead
+    style.firstLineHeadIndent = lead
+    switch attrs[kayaRichKey("align")] as? String {
+    case "center": style.alignment = .center
+    case "justify": style.alignment = .justified
+    case "end": style.alignment = kayaParagraphIsRTL(paragraph()) ? .left : .right
+    default: style.alignment = .natural
+    }
+    return style
 }
 
 private func kayaReadI64Value(_ raw: UnsafeRawBufferPointer, _ at: inout Int) -> Int {
@@ -769,17 +1034,33 @@ func kayaRunSpelling(_ text: String, _ runs: [KayaRichRun]) -> String {
         .joined(separator: "|")
 }
 
-/// The runs the storage holds, by start then name, UTF-16 units.
+/// The runs the storage holds, by start then name, UTF-16 units: every
+/// `kaya.rich.<name>` key, an app's dotted names included (RD8).
 func kayaReadRichRuns(_ storage: NSAttributedString) -> [KayaRichRun] {
     let full = NSRange(location: 0, length: storage.length)
     guard full.length > 0 else { return [] }
+    var open: [String: KayaRichRun] = [:]
     var runs: [KayaRichRun] = []
-    for name in kayaRichNames {
-        storage.enumerateAttribute(kayaRichKey(name), in: full, options: []) { value, range, _ in
-            guard let value = value as? String else { return }
-            runs.append(KayaRichRun(range: range, name: name, value: value))
+    storage.enumerateAttributes(in: full, options: []) { attrs, sub, _ in
+        var here: [String: String] = [:]
+        for (key, value) in attrs where key.rawValue.hasPrefix(kayaRichPrefix) {
+            guard let value = value as? String else { continue }
+            here[String(key.rawValue.dropFirst(kayaRichPrefix.count))] = value
+        }
+        for (name, run) in open where here[name] != run.value {
+            runs.append(run)
+            open.removeValue(forKey: name)
+        }
+        for (name, value) in here {
+            if var run = open[name] {
+                run.range.length = NSMaxRange(sub) - run.range.location
+                open[name] = run
+            } else {
+                open[name] = KayaRichRun(range: sub, name: name, value: value)
+            }
         }
     }
+    runs.append(contentsOf: open.values)
     return runs.sorted { ($0.range.location, $0.name) < ($1.range.location, $1.name) }
 }
 
@@ -6259,6 +6540,52 @@ enum KayaHost {
         return String(decoding: buffer[0..<Int(wrote)], as: UTF8.self)
     }
 
+    /// docs/rich-document-plan.md §11: true when the core took the key.
+    static func textKey(_ widget: UInt64, _ key: UInt32, _ start: Int, _ end: Int) -> Bool {
+        guard api != nil, start >= 0, end >= 0 else { return false }
+        return api.text_key(widget, key, UInt64(start), UInt64(end)) != 0
+    }
+
+    /// kaya_text_runs' contract, grown until the answer fits.
+    private static func readSized(_ read: (UnsafeMutablePointer<UInt8>?, UInt) -> UInt) -> [UInt8] {
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let wrote = Int(buffer.withUnsafeMutableBufferPointer { read($0.baseAddress, UInt($0.count)) })
+            if wrote <= buffer.count { return Array(buffer[0..<wrote]) }
+            buffer = [UInt8](repeating: 0, count: wrote)
+        }
+    }
+
+    static func textMarkers(_ widget: UInt64) -> String {
+        guard api != nil else { return "" }
+        return String(decoding: readSized { api.text_markers(widget, $0, $1) }, as: UTF8.self)
+    }
+
+    static func textCopy(_ widget: UInt64, _ start: Int, _ end: Int, html: Bool) -> Data {
+        guard api != nil, start >= 0, end > start else { return Data() }
+        return Data(readSized { api.text_copy(widget, UInt64(start), UInt64(end), html ? 1 : 0, $0, $1) })
+    }
+
+    /// The plain text a rich paste inserts, or nil when it stays plain.
+    static func textPaste(_ widget: UInt64, rtf: Data?, html: Data?) -> String? {
+        guard api != nil else { return nil }
+        let r = [UInt8](rtf ?? Data())
+        let h = [UInt8](html ?? Data())
+        let bytes = r.withUnsafeBufferPointer { rp in
+            h.withUnsafeBufferPointer { hp in
+                readSized {
+                    api.text_paste(
+                        widget, rp.count > 0 ? rp.baseAddress : nil, UInt(rp.count),
+                        hp.count > 0 ? hp.baseAddress : nil, UInt(hp.count), $0, $1)
+                }
+            }
+        }
+        return bytes.isEmpty ? nil : String(decoding: bytes, as: UTF8.self)
+    }
+
+    static func inkForDark(_ rgb: UInt32) -> UInt32 { api.ink_for_dark(rgb) }
+    static func inkFromDark(_ rgb: UInt32) -> UInt32 { api.ink_from_dark(rgb) }
+
     /// An entry edit, with the three facts the core's undo ledger cannot derive
     /// (docs/undo-plan.md §3): the window, focus, and whether the edit is
     /// LEDGER-QUIET — a native undo this backend ROUTED must not be banked
@@ -7630,6 +7957,12 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                         NSApp.activate(ignoringOtherApps: true)
                         NSApp.orderFrontCharacterPalette(nil)
                     }
+                    #endif
+                case commandTextColor:
+                    #if os(macOS)
+                        MainActor.assumeIsolated { kayaPresentTextColor(kayaScene.nodes[id]!) }
+                    #else
+                        kayaDiag("text_color: the iOS arm presents no colour picker yet (docs/rich-document-plan.md §9 step 4)")
                     #endif
                 default:
                     fatalError("kaya: unknown command \(command)")
@@ -9895,6 +10228,12 @@ private func kayaSecureFocused() -> Bool {
         return (true, "")
     }
 #endif
+
+/// An `html` clipboard string spells a double quote `\q`, since a `.steps`
+/// string cannot carry one (harness.rs's `clip_argument`).
+private func kayaClipArgument(_ kind: String, _ text: String) -> String {
+    kind == "html" ? text.replacingOccurrences(of: "\\q", with: "\"") : text
+}
 
 private func kayaQuoted(_ rest: [Substring]) -> String {
     let joined = rest.joined(separator: " ")
@@ -12855,8 +13194,8 @@ private func kayaRunScript(_ script: String) {
                 // The Return key as its own verb (docs/rich-text-plan.md R10),
                 // through the same key path `type` takes; Tab and Space move
                 // no caret (docs/reveal-plan.md V10).
-                guard parts.count == 2, ["return", "tab", "space", "up", "down"].contains(parts[1]) else {
-                    failures.append("press wants one of the named keys (return, tab, space, up, down): \(line)")
+                guard parts.count == 2, ["return", "tab", "space", "up", "down", "shift+tab", "backspace"].contains(parts[1]) else {
+                    failures.append("press wants one of the named keys (return, tab, space, up, down, shift+tab, backspace): \(line)")
                     break
                 }
                 kayaAwaitQuiet()
@@ -14228,14 +14567,14 @@ private func kayaRunScript(_ script: String) {
                     kayaAwaitQuiet()
                     kayaClipboardSeed(
                         kind: String(parts[1]),
-                        argument: kayaQuoted(Array(parts[2...])))
+                        argument: kayaClipArgument(String(parts[1]), kayaQuoted(Array(parts[2...]))))
                 } else {
                     failures.append("clipboard_seed wants a kind and its content")
                 }
             case "expect_clipboard":
                 if parts.count > 2 {
                     let kind = String(parts[1])
-                    let want = kayaQuoted(Array(parts[2...]))
+                    let want = kayaClipArgument(kind, kayaQuoted(Array(parts[2...])))
                     // POLLED: the copy went out on the apply pump, so
                     // the clipboard changes a moment after the click.
                     var got = ""
@@ -17008,6 +17347,185 @@ private func kayaRunScript(_ script: String) {
                     observed.append("\(parts[2]) \(wantState)")
                 } else {
                     failures.append("\(parts[2]) is \(gotState), wanted \(wantState)")
+                }
+            case "select_text":
+                // `select_text <target> <start:end>`, bytes: the widget takes
+                // the keyboard and the selection as a user's click and drag
+                // would leave them; the selection report reaches the core.
+                kayaAwaitQuiet()
+                kayaAwaitTextView(parts[1])
+                let selAnswered = kayaAnswers()
+                let selected = DispatchQueue.main.sync { () -> String? in
+                    guard parts.count == 3, let node = kayaTextTarget(parts[1]) else {
+                        return "wants a textarea target and a start:end byte range"
+                    }
+                    #if os(macOS)
+                        guard let view = kayaMacTextViews[node.id]?.view else { return "no text view for \(parts[1])" }
+                        let bounds = parts[2].split(separator: ":")
+                        guard bounds.count == 2, let a = Int(bounds[0]), let b = Int(bounds[1]) else {
+                            return "\(parts[2]) is not a start:end range"
+                        }
+                        let text = view.string
+                        let start = kayaUtf16Offset(text, a), end = kayaUtf16Offset(text, b)
+                        guard start >= 0, end >= start else {
+                            return "\(parts[2]) is not on a character boundary of the \(text.utf8.count)-byte text"
+                        }
+                        guard view.window?.makeFirstResponder(view) == true else {
+                            return "\(parts[1]) could not take first responder"
+                        }
+                        view.setSelectedRange(NSRange(location: start, length: end - start))
+                        return nil
+                    #else
+                        _ = node
+                        kayaDepthStub("richdoc", on: "ios")
+                    #endif
+                }
+                if let trouble = selected { failures.append("select_text: \(trouble)") } else { kayaAwaitAnswer(selAnswered) }
+            case "expect_markers":
+                // THE MARKERS THE ARM DREW (docs/rich-document-plan.md §11),
+                // read off the fragments' record, never the core's numbering;
+                // a record that disagrees with the core's fails naming both.
+                let wantMarkers = kayaQuoted(Array(parts[2...]))
+                var markerRead: (drawn: String, core: String, why: String?) = ("", "", nil)
+                let markerDeadline = Date().addingTimeInterval(5)
+                repeat {
+                    markerRead = DispatchQueue.main.sync { () -> (String, String, String?) in
+                        guard let node = kayaTextTarget(parts[1]) else { return ("", "", "no such target \(parts[1])") }
+                        #if os(macOS)
+                            guard let view = kayaMacTextViews[node.id]?.view, let manager = view.textLayoutManager else {
+                                return ("", "", "no text view for \(parts[1])")
+                            }
+                            view.displayIfNeeded()
+                            let text = view.string
+                            let drawn = kayaDrawnMarkersOf(manager).sorted { $0.key < $1.key }
+                                .map { "\(kayaByteOffset(text, $0.key)):\($0.value.level) \($0.value.text)" }
+                                .joined(separator: "|")
+                            return (drawn, KayaHost.textMarkers(node.id), nil)
+                        #else
+                            _ = node
+                            kayaDepthStub("richdoc", on: "ios")
+                        #endif
+                    }
+                    if markerRead.why != nil || (markerRead.drawn == wantMarkers && markerRead.core == wantMarkers) { break }
+                    usleep(20_000)
+                } while Date() < markerDeadline
+                if let why = markerRead.why {
+                    failures.append("markers: \(why)")
+                } else if markerRead.drawn != markerRead.core {
+                    failures.append(
+                        "markers drawn \"\(markerRead.drawn)\" — but the core numbers \"\(markerRead.core)\", wanted \"\(wantMarkers)\"")
+                } else if markerRead.drawn != wantMarkers {
+                    failures.append("markers \"\(markerRead.drawn)\", wanted \"\(wantMarkers)\"")
+                } else {
+                    observed.append("markers \"\(wantMarkers)\"")
+                }
+            case "click_marker":
+                // `click_marker <target> <start>`: a real click through the
+                // view's own mouseDown on the drawn marker of the paragraph
+                // starting at that byte.
+                kayaAwaitQuiet()
+                kayaAwaitTextView(parts[1])
+                let clickAnswered = kayaAnswers()
+                let clicked = DispatchQueue.main.sync { () -> String? in
+                    guard parts.count == 3, let node = kayaTextTarget(parts[1]), let byte = Int(parts[2]) else {
+                        return "wants a textarea target and a paragraph's start byte"
+                    }
+                    #if os(macOS)
+                        guard let view = kayaMacTextViews[node.id]?.view as? NSTextView,
+                            let manager = view.textLayoutManager, let window = view.window
+                        else { return "no text view for \(parts[1])" }
+                        view.displayIfNeeded()
+                        let start = kayaUtf16Offset(view.string, byte)
+                        let drawn = kayaDrawnMarkersOf(manager)
+                        guard let mark = drawn[start] else {
+                            let seen = drawn.keys.sorted().map { String(kayaByteOffset(view.string, $0)) }
+                            return "no marker is drawn at byte \(byte) (drawn at \(seen.isEmpty ? "none" : seen.joined(separator: ", ")))"
+                        }
+                        let inView = CGPoint(
+                            x: mark.box.midX + view.textContainerOrigin.x, y: mark.box.midY + view.textContainerOrigin.y)
+                        let at = view.convert(inView, to: nil)
+                        func mouse(_ type: NSEvent.EventType) -> NSEvent? {
+                            NSEvent.mouseEvent(
+                                with: type, location: at, modifierFlags: [],
+                                timestamp: ProcessInfo.processInfo.systemUptime,
+                                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                                pressure: 1)
+                        }
+                        guard let down = mouse(.leftMouseDown), let up = mouse(.leftMouseUp) else {
+                            return "the mouse events could not be made"
+                        }
+                        // The up is queued first, so a click the view does not
+                        // swallow ends AppKit's own tracking loop.
+                        NSApp.postEvent(up, atStart: false)
+                        view.mouseDown(with: down)
+                        _ = NSApp.nextEvent(matching: .leftMouseUp, until: Date(), inMode: .default, dequeue: true)
+                        return nil
+                    #else
+                        _ = node
+                        kayaDepthStub("richdoc", on: "ios")
+                    #endif
+                }
+                if let trouble = clicked { failures.append("click_marker: \(trouble)") } else { kayaAwaitAnswer(clickAnswered) }
+            case "pick_text_color":
+                // `pick_text_color <target> "<RRGGBB | light RRGGBB dark RRGGBB>"`:
+                // the presented colour panel's colour set and its action sent,
+                // as a user's pick does, to the responder chain of the view's
+                // window (the panel's own target is the key window's, which an
+                // accessory guest may not hold).
+                let pickSpec = kayaQuoted(Array(parts[2...]))
+                kayaAwaitQuiet()
+                let pickAnswered = kayaAnswers()
+                let picked = DispatchQueue.main.sync { () -> String? in
+                    guard let node = kayaTextTarget(parts[1]) else { return "no such target \(parts[1])" }
+                    #if os(macOS)
+                        guard let view = kayaMacTextViews[node.id]?.view, let window = view.window else {
+                            return "no text view for \(parts[1])"
+                        }
+                        let mode = kayaAppearanceIsDark(view.effectiveAppearance) ? "dark" : "light"
+                        let hex = pickSpec.count == 6 ? Substring(pickSpec) : kayaInkForMode(pickSpec, Substring(mode))
+                        guard let hex, let rgb = UInt32(hex, radix: 16) else {
+                            return "\"\(pickSpec)\" names no \(mode) colour as RRGGBB"
+                        }
+                        let panel = NSColorPanel.shared
+                        guard panel.isVisible else {
+                            return "no colour panel is presented — the app's text_color command did not bring one up"
+                        }
+                        kayaSettingPanelColor = true
+                        panel.color = kayaColorFromRGB(rgb)
+                        kayaSettingPanelColor = false
+                        guard NSApp.sendAction(#selector(NSTextView.changeColor(_:)), to: window.firstResponder, from: panel)
+                        else { return "the panel's changeColor: reached no responder in \(parts[1])'s window" }
+                        return nil
+                    #else
+                        _ = node
+                        kayaDepthStub("richdoc", on: "ios")
+                    #endif
+                }
+                if let trouble = picked { failures.append("pick_text_color: \(trouble)") } else { kayaAwaitAnswer(pickAnswered) }
+            case "expect_text_ink":
+                // `expect_text_ink <target> <start:end> "light RRGGBB dark RRGGBB"`:
+                // the run's glyphs as the window drew them, the pixel farthest
+                // from the text ground inside the run's own segments.
+                let wantTextInk = kayaQuoted(Array(parts[3...]))
+                var gotTextInk = ""
+                let textInkDeadline = Date().addingTimeInterval(3)
+                repeat {
+                    gotTextInk = DispatchQueue.main.sync { () -> String in
+                        guard let node = kayaTextTarget(parts[1]) else { return "<no such target \(parts[1])>" }
+                        #if os(macOS)
+                            return kayaTextInk(node, String(parts[2]))
+                        #else
+                            _ = node
+                            kayaDepthStub("richdoc", on: "ios")
+                        #endif
+                    }
+                    if kayaTextInkMatches(gotTextInk, wantTextInk) { break }
+                    usleep(50_000)
+                } while Date() < textInkDeadline
+                if kayaTextInkMatches(gotTextInk, wantTextInk) {
+                    observed.append("text ink \(parts[2]) \(wantTextInk)")
+                } else {
+                    failures.append("text ink \(gotTextInk) at \(parts[2]), wanted \(wantTextInk)")
                 }
             case "format":
                 // `format <target> <start:end> <name>[=<value>] [off]`, bytes:
@@ -27978,6 +28496,23 @@ func kayaInkForMode(_ want: String, _ mode: Substring) -> Substring? {
     return nil
 }
 
+/// expect_text_ink's per-channel tolerance: the six scene colours read within
+/// 2 of the run's colour off glyph pixels, light and dark (measured
+/// 2026-11-11); harness.rs's TEXT_INK_TOLERANCE is the other copy.
+let kayaTextInkTolerance = 3
+
+/// `light RRGGBB` or `dark RRGGBB` read against the per-mode expectation.
+func kayaTextInkMatches(_ got: String, _ want: String) -> Bool {
+    let parts = got.split(separator: " ")
+    guard parts.count == 2, let wanted = kayaInkForMode(want, parts[0]),
+        let g = UInt32(parts[1], radix: 16), let w = UInt32(wanted, radix: 16)
+    else { return false }
+    return [16, 8, 0].allSatisfy { shift in
+        abs(Int((g >> UInt32(shift)) & 0xFF) - Int((w >> UInt32(shift)) & 0xFF)) <= kayaTextInkTolerance
+    }
+}
+
+
 /// The reported mode's colours, every channel within `kayaInkTolerance`.
 /// An answer that does not parse — every `<...>` diagnostic below — never
 /// matches, so it reaches the failure text whole.
@@ -31643,6 +32178,9 @@ func kayaRoleEnabled(_ role: String) -> Bool {
             // an undeclared editable target enables on the offer alone.
             let (kinds, custom) = kayaParseAcceptList(node.accepts)
             if node.accepts.isEmpty {
+                // A rich textarea reads RTF and HTML through the core's
+                // normaliser (docs/rich-document-plan.md §7).
+                if node.rich, NSPasteboard.general.availableType(from: [.rtf, .html]) != nil { return true }
                 return NSPasteboard.general.canReadObject(forClasses: [NSString.self])
             }
             let offered = NSPasteboard.general.types?.map(\.rawValue) ?? []
@@ -31889,6 +32427,8 @@ func kayaUndoInertNote(_ item: KayaMenuItemModel, verb: String) {
         let (key, code, flags): (String, UInt16, NSEvent.ModifierFlags) =
             switch name {
             case "tab": ("\t", 48, [])
+            case "shift+tab": ("\u{19}", 48, [.shift])
+            case "backspace": ("\u{7F}", 51, [])
             case "return": ("\r", 36, [])
             case "up": (arrow(NSUpArrowFunctionKey), 126, [.numericPad, .function])
             case "down": (arrow(NSDownArrowFunctionKey), 125, [.numericPad, .function])
@@ -38675,13 +39215,92 @@ private final class KayaTextView: NSTextView {
         }
     }
 
-    /// A rich view takes a paste as TEXT under the typing attributes: with
-    /// `isRichText` on, AppKit would paste RTF's own attributes, none of
-    /// which is in the v1 vocabulary (docs/rich-text-plan.md R3).
+    /// The plain text a rich paste is inserting, the core holding its runs
+    /// (`kaya_text_paste`); the edit that inserts exactly it takes them.
+    var pasteArmed: String?
+    /// The markers last derived onto the storage, and the text they were for.
+    var markersShown: (spelled: String, text: String)?
+
+    /// A rich view's paste reads the board's RTF, then its HTML, through the
+    /// core's one normaliser (docs/rich-document-plan.md §7) and inserts the
+    /// text it answers as a paste; anything else stays plain, never AppKit's
+    /// own attributes.
     override func paste(_ sender: Any?) {
         guard rich else { return super.paste(sender) }
         KayaHost.textEditSource(nodeId, editSourcePaste)
+        let board = NSPasteboard.general
+        let rtf = board.data(forType: .rtf)
+        let html = board.data(forType: .html)
+        if rtf != nil || html != nil, let text = KayaHost.textPaste(nodeId, rtf: rtf, html: html) {
+            let range = selectedRange()
+            pasteArmed = text
+            if shouldChangeText(in: range, replacementString: text) {
+                textStorage?.replaceCharacters(
+                    in: range, with: NSAttributedString(string: text, attributes: typingAttributes))
+                setSelectedRange(NSRange(location: range.location + (text as NSString).length, length: 0))
+                undoManager?.setActionName("Paste")
+                didChangeText()
+            }
+            pasteArmed = nil
+            return
+        }
         pasteAsPlainText(sender)
+    }
+
+    /// A rich copy puts the core's RTF and HTML beside the plain text
+    /// (`kaya_text_copy`), never AppKit's own RTF of the display.
+    override func copy(_ sender: Any?) {
+        guard rich else { return super.copy(sender) }
+        kayaRichCopy(self)
+    }
+
+    override func cut(_ sender: Any?) {
+        guard rich else { return super.cut(sender) }
+        kayaRichCopy(self)
+        let range = selectedRange()
+        guard range.length > 0, shouldChangeText(in: range, replacementString: "") else { return }
+        textStorage?.replaceCharacters(in: range, with: "")
+        undoManager?.setActionName("Cut")
+        didChangeText()
+    }
+
+    /// Show Colors' pick is the widget's own `color` act over the selection
+    /// (docs/rich-document-plan.md §5): AppKit never writes `.foregroundColor`
+    /// behind the run table. A pick made on a dark page is stored as the light
+    /// colour that maps to it.
+    override func changeColor(_ sender: Any?) {
+        guard rich else { return super.changeColor(sender) }
+        guard !kayaSettingPanelColor, let node = kayaScene.nodes[nodeId] else { return }
+        let picked = (sender as? NSColorPanel)?.color ?? NSColorPanel.shared.color
+        guard var rgb = kayaRGBOf(picked) else { return }
+        if kayaAppearanceIsDark(effectiveAppearance) { rgb = KayaHost.inkFromDark(rgb) }
+        if let trouble = kayaFormatSelection(node, "color", String(format: "#%06X", rgb), removed: false) {
+            kayaDiag("changeColor: refused: \(trouble)")
+        }
+    }
+
+    /// A click on a checklist item's box is the core's check key
+    /// (docs/rich-document-plan.md §6), hit-tested against the box drawn.
+    override func mouseDown(with event: NSEvent) {
+        if rich, let start = kayaCheckboxHit(event.locationInWindow),
+            KayaHost.textKey(nodeId, UInt32(KAYA_TEXT_KEY_CHECK), start, start)
+        {
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
+    /// The paragraph start (bytes) whose drawn checklist box is under a window
+    /// point, or nil.
+    func kayaCheckboxHit(_ windowPoint: NSPoint) -> Int? {
+        guard let manager = textLayoutManager else { return nil }
+        let local = convert(windowPoint, from: nil)
+        let at = CGPoint(x: local.x - textContainerOrigin.x, y: local.y - textContainerOrigin.y)
+        for (start, mark) in kayaDrawnMarkersOf(manager)
+        where (mark.text == "[ ]" || mark.text == "[x]") && mark.box.insetBy(dx: -2, dy: -2).contains(at) {
+            return kayaByteOffset(string, start)
+        }
+        return nil
     }
 
     /// FOCUS IS APPLIED WHEN THE VIEW HAS SOMEWHERE TO BE FOCUSED — the case
@@ -38856,14 +39475,14 @@ private struct KayaMacTextarea: NSViewRepresentable {
         /// manager alive, and a widget whose content manager is collected has no
         /// text at all. The coordinator outlives every update.
         var content: NSTextContentStorage?
-        /// What the Return seen in `shouldChangeTextIn` will insert past the end
-        /// of a heading (docs/rich-text-plan.md R10), stripped below.
-        var returnStrip: NSRange?
+        /// What the edit seen in `shouldChangeTextIn` inserts and the runs it
+        /// takes by the core's rule (`RichDoc::typed_runs`), applied below.
+        var typed: KayaTypedEdit?
 
         func textDidChange(_ notification: Notification) {
             guard let node, let view = notification.object as? NSTextView else { return }
-            let strip = returnStrip
-            returnStrip = nil
+            let edit = typed
+            typed = nil
             let value = node.rich ? view.string : kayaLF(view.string)
             // THE ECHO DOCTRINE, held where an echo could enter: a programmatic
             // write emits nothing. "AppKit does not notify about a `string`
@@ -38875,8 +39494,8 @@ private struct KayaMacTextarea: NSViewRepresentable {
             if let own = view as? KayaTextView {
                 own.pendingOn.removeAll()
                 own.pendingOff.removeAll()
-                // R10, before the read below: the storage and the report agree.
-                if node.rich, let strip { kayaStripReturnBlock(own, strip) }
+                // Before the read below: the storage and the report agree.
+                if node.rich, let edit, !edit.paste { kayaApplyTypedRuns(own, edit) }
             }
             kayaUserWrite {
                 node.text = value
@@ -38888,6 +39507,10 @@ private struct KayaMacTextarea: NSViewRepresentable {
             if commit {
                 (view as? KayaTextView)?.composing = false
                 KayaHost.textComposing(node.id, false)
+            }
+            if node.rich, let own = view as? KayaTextView {
+                if let edit, edit.paste { kayaApplyPastedRuns(own, node, edit) }
+                kayaDeriveMarkers(own)
             }
         }
 
@@ -38905,15 +39528,18 @@ private struct KayaMacTextarea: NSViewRepresentable {
                 if start >= 0, end >= 0 {
                     KayaHost.textReportedEdit(node.id, start, end, inserted: replacement.utf8.count)
                 }
-                // R10 is decided on the text this Return has not landed in yet;
-                // textDidChange strips what it names.
+                // Decided on the text this edit has not landed in yet;
+                // textDidChange applies it.
                 let own = textView as? KayaTextView
-                let armed = own?.pendingAt == affected.location
-                returnStrip = textView.textStorage.map {
-                    kayaReturnStrip(
-                        $0, affected, replacement, pendingOn: armed ? own?.pendingOn ?? [:] : [:],
-                        pendingOff: armed ? own?.pendingOff ?? [] : [])
-                } ?? nil
+                if let own, let storage = textView.textStorage, !replacement.isEmpty {
+                    typed = KayaTypedEdit(
+                        location: affected.location, length: (replacement as NSString).length,
+                        runs: own.pasteArmed == replacement
+                            ? [] : kayaTypedRuns(storage, affected, replacement, own),
+                        paste: own.pasteArmed == replacement)
+                } else {
+                    typed = nil
+                }
             }
             return true
         }
@@ -38923,7 +39549,19 @@ private struct KayaMacTextarea: NSViewRepresentable {
         /// `insertLineBreak:` (a line separator by default), so the newline is
         /// inserted here as text. A plain textarea takes neither branch.
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
-            guard let node, node.submits else { return false }
+            guard let node else { return false }
+            // docs/rich-document-plan.md §11: the four keys are offered to the
+            // core first, the selection in bytes as the key arrives.
+            if node.rich, !textView.hasMarkedText(), let key = kayaRichKeyFor(selector) {
+                let range = textView.selectedRange()
+                let text = textView.string
+                if KayaHost.textKey(
+                    node.id, key, kayaByteOffset(text, range.location), kayaByteOffset(text, NSMaxRange(range)))
+                {
+                    return true
+                }
+            }
+            guard node.submits else { return false }
             if selector == #selector(NSResponder.insertNewline(_:)) {
                 KayaHost.emitSubmitted(node, node.text)
                 return true
@@ -38958,8 +39596,15 @@ private struct KayaMacTextarea: NSViewRepresentable {
         ) -> [NSAttributedString.Key: Any] {
             guard let node, node.rich else { return newTypingAttributes }
             var attrs = newTypingAttributes
-            attrs.removeValue(forKey: kayaRichKey("link"))
+            for key in attrs.keys where key.rawValue.hasPrefix(kayaRichPrefix) {
+                let name = String(key.rawValue.dropFirst(kayaRichPrefix.count))
+                if !kayaParagraphNames.contains(name), !kayaRichExpandsAtEnd(name) {
+                    attrs.removeValue(forKey: key)
+                }
+            }
             attrs.removeValue(forKey: .link)
+            attrs.removeValue(forKey: kayaMarkerKey)
+            attrs.removeValue(forKey: kayaFinalMarkerKey)
             if let view = textView as? KayaTextView, view.pendingAt == view.selectedRange().location {
                 for (key, value) in view.pendingOn { attrs[key] = value }
                 for key in view.pendingOff { attrs.removeValue(forKey: key) }
@@ -39128,7 +39773,9 @@ private struct KayaMacTextarea: NSViewRepresentable {
                 let location = min(selection.location, end)
                 view.setSelectedRange(
                     NSRange(location: location, length: min(selection.length, end - location)))
+                view.markersShown = nil
             }
+            kayaDeriveMarkers(view)
         } else if view.string != text, !view.hasMarkedText() {
             let selection = view.selectedRange
             view.string = text
@@ -39461,9 +40108,10 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         var out: [NSAttributedString.Key: Any] = [.font: font]
         if synthBold { out[.strokeWidth] = kayaSyntheticBoldStroke } else { storage.removeAttribute(.strokeWidth, range: sub) }
         let link = attrs[kayaRichKey("link")] as? String
+        let ink = (attrs[kayaRichKey("color")] as? String).flatMap(kayaDocumentInk)
         out[.foregroundColor] =
             link != nil
-            ? NSColor.linkColor : (block == "quote" ? NSColor.secondaryLabelColor : NSColor.textColor)
+            ? NSColor.linkColor : ink ?? (block == "quote" ? NSColor.secondaryLabelColor : NSColor.textColor)
         if has("underline") || link != nil {
             out[.underlineStyle] = NSUnderlineStyle.single.rawValue
         } else {
@@ -39481,10 +40129,12 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         } else {
             storage.removeAttribute(kayaGroundKey, range: sub)
         }
-        let paragraph = NSMutableParagraphStyle()
+        let paragraph = kayaRichParagraphStyle(attrs) {
+            let ns = storage.string as NSString
+            let whole = ns.paragraphRange(for: NSRange(location: sub.location, length: 0))
+            return Substring(ns.substring(with: whole))
+        }
         if block == "quote" {
-            paragraph.headIndent = kayaQuoteIndent
-            paragraph.firstLineHeadIndent = kayaQuoteIndent
             out[kayaRuleKey] = kayaQuoteRule
         } else {
             storage.removeAttribute(kayaRuleKey, range: sub)
@@ -39508,24 +40158,291 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     return doc
 }
 
-/// R10's strip, this side: AppKit carries a heading's font, paragraph style and
-/// kaya's own key across Return (docs/measurements/richtext-return-mac-2026-09-14.md
-/// §B), so the block comes off the inserted newline, its display goes back to
-/// body, and what follows types as body.
-@MainActor private func kayaStripReturnBlock(_ view: KayaTextView, _ range: NSRange) {
-    guard let storage = view.textStorage, range.length > 0,
-        NSMaxRange(range) <= storage.length
-    else { return }
-    let base = kayaRichBaseFont(view)
-    let baseBold = kayaRichBaseBold(view)
+/// One user edit's insertion, seen before it lands: where, how long, and the
+/// runs the core's rule gives it (relative, UTF-16), or the paste's.
+struct KayaTypedEdit {
+    let location: Int
+    let length: Int
+    let runs: [KayaRichRun]
+    let paste: Bool
+}
+
+/// `RichDoc::typed_runs`, this side (docs/rich-document-plan.md §11): inline
+/// marks from the unit before by each mark's expand rule, paragraph attributes
+/// from the paragraph the text lands in, the armed attributes at their caret;
+/// from the first newline on, a Return at a paragraph's end carries what
+/// continues and a Return inside one keeps all but `start`. Read off the
+/// storage before the edit, which is the core's mirror while the wall holds.
+@MainActor private func kayaTypedRuns(
+    _ storage: NSAttributedString, _ affected: NSRange, _ replacement: String, _ view: KayaTextView
+) -> [KayaRichRun] {
+    let ns = storage.string as NSString
+    let start = affected.location
+    func kayaAttrs(_ at: Int) -> [String: String] {
+        guard at >= 0, at < storage.length else { return [:] }
+        var out: [String: String] = [:]
+        for (key, value) in storage.attributes(at: at, effectiveRange: nil)
+        where key.rawValue.hasPrefix(kayaRichPrefix) {
+            if let value = value as? String { out[String(key.rawValue.dropFirst(kayaRichPrefix.count))] = value }
+        }
+        return out
+    }
+    var inline = kayaAttrs(start - 1).filter { !kayaParagraphNames.contains($0.key) && kayaRichExpandsAtEnd($0.key) }
+    let before = ns.range(of: "\n", options: .backwards, range: NSRange(location: 0, length: min(start, ns.length)))
+    let paraStart = before.location == NSNotFound ? 0 : NSMaxRange(before)
+    var para: [String: String]
+    if paraStart < ns.length {
+        para = kayaAttrs(paraStart).filter { kayaParagraphNames.contains($0.key) }
+    } else {
+        para = ns.length > 0 && ns.character(at: ns.length - 1) == 0x0A
+            ? kayaAttrs(ns.length - 1).filter { kayaParagraphNames.contains($0.key) } : [:]
+        if view.pendingAt == ns.length {
+            for (key, value) in view.pendingOn {
+                let name = String(key.rawValue.dropFirst(kayaRichPrefix.count))
+                if kayaParagraphNames.contains(name) { para[name] = value }
+            }
+            for key in view.pendingOff { para.removeValue(forKey: String(key.rawValue.dropFirst(kayaRichPrefix.count))) }
+        }
+    }
+    if view.pendingAt == start {
+        for (key, value) in view.pendingOn {
+            let name = String(key.rawValue.dropFirst(kayaRichPrefix.count))
+            if kayaParagraphNames.contains(name) { para[name] = value } else { inline[name] = value }
+        }
+        for key in view.pendingOff {
+            let name = String(key.rawValue.dropFirst(kayaRichPrefix.count))
+            para.removeValue(forKey: name)
+            inline.removeValue(forKey: name)
+        }
+    }
+    let atEnd = start >= ns.length || ns.character(at: start) == 0x0A
+    let piece = replacement as NSString
+    let newline = piece.range(of: "\n").location
+    var carried: [String: String] = [:]
+    if newline != NSNotFound {
+        carried = para.filter { name, value in
+            if atEnd {
+                switch name {
+                case "block": return !value.hasPrefix("heading")
+                case "checked", "start": return false
+                default: return true
+                }
+            }
+            return name != "start"
+        }
+    }
+    let length = piece.length
+    let cut = newline == NSNotFound ? length : newline
+    var runs: [KayaRichRun] = []
+    for (name, value) in inline { runs.append(KayaRichRun(range: NSRange(location: 0, length: length), name: name, value: value)) }
+    for (name, value) in para where cut > 0 {
+        runs.append(KayaRichRun(range: NSRange(location: 0, length: cut), name: name, value: value))
+    }
+    for (name, value) in carried where length > cut {
+        runs.append(KayaRichRun(range: NSRange(location: cut, length: length - cut), name: name, value: value))
+    }
+    return runs
+}
+
+/// The inserted range made to hold exactly `runs`, its display derived again.
+@MainActor private func kayaSetInsertedRuns(_ view: KayaTextView, _ range: NSRange, _ runs: [KayaRichRun]) {
+    guard let storage = view.textStorage, range.length > 0, NSMaxRange(range) <= storage.length else { return }
     storage.beginEditing()
-    storage.removeAttribute(kayaRichKey("block"), range: range)
-    kayaRestyle(storage, range, base: base, baseBold: baseBold)
+    storage.enumerateAttributes(in: range, options: []) { attrs, sub, _ in
+        for key in attrs.keys where key.rawValue.hasPrefix(kayaRichPrefix) { storage.removeAttribute(key, range: sub) }
+    }
+    for run in runs where run.range.length > 0 && NSMaxRange(run.range) <= range.length {
+        storage.addAttribute(
+            kayaRichKey(run.name), value: run.value,
+            range: NSRange(location: range.location + run.range.location, length: run.range.length))
+    }
+    kayaRestyle(storage, range, base: kayaRichBaseFont(view), baseBold: kayaRichBaseBold(view))
     storage.endEditing()
-    var typing = storage.attributes(at: NSMaxRange(range) - 1, effectiveRange: nil)
-    typing.removeValue(forKey: kayaRichKey("link"))
-    typing.removeValue(forKey: .link)
-    view.typingAttributes = typing
+}
+
+@MainActor private func kayaApplyTypedRuns(_ view: KayaTextView, _ edit: KayaTypedEdit) {
+    kayaSetInsertedRuns(view, NSRange(location: edit.location, length: edit.length), edit.runs)
+}
+
+/// A rich paste's runs are the core's normaliser's (`kaya_text_paste` armed
+/// them), read back from the core over the inserted bytes.
+@MainActor private func kayaApplyPastedRuns(_ view: KayaTextView, _ node: KayaNode, _ edit: KayaTypedEdit) {
+    let text = view.string
+    let from = kayaByteOffset(text, edit.location)
+    let to = kayaByteOffset(text, edit.location + edit.length)
+    guard from >= 0, to > from else { return }
+    var runs: [KayaRichRun] = []
+    for item in KayaHost.textRuns(node.id).split(separator: "|") {
+        guard let space = item.firstIndex(of: " "), let colon = item.firstIndex(of: ":"), colon < space,
+            let a = Int(item[..<colon]), let b = Int(item[item.index(after: colon)..<space])
+        else { continue }
+        let attr = item[item.index(after: space)...]
+        let name = attr.firstIndex(of: "=").map { String(attr[..<$0]) } ?? String(attr)
+        let value = attr.firstIndex(of: "=").map { String(attr[attr.index(after: $0)...]) } ?? "true"
+        let lo = max(a, from), hi = min(b, to)
+        guard hi > lo else { continue }
+        let s16 = kayaUtf16Offset(text, lo) - edit.location
+        let e16 = kayaUtf16Offset(text, hi) - edit.location
+        runs.append(KayaRichRun(range: NSRange(location: s16, length: e16 - s16), name: name, value: value))
+    }
+    kayaSetInsertedRuns(view, NSRange(location: edit.location, length: edit.length), runs)
+    if let storage = view.textStorage { node.richRuns = kayaReadRichRuns(storage) }
+}
+
+/// The core's markers derived onto the storage when they or the text moved
+/// (docs/rich-document-plan.md §11), never per draw.
+@MainActor private func kayaDeriveMarkers(_ view: KayaTextView) {
+    guard view.rich, let storage = view.textStorage, !view.hasMarkedText() else { return }
+    let spelled = KayaHost.textMarkers(view.nodeId)
+    let text = storage.string
+    if let shown = view.markersShown, shown.spelled == spelled, shown.text == text { return }
+    view.markersShown = (spelled, text)
+    let full = NSRange(location: 0, length: storage.length)
+    storage.beginEditing()
+    storage.removeAttribute(kayaMarkerKey, range: full)
+    storage.removeAttribute(kayaFinalMarkerKey, range: full)
+    for item in spelled.split(separator: "|") {
+        guard let colon = item.firstIndex(of: ":"), let start = Int(item[..<colon]) else { continue }
+        let mark = String(item[item.index(after: colon)...])
+        let at = kayaUtf16Offset(text, start)
+        if at >= 0, at < storage.length {
+            storage.addAttribute(kayaMarkerKey, value: mark, range: NSRange(location: at, length: 1))
+        } else if at == storage.length, storage.length > 0 {
+            storage.addAttribute(kayaFinalMarkerKey, value: mark, range: NSRange(location: storage.length - 1, length: 1))
+        }
+    }
+    storage.endEditing()
+    if let manager = view.textLayoutManager { kayaForgetDrawnMarkers(manager) }
+    view.needsDisplay = true
+}
+
+/// The four keys the core is offered (KAYA_TEXT_KEY_*).
+func kayaRichKeyFor(_ selector: Selector) -> UInt32? {
+    switch selector {
+    case #selector(NSResponder.insertNewline(_:)): return UInt32(KAYA_TEXT_KEY_RETURN)
+    case #selector(NSResponder.deleteBackward(_:)): return UInt32(KAYA_TEXT_KEY_BACKSPACE)
+    case #selector(NSResponder.insertTab(_:)): return UInt32(KAYA_TEXT_KEY_TAB)
+    case #selector(NSResponder.insertBacktab(_:)): return UInt32(KAYA_TEXT_KEY_SHIFT_TAB)
+    default: return nil
+    }
+}
+
+/// The plain text, RTF and HTML of the view's selection on the board, staged
+/// as every kaya write is (kayaClipStaging).
+@MainActor private func kayaRichCopy(_ view: KayaTextView) {
+    let range = view.selectedRange()
+    guard range.length > 0 else { return }
+    let text = view.string
+    let plain = (text as NSString).substring(with: range)
+    let start = kayaByteOffset(text, range.location)
+    let end = kayaByteOffset(text, NSMaxRange(range))
+    let rtf = KayaHost.textCopy(view.nodeId, start, end, html: false)
+    let html = KayaHost.textCopy(view.nodeId, start, end, html: true)
+    kayaClipStaging()
+    let board = NSPasteboard.general
+    board.clearContents()
+    var types: [NSPasteboard.PasteboardType] = [.string]
+    if !rtf.isEmpty { types.append(.rtf) }
+    if !html.isEmpty { types.append(.html) }
+    board.declareTypes(types, owner: nil)
+    board.setString(plain, forType: .string)
+    if !rtf.isEmpty { board.setData(rtf, forType: .rtf) }
+    if !html.isEmpty { board.setString(String(decoding: html, as: UTF8.self), forType: .html) }
+    kayaClipOwned(kayaClipBoardNow(), composed: false)
+}
+
+/// A run's drawn ink, `<mode> RRGGBB`: the window server's picture of the
+/// run's own segments, the ground taken as the picture's commonest colour and
+/// the ink as the pixel farthest from it; or what was measured instead.
+@MainActor func kayaTextInk(_ node: KayaNode, _ spec: String) -> String {
+    guard let view = kayaMacTextViews[node.id]?.view, let manager = view.textLayoutManager,
+        let content = manager.textContentManager, let window = view.window, let root = window.contentView
+    else { return "<no text view>" }
+    let bounds = spec.split(separator: ":")
+    guard bounds.count == 2, let a = Int(bounds[0]), let b = Int(bounds[1]) else {
+        return "<\(spec) is not a start:end range>"
+    }
+    let text = view.string
+    let s16 = kayaUtf16Offset(text, a), e16 = kayaUtf16Offset(text, b)
+    guard s16 >= 0, e16 > s16 else { return "<\(spec) is not a non-empty range on a character boundary>" }
+    let run = NSRange(location: s16, length: e16 - s16)
+    let selected = view.selectedRange()
+    if NSIntersectionRange(selected, run).length > 0 {
+        return "<the selection \(selected.location):\(NSMaxRange(selected)) (UTF-16) covers the run, so its ground is the selection's>"
+    }
+    view.displayIfNeeded()
+    guard let from = content.location(content.documentRange.location, offsetBy: s16),
+        let to = content.location(from, offsetBy: e16 - s16), let range = NSTextRange(location: from, end: to)
+    else { return "<no text range for \(spec)>" }
+    manager.ensureLayout(for: range)
+    var box = CGRect.null
+    manager.enumerateTextSegments(in: range, type: .standard, options: []) { _, frame, _, _ in
+        box = box.union(frame)
+        return true
+    }
+    guard !box.isNull, box.width > 0, box.height > 0 else { return "<no laid-out segment for \(spec)>" }
+    let inView = box.offsetBy(dx: view.textContainerOrigin.x, dy: view.textContainerOrigin.y)
+    guard view.visibleRect.contains(inView) else { return "<the run \(spec) is outside the viewport>" }
+    let inRoot = view.convert(inView, to: root)
+    let down = root.isFlipped ? inRoot
+        : CGRect(x: inRoot.minX, y: root.bounds.height - inRoot.maxY, width: inRoot.width, height: inRoot.height)
+    let (picture, why) = kayaWindowServerImage(window, root, down)
+    guard let picture else { return "<no picture of the window: \(why)>" }
+    let (w, h) = (picture.width, picture.height)
+    var px = [UInt8](repeating: 0, count: w * h * 4)
+    let drawn = px.withUnsafeMutableBytes { raw -> Bool in
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+            let ctx = CGContext(
+                data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4, space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return false }
+        ctx.draw(picture, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return true
+    }
+    guard drawn, w * h > 0 else { return "<the picture would not decode>" }
+    var counts: [UInt32: Int] = [:]
+    for i in stride(from: 0, to: px.count, by: 4) {
+        counts[(UInt32(px[i]) << 16) | (UInt32(px[i + 1]) << 8) | UInt32(px[i + 2]), default: 0] += 1
+    }
+    let ground = counts.max { $0.value < $1.value }!.key
+    func distance(_ c: UInt32) -> Int {
+        [16, 8, 0].reduce(0) { $0 + abs(Int((c >> UInt32($1)) & 0xFF) - Int((ground >> UInt32($1)) & 0xFF)) }
+    }
+    let ink = counts.keys.max { distance($0) < distance($1) }!
+    let mode = kayaAppearanceIsDark(view.effectiveAppearance) ? "dark" : "light"
+    return "\(mode) " + String(format: "%06X", ink)
+}
+
+/// The colour panel's own colour is being set, which is not a user's pick.
+nonisolated(unsafe) var kayaSettingPanelColor = false
+
+/// The `text_color` command (docs/rich-document-plan.md §11): the view takes
+/// the keyboard and the shared colour panel comes up over the selection's
+/// colour as this page draws it, or the automatic ink.
+@MainActor func kayaPresentTextColor(_ node: KayaNode) {
+    guard let view = kayaMacTextViews[node.id]?.view as? KayaTextView else {
+        kayaDiag("text_color: widget \(node.id) has no text view")
+        return
+    }
+    kayaScene.focusedId = node.id
+    view.window?.makeFirstResponder(view)
+    let at = min(view.selectedRange().location, max(0, (view.textStorage?.length ?? 0) - 1))
+    let stored = (view.textStorage?.length ?? 0) > 0
+        ? view.textStorage?.attribute(kayaRichKey("color"), at: at, effectiveRange: nil) as? String : nil
+    var shown: NSColor = NSColor.textColor
+    if let stored, let rgb = kayaHexRGB(stored) {
+        shown = kayaColorFromRGB(kayaAppearanceIsDark(view.effectiveAppearance) ? KayaHost.inkForDark(rgb) : rgb)
+    } else {
+        view.effectiveAppearance.performAsCurrentDrawingAppearance {
+            shown = NSColor.textColor.usingColorSpace(.sRGB) ?? .black
+        }
+    }
+    let panel = NSColorPanel.shared
+    panel.showsAlpha = false
+    kayaSettingPanelColor = true
+    panel.color = shown
+    kayaSettingPanelColor = false
+    panel.orderFront(nil)
 }
 
 /// apply_edit, this side, after the apply arm moved the node's text: the
@@ -39558,6 +40475,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     let location = min(selection.location, end)
     view.setSelectedRange(
         NSRange(location: location, length: min(selection.length, end - location)))
+    kayaDeriveMarkers(view)
 }
 
 /// The widget's own formatting act over its current selection — the path an
@@ -39573,7 +40491,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     _ node: KayaNode, _ range: NSRange, _ name: String, _ value: String, removed: Bool
 ) -> String? {
     guard node.rich else { return "widget \(node.id) is not rich" }
-    guard kayaRichNames.contains(name) else { return "\(name) is not a rich attribute" }
+    guard kayaRichNameKept(name) else { return "\(name) is not a rich attribute" }
     let key = kayaRichKey(name)
     let off = removed || (name == "block" && value == "body")
     if node.richShown == node.richSeq, let view = kayaMacTextViews[node.id]?.view as? KayaTextView,
@@ -39589,6 +40507,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         kayaRestyle(storage, range, base: kayaRichBaseFont(view), baseBold: kayaRichBaseBold(view))
         storage.endEditing()
         node.richRuns = kayaReadRichRuns(storage)
+        kayaDeriveMarkers(view)
         return nil
     }
     let doc = NSMutableAttributedString(
@@ -39608,7 +40527,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     -> String?
 {
     guard node.rich else { return "widget \(node.id) is not a rich textarea" }
-    guard kayaRichNames.contains(name) else { return "\(name) is not a rich attribute" }
+    guard kayaRichNameKept(name) else { return "\(name) is not a rich attribute" }
     guard let view = kayaMacTextViews[node.id]?.view as? KayaTextView,
         let storage = view.textStorage
     else {
@@ -39619,6 +40538,31 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     }
     let key = kayaRichKey(name)
     let off = removed || (name == "block" && value == "body")
+    // A paragraph act never reaches an arm over the selection (the core
+    // resolves it, docs/rich-document-plan.md §11) but for the empty final
+    // paragraph's, which the core armed itself: armed here at the text's end.
+    if name != "block", kayaParagraphNames.contains(name) {
+        let end = storage.length
+        if view.pendingAt != end {
+            view.pendingOn.removeAll()
+            view.pendingOff.removeAll()
+        }
+        view.pendingAt = end
+        if off {
+            view.pendingOn.removeValue(forKey: key)
+            view.pendingOff.insert(key)
+        } else {
+            view.pendingOff.remove(key)
+            view.pendingOn[key] = value
+        }
+        if view.selectedRange.location == end {
+            var attrs = view.typingAttributes
+            if off { attrs.removeValue(forKey: key) } else { attrs[key] = value }
+            view.typingAttributes = attrs
+        }
+        kayaDeriveMarkers(view)
+        return nil
+    }
     var range = view.selectedRange
     if name == "block" {
         let ns = storage.string as NSString
@@ -39671,6 +40615,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     let end = kayaByteOffset(text, NSMaxRange(range))
     guard start >= 0, end >= 0 else { return "the selection is not on a character boundary" }
     KayaHost.textFormatted(node.tag, start, end, name, value, removed: off)
+    kayaDeriveMarkers(view)
     return nil
 }
 

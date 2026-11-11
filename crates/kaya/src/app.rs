@@ -1016,6 +1016,57 @@ impl Block {
     }
 }
 
+/// A list item's kind, the value of a `list` run (docs/rich-document-plan.md
+/// RD2); [`ListKind::None`] is the run's absence, as [`Block::Body`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListKind {
+    None,
+    Bullet,
+    Numbered,
+    Check,
+}
+
+impl ListKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            ListKind::None => "none",
+            ListKind::Bullet => "bullet",
+            ListKind::Numbered => "numbered",
+            ListKind::Check => "check",
+        }
+    }
+}
+
+/// A paragraph's alignment, the value of an `align` run (RD1);
+/// [`ParagraphAlign::Start`] is the run's absence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParagraphAlign {
+    Start,
+    Center,
+    End,
+    Justify,
+}
+
+impl ParagraphAlign {
+    pub fn name(self) -> &'static str {
+        match self {
+            ParagraphAlign::Start => "start",
+            ParagraphAlign::Center => "center",
+            ParagraphAlign::End => "end",
+            ParagraphAlign::Justify => "justify",
+        }
+    }
+}
+
+/// A `.kdoc` file read (docs/rich-document-plan.md §4): the document, and
+/// why it may only be read when it carries a name this kaya cannot keep
+/// through an edit (RD8).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Kdoc {
+    pub document: Document,
+    pub read_only: Option<String>,
+}
+
 /// A `rich` textarea's text and runs, kept current by the binding from the
 /// edits it delivers (docs/rich-text-plan.md R1).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1107,6 +1158,52 @@ impl Document {
     /// A paragraph's kind; the range covers whole paragraphs or is refused.
     pub fn block(self, range: std::ops::Range<usize>, kind: Block) -> Self {
         self.mark(range, "block", kind.name())
+    }
+
+    /// A list item over whole paragraphs (docs/rich-document-plan.md RD2).
+    pub fn list(self, range: std::ops::Range<usize>, kind: ListKind) -> Self {
+        self.mark(range, "list", kind.name())
+    }
+
+    /// An indent level, 1 to 8, over whole paragraphs (RD3).
+    pub fn indent(self, range: std::ops::Range<usize>, level: u32) -> Self {
+        self.mark(range, "indent", level.to_string())
+    }
+
+    /// A checklist item checked, over whole paragraphs.
+    pub fn checked(self, range: std::ops::Range<usize>) -> Self {
+        self.mark(range, "checked", "true")
+    }
+
+    /// A numbered list's first number, on its first item.
+    pub fn start(self, range: std::ops::Range<usize>, first: u64) -> Self {
+        self.mark(range, "start", first.to_string())
+    }
+
+    pub fn align(self, range: std::ops::Range<usize>, align: ParagraphAlign) -> Self {
+        self.mark(range, "align", align.name())
+    }
+
+    /// A text colour, `#RRGGBB` as it reads on a light page (RD4, RD5).
+    pub fn color(self, range: std::ops::Range<usize>, rgb: &str) -> Self {
+        self.mark(range, "color", rgb.to_ascii_uppercase())
+    }
+
+    /// A `.kdoc` file's bytes read; refused in one sentence when they are not
+    /// one, or name a newer major version (docs/rich-document-plan.md §4).
+    pub fn from_kdoc(bytes: &[u8]) -> Result<Kdoc, String> {
+        let read = crate::richdoc::kdoc::read(bytes)?;
+        Ok(Kdoc { document: Document { text: read.text, runs: read.runs }, read_only: read.read_only })
+    }
+
+    /// The document as a `.kdoc` file, the same bytes in nine bindings
+    /// (RD13). Panics naming the run when the document breaks a wall
+    /// set_document holds.
+    pub fn to_kdoc(&self) -> Vec<u8> {
+        match crate::richdoc::kdoc::write(&self.text, &self.runs) {
+            Ok(json) => json.into_bytes(),
+            Err(why) => panic!("kaya: to_kdoc: {why}"),
+        }
     }
 
     pub fn attr_at(&self, byte: usize, name: &str) -> Option<&str> {
@@ -1264,6 +1361,29 @@ impl Selection {
     /// next typed character takes it).
     pub fn has(&self, name: &str) -> bool {
         self.attrs.iter().any(|(n, _)| n == name)
+    }
+
+    /// The list kind every touched paragraph shares; None otherwise.
+    pub fn list(&self) -> ListKind {
+        let kind = self.attrs.iter().find(|(n, _)| n == "list").map(|(_, v)| v.as_str());
+        [ListKind::Bullet, ListKind::Numbered, ListKind::Check]
+            .into_iter()
+            .find(|k| Some(k.name()) == kind)
+            .unwrap_or(ListKind::None)
+    }
+
+    /// The alignment every touched paragraph shares; Start otherwise.
+    pub fn paragraph_align(&self) -> ParagraphAlign {
+        let kind = self.attrs.iter().find(|(n, _)| n == "align").map(|(_, v)| v.as_str());
+        [ParagraphAlign::Center, ParagraphAlign::End, ParagraphAlign::Justify]
+            .into_iter()
+            .find(|a| Some(a.name()) == kind)
+            .unwrap_or(ParagraphAlign::Start)
+    }
+
+    /// The colour holding over the whole selection, `#RRGGBB`.
+    pub fn color(&self) -> Option<&str> {
+        self.attrs.iter().find(|(n, _)| n == "color").map(|(_, v)| v.as_str())
     }
 
     /// The paragraph kind every touched paragraph shares; Body for body text
@@ -1569,7 +1689,7 @@ impl AppCtx {
     /// A ranged act's range in the fold's text: a `block` covers the whole
     /// paragraphs it touches, as the core snaps it (docs/rich-text-plan.md §17).
     fn ranged_act_bounds(&self, widget: u64, range: std::ops::Range<usize>, name: &str) -> TextRange {
-        if name != "block" {
+        if !crate::richdoc::is_paragraph_attr(name) {
             return TextRange::new(range.start as u64, range.end as u64);
         }
         let docs = self.documents.borrow();
@@ -3948,7 +4068,8 @@ impl<'a> Tx<'a> {
         // as the core snaps it.
         let range = self.ctx.ranged_act_bounds(widget.0, range, name);
         let text: String = value.into().into();
-        let value = if name == "block" && text == "body" { None } else { Some(text.as_str()) };
+        let value = crate::richdoc::canonical_value(name, &text).unwrap_or_else(|why| panic!("kaya: format_range: {why}"));
+        let value = value.as_deref();
         self.ctx.absorb_format(widget.0, range, name, value);
         self.ops.push(TxOp::FormatText {
             widget,
@@ -4005,6 +4126,50 @@ impl<'a> Tx<'a> {
     /// Make the selection's paragraphs `kind`; [`Block::Body`] clears.
     pub fn set_block(&mut self, widget: WidgetId, kind: Block) {
         self.format(widget, "block", kind.name());
+    }
+
+    /// Make the selection's paragraphs list items of `kind` (a heading or a
+    /// code block becomes body); [`ListKind::None`] ends the list
+    /// (docs/rich-document-plan.md §6). The core answers through
+    /// [`Messages::on_format`].
+    pub fn set_list(&mut self, widget: WidgetId, kind: ListKind) {
+        self.format(widget, "list", kind.name());
+    }
+
+    /// One level deeper for each of the selection's paragraphs, to 8.
+    pub fn indent(&mut self, widget: WidgetId) {
+        self.format(widget, "indent", "+1");
+    }
+
+    /// One level shallower for each of the selection's paragraphs, to 0.
+    pub fn outdent(&mut self, widget: WidgetId) {
+        self.format(widget, "indent", "-1");
+    }
+
+    pub fn set_paragraph_align(&mut self, widget: WidgetId, align: ParagraphAlign) {
+        self.format(widget, "align", align.name());
+    }
+
+    /// Check or uncheck the selection's checklist items.
+    pub fn check_items(&mut self, widget: WidgetId, checked: bool) {
+        if checked {
+            self.format(widget, "checked", "true");
+        } else {
+            self.unformat(widget, "checked");
+        }
+    }
+
+    /// The selection's text in a colour, `#RRGGBB` as it reads on a light
+    /// page; automatic ink is [`Tx::unformat`] of `color` (RD4).
+    pub fn color(&mut self, widget: WidgetId, rgb: &str) {
+        self.format(widget, "color", rgb.to_ascii_uppercase().as_str());
+    }
+
+    /// Present the platform's own colour picker over the selection; each
+    /// colour the user commits arrives as a `color` act through
+    /// [`Messages::on_format`] (docs/rich-document-plan.md §5).
+    pub fn pick_text_color(&mut self, widget: WidgetId) {
+        self.ops.push(TxOp::WidgetCommand { widget, command: CommandKind::TextColor });
     }
 
     /// Scroll the textarea so a range is inside the viewport. A pure

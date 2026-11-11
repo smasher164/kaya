@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x585cc259da5c8c75L
+let spec_hash = 0x5f131b7e55fe0f95L
 let version = "0.0.0"
 
 let value_bool = 1
@@ -352,6 +352,20 @@ let rich_attr_strike = 4
 let rich_attr_code = 5
 let rich_attr_link = 6
 let rich_attr_block = 7
+let rich_attr_list = 8
+let rich_attr_indent = 9
+let rich_attr_checked = 10
+let rich_attr_start = 11
+let rich_attr_align = 12
+let rich_attr_color = 13
+let list_kind_none = 0
+let list_kind_bullet = 1
+let list_kind_numbered = 2
+let list_kind_check = 3
+let paragraph_align_start = 0
+let paragraph_align_center = 1
+let paragraph_align_end = 2
+let paragraph_align_justify = 3
 let block_kind_body = 0
 let block_kind_heading1 = 1
 let block_kind_heading2 = 2
@@ -467,6 +481,7 @@ let pprop_captions_language = 7
 let command_clear = 1
 let command_focus = 2
 let command_emoji_picker = 3
+let command_text_color = 4
 let tx_kind_create_signal = 1
 let tx_kind_write_signal = 2
 let tx_kind_create_widget = 3

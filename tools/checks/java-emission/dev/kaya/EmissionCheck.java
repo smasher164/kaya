@@ -420,6 +420,111 @@ public final class EmissionCheck {
         });
     }
 
+    // THE RICH DOCUMENT (docs/rich-document-plan.md §11, RD13): the .kdoc is
+    // the core's bytes, the ranged fold snaps every paragraph attribute and
+    // folds its absence as a removal, and the acts are format under a name.
+    private static final String KDOC = "{\n  \"kaya\": \"document\",\n  \"version\": 1,\n  \"requires\": [],\n"
+            + "  \"paragraphs\": [\n"
+            + "    {\"block\": \"heading1\", \"spans\": [[\"Walks\"]]},\n"
+            + "    {\"list\": \"bullet\", \"spans\": [[\"map\"]]},\n"
+            + "    {\"list\": \"bullet\", \"indent\": 1, \"spans\": [[\"water\", {\"color\": \"#C4554D\"}]]}\n"
+            + "  ]\n}\n";
+
+    private static String spell(List<KayaApp.TextRun> runs) {
+        List<String> parts = new ArrayList<>();
+        for (KayaApp.TextRun r : runs) {
+            parts.add(r.range().start + ":" + r.range().stop + " " + r.name() + "=" + r.value());
+        }
+        return String.join("|", parts);
+    }
+
+    private static boolean holds(List<byte[]> got, byte[] want) {
+        for (byte[] r : got) {
+            if (Arrays.equals(r, want)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void richDocument(KayaApp app) {
+        KayaApp.Document walks = new KayaApp.Document("Walks\nmap\nwater")
+                .block(KayaApp.TextRange.ofBytes(0, 5), KayaApp.Block.HEADING1)
+                .list(KayaApp.TextRange.ofBytes(6, 15), KayaApp.ListKind.BULLET)
+                .indent(KayaApp.TextRange.ofBytes(10, 15), 1)
+                .color(KayaApp.TextRange.ofBytes(10, 15), "#c4554d");
+        String file = new String(walks.toKdoc(), StandardCharsets.UTF_8);
+        check(file.equals(KDOC), "toKdoc wrote\n" + file + "\nand Rust writes\n" + KDOC);
+        KayaApp.Kdoc back = KayaApp.Document.fromKdoc(file.getBytes(StandardCharsets.UTF_8));
+        check(back.readOnly().isEmpty(), "a kaya-written .kdoc read back read-only: " + back.readOnly());
+        check(new String(back.document().toKdoc(), StandardCharsets.UTF_8).equals(KDOC),
+                "a .kdoc read back wrote different bytes");
+        String said = "";
+        try {
+            KayaApp.Document.fromKdoc("{\"kaya\": \"document\", \"version\": 2, \"paragraphs\": []}"
+                    .getBytes(StandardCharsets.UTF_8));
+        } catch (IllegalArgumentException e) {
+            said = e.getMessage();
+        }
+        check(said.equals("the document is version 2, newer than the version 1 this kaya reads"),
+                "a version-2 .kdoc was refused with \"" + said + "\"");
+
+        staged(app, tx -> {
+            KayaApp.Widget editor = tx.textarea().rich();
+            tx.setDocument(editor, new KayaApp.Document("Walks\nmap\nwater"));
+            int before = records(tx).size();
+            tx.formatRange(editor, KayaApp.TextRange.ofBytes(7, 8), "list", "bullet");
+            tx.formatRange(editor, KayaApp.TextRange.ofBytes(0, 2), "color", "#abcdef");
+            List<byte[]> got = new ArrayList<>(records(tx).subList(before, records(tx).size()));
+            check(holds(got, KayaWire.txFormatText(editor.id, 0, 1, 6, 9, new Object[] { "list", "bullet" }))
+                    && holds(got, KayaWire.txFormatText(editor.id, 0, 1, 0, 2, new Object[] { "color", "#ABCDEF" })),
+                    "a ranged list act did not snap to its paragraph, or a ranged colour was not upper-cased");
+            check(spell(app.document(editor).runs()).equals("0:2 color=#ABCDEF|6:9 list=bullet"),
+                    "the fold after a ranged list act reads " + spell(app.document(editor).runs()));
+            before = records(tx).size();
+            tx.formatRange(editor, KayaApp.TextRange.ofBytes(7, 8), "list", "none");
+            got = new ArrayList<>(records(tx).subList(before, records(tx).size()));
+            check(holds(got, KayaWire.txFormatText(editor.id, 1, 1, 6, 9, new Object[] { "list", "" }))
+                    && spell(app.document(editor).runs()).equals("0:2 color=#ABCDEF"),
+                    "a ranged list act with none did not fold as the removal: "
+                            + spell(app.document(editor).runs()));
+
+            before = records(tx).size();
+            tx.setList(editor, KayaApp.ListKind.CHECK);
+            tx.indent(editor);
+            tx.outdent(editor);
+            tx.setParagraphAlign(editor, KayaApp.ParagraphAlign.CENTER);
+            tx.checkItems(editor, true);
+            tx.checkItems(editor, false);
+            tx.color(editor, "#c4554d");
+            tx.pickTextColor(editor);
+            got = new ArrayList<>(records(tx).subList(before, records(tx).size()));
+            List<byte[]> want = List.of(
+                    KayaWire.txFormatText(editor.id, 0, 0, 0, 0, new Object[] { "list", "check" }),
+                    KayaWire.txFormatText(editor.id, 0, 0, 0, 0, new Object[] { "indent", "+1" }),
+                    KayaWire.txFormatText(editor.id, 0, 0, 0, 0, new Object[] { "indent", "-1" }),
+                    KayaWire.txFormatText(editor.id, 0, 0, 0, 0, new Object[] { "align", "center" }),
+                    KayaWire.txFormatText(editor.id, 0, 0, 0, 0, new Object[] { "checked", "true" }),
+                    KayaWire.txFormatText(editor.id, 1, 0, 0, 0, new Object[] { "checked", "" }),
+                    KayaWire.txFormatText(editor.id, 0, 0, 0, 0, new Object[] { "color", "#C4554D" }),
+                    KayaWire.txWidgetCommand(editor.id, KayaWire.COMMAND_TEXT_COLOR));
+            boolean same = got.size() == want.size();
+            for (int i = 0; same && i < want.size(); i++) {
+                same = Arrays.equals(got.get(i), want.get(i));
+            }
+            check(same, "the rich document's acts staged " + got.size()
+                    + " records, not the seven format acts and the picker command");
+        });
+
+        KayaApp.Selection sel = new KayaApp.Selection(KayaApp.TextRange.ofBytes(0, 3), List.of(
+                new KayaApp.TextRun(KayaApp.TextRange.ofBytes(0, 3), "list", "numbered"),
+                new KayaApp.TextRun(KayaApp.TextRange.ofBytes(0, 3), "color", "#C4554D")));
+        check(sel.list() == KayaApp.ListKind.NUMBERED && sel.paragraphAlign() == KayaApp.ParagraphAlign.START
+                && sel.color().orElse("").equals("#C4554D")
+                && new KayaApp.Selection(KayaApp.TextRange.ofBytes(0, 0), List.of()).color().isEmpty(),
+                "a selection misread its list kind, alignment or colour");
+    }
+
     public static void main(String[] args) {
         String lib = System.getenv("KAYA_LIB");
         if (lib != null) {
@@ -433,6 +538,7 @@ public final class EmissionCheck {
         chain(app);
         menus(app);
         formats(app);
+        richDocument(app);
         if (!FAILURES.isEmpty()) {
             System.out.println("emission-check: " + FAILURES.size() + " failure(s)");
             System.exit(1);

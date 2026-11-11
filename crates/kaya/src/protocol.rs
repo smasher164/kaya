@@ -2856,6 +2856,10 @@ pub enum CommandKind {
     /// Focus a text field and open the platform's emoji picker on it; a
     /// chosen emoji arrives as text_changed (docs/emoji-picker-plan.md).
     EmojiPicker,
+    /// Present the platform's colour picker over a rich textarea's selection;
+    /// each colour the user commits is the widget's own `color` act
+    /// (docs/rich-document-plan.md §5).
+    TextColor,
 }
 
 /// A span of a text widget's content, in UTF-8 BYTE offsets into the widget's

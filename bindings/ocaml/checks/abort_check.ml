@@ -853,6 +853,114 @@ let () =
       fail "the fold after the two removals holds [%s], wanted nothing"
         (show_runs runs));
 
+  (* THE RICH DOCUMENT (docs/rich-document-plan.md §11, RD13): the .kdoc is
+     the core's bytes, the ranged fold snaps every paragraph attribute and
+     folds its absence as a removal, and the acts are [format] under a
+     name. *)
+  let kdoc_file =
+    "{\n  \"kaya\": \"document\",\n  \"version\": 1,\n  \"requires\": [],\n"
+    ^ "  \"paragraphs\": [\n"
+    ^ "    {\"block\": \"heading1\", \"spans\": [[\"Walks\"]]},\n"
+    ^ "    {\"list\": \"bullet\", \"spans\": [[\"map\"]]},\n"
+    ^ "    {\"list\": \"bullet\", \"indent\": 1, \"spans\": [[\"water\", {\"color\": \"#C4554D\"}]]}\n"
+    ^ "  ]\n}\n"
+  in
+  let walks =
+    Document.create "Walks\nmap\nwater"
+    |> Document.block (0, 5) Heading1
+    |> Document.list (6, 15) List_kind.Bullet
+    |> Document.indent (10, 15) 1
+    |> Document.color (10, 15) "#c4554d"
+  in
+  let walks_file = Document.to_kdoc walks in
+  if walks_file <> kdoc_file then
+    fail "to_kdoc wrote\n%s\nand Rust writes\n%s" walks_file kdoc_file;
+  let back = Document.of_kdoc walks_file in
+  if back.read_only <> None then fail "a kaya-written .kdoc read back read-only";
+  if Document.to_kdoc back.document <> kdoc_file then
+    fail "a .kdoc read back wrote different bytes";
+  (match Document.of_kdoc "{\"kaya\": \"document\", \"version\": 2, \"paragraphs\": []}" with
+  | exception Failure said ->
+      if said <> "the document is version 2, newer than the version 1 this kaya reads" then
+        fail "a version-2 .kdoc was refused with %S" said
+  | _ -> fail "a version-2 .kdoc was read");
+
+  let (Widget editor_id) = editor in
+  let queued call =
+    build app (fun () ->
+        let tx = the_tx () in
+        let before = List.length (For_checks.records tx) in
+        call ();
+        List.rev (queued_since tx before))
+  in
+  build app (fun () -> set_document editor (Document.create "Walks\nmap\nwater"));
+  let got =
+    queued (fun () ->
+        format_range editor (7, 8) "list" (List_kind.name List_kind.Bullet);
+        format_range editor (0, 2) "color" "#abcdef")
+  in
+  if got
+     <> [
+          tx_format_text editor_id 0 1 6L 9L [ Str "list"; Str "bullet" ];
+          tx_format_text editor_id 0 1 0L 2L [ Str "color"; Str "#ABCDEF" ];
+        ]
+  then
+    fail "a ranged list act did not snap to its paragraph, or a ranged colour \
+          was not upper-cased";
+  if show_runs (fold ()) <> "0..2 color=#ABCDEF, 6..9 list=bullet" then
+    fail "the fold after a ranged list act holds [%s]" (show_runs (fold ()));
+  let got =
+    queued (fun () -> format_range editor (7, 8) "list" (List_kind.name List_kind.None))
+  in
+  if got <> [ tx_format_text editor_id 1 1 6L 9L [ Str "list"; Str "" ] ]
+     || show_runs (fold ()) <> "0..2 color=#ABCDEF"
+  then
+    fail "a ranged list act with none did not fold as the removal: [%s]"
+      (show_runs (fold ()));
+  let got =
+    queued (fun () ->
+        set_list editor List_kind.Check;
+        indent editor;
+        outdent editor;
+        set_paragraph_align editor Paragraph_align.Center;
+        check_items editor true;
+        check_items editor false;
+        color editor "#c4554d";
+        pick_text_color editor)
+  in
+  let sel name value = tx_format_text editor_id 0 0 0L 0L [ Str name; Str value ] in
+  if got
+     <> [
+          sel "list" "check";
+          sel "indent" "+1";
+          sel "indent" "-1";
+          sel "align" "center";
+          sel "checked" "true";
+          tx_format_text editor_id 1 0 0L 0L [ Str "checked"; Str "" ];
+          sel "color" "#C4554D";
+          tx_widget_command editor_id command_text_color;
+        ]
+  then
+    fail "the rich document's acts queued %d records, not the seven format \
+          acts and the picker command"
+      (List.length got);
+  let doc_sel : Selection.t =
+    {
+      range = (0, 3);
+      attrs =
+        [
+          { Run.range = (0, 3); name = "list"; value = "numbered" };
+          { Run.range = (0, 3); name = "color"; value = "#C4554D" };
+        ];
+    }
+  in
+  if
+    Selection.list doc_sel <> List_kind.Numbered
+    || Selection.paragraph_align doc_sel <> Paragraph_align.Start
+    || Selection.color doc_sel <> Some "#C4554D"
+    || Selection.color { range = (0, 0); attrs = [] } <> None
+  then fail "a selection misread its list kind, alignment or colour";
+
   (* THE DOCUMENT AS A ROW FIELD (docs/rich-text-plan.md §19). NOTHING
      ELSE READS THESE BYTES: the richrows scene asserts what the CORE
      renders, so a field encoding the core happens to tolerate would be

@@ -630,6 +630,33 @@ static partial class Kaya
         kaya_pref_remove(raw, (nuint)raw.Length);
     }
 
+    [DllImport("kaya")]
+    static extern nuint kaya_kdoc_read(byte[] bytes, nuint len, byte[]? into, nuint cap);
+
+    [DllImport("kaya")]
+    static extern nuint kaya_kdoc_write(byte[] doc, nuint len, byte[]? into, nuint cap);
+
+    delegate nuint KdocCall(byte[] input, nuint len, byte[]? into, nuint cap);
+
+    static List<object> KdocValues(KdocCall call, byte[] input)
+    {
+        nuint needed = call(input, (nuint)input.Length, null, 0);
+        var buf = new byte[(int)needed];
+        call(input, (nuint)input.Length, buf, needed);
+        int count = (int)BitConverter.ToUInt32(buf, 0);
+        int at = 8;
+        var values = new List<object>(count);
+        for (int i = 0; i < count; i++)
+            values.Add(ReadValue(buf, ref at));
+        return values;
+    }
+
+    /// kaya_kdoc_read's values list (docs/rich-document-plan.md RD13).
+    internal static List<object> KdocRead(byte[] bytes) => KdocValues(kaya_kdoc_read, bytes);
+
+    /// kaya_kdoc_write's values list: refusal, then the file's text.
+    internal static List<object> KdocWrite(byte[] doc) => KdocValues(kaya_kdoc_write, doc);
+
     /// One value at `at`, advancing past it (header plus payload, padded
     /// to eight). A blob is redeemed and RELEASED here, as the generated
     /// ParseClip does it.

@@ -9,6 +9,28 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — the rich document (docs/rich-document-plan.md), depth on the mac (2026-11-11); iOS, GTK, WinUI and Compose arms are the breadth slice (§9 step 4)
+KEY: richdoc, expect_markers, click_marker, pick_text_color, expect_text_ink, select_text, shift+tab, backspace, kaya_text_key, kaya_text_markers, kaya_text_copy, kaya_text_paste, kaya_ink_for_dark, kaya_ink_from_dark, text_color, kayaDrawnMarkers, kaya.draw.marker, KayaRichFragment, DEPTH STUB richdoc
+
+The Mac arm, the Rust guest and tools/scenes/richdoc.steps run on the mac lane
+(plain and dark). The new harness verbs refuse on the Rust backends through
+Stage defaults, and each unbuilt arm refuses the scene through the stub call:
+
+  - **DEPTH STUB: richdoc on gtk** — markers drawn in `snapshot_layer` from
+    `gtk_text_view_get_line_yrange`, a `left-margin` tag per level, colour on
+    `notify::dark`, the four keys and the box click offered to `kaya_text_key`,
+    RTF and HTML through the clipboard, and the five verbs.
+  - **DEPTH STUB: richdoc on winui** — native list paragraphs or drawn markers
+    (§6), colour re-applied after `ActualThemeChanged`, the keys, the clipboard,
+    the colour picker flyout, and the five verbs.
+  - **DEPTH STUB: richdoc on compose** — markers in `drawBehind`, a
+    `TextIndent` per level, colour when the palette re-resolves, the keys, the
+    clipboard, kaya's colour sheet, and the five verbs.
+  - **DEPTH STUB: richdoc on swiftui/ios** — the Mac arm's shared helpers
+    (`kayaRichParagraphStyle`, `kayaDocumentInk`, the fragment's markers) wired
+    into the UITextView arm, the keys, the clipboard,
+    UIColorPickerViewController for `text_color`, and the five verbs.
+
 ## ~~RULING — a growing video view or surface is laid out five ways (measured 2026-11-01, the call screen's geometry)~~ RESOLVED 2026-11-01, ruled and built (the maintainer: "i agree with your recommendation of a"): a growing aspect box fills until either axis of its room is used up, its box the picture with no bands, centred across a column where the width is not the limit, and the share it does not use stays with the container (docs/media-plan.md §3, a growing box; `crate::media::grown_box`). All five arms follow it: SwiftUI's KayaFlex caps the share and proposes the fitted box (the iOS slot under the box is gone), Compose takes `weight(fill = false)`, GTK's flex layout allocates the box (and a growing view takes no minimum, which had held the window at 1132 high), WinUI widens the host and caps the rows. tools/scenes/farend.steps reads `surface@narrow` "80x60" with the gap under it 8 and `surface@tall` "4:3" on all five lanes in all nine languages, watched red on the old arms.
 
 The chat app's peer picture took `grow` in the call's column until 2026-11-01, and the five backends read that one prop five ways (chatcall's reads on a 640x480 surface, natural 320x240): SwiftUI on the mac widened the box until it filled the grown slot keeping its aspect (507x380); SwiftUI on iOS widened it to the room (343x257) and left the rest of the slot empty under it; Compose widened it within the room (320x240 on the 360 dp phone); WinUI kept the natural width and stretched its host down the slot (320x372), and GTK did the same (320x352 on X11, 320x362 on Wayland), each drawing the picture centred with bands above and below. docs/media-plan.md §3 says only that a view "is no wider than its natural width unless it grows" and that its height follows its width; it does not say what a growing aspect box does with the main axis of a column. The app dropped `grow` (docs/capture-plan.md §12 item 7), so no scene grows a video view now. To settle: whether grow on an aspect box widens it until either axis is used up (the mac's reading, no bands anywhere), or widens it only across the column (the phones'), and then one arm per backend and a scene read of a growing view's box on five lanes.

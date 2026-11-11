@@ -481,6 +481,38 @@ def fmt_time(packed: int, length: int) -> str:
     return _filled("kaya_fmt_time", lambda o, c: _lib.kaya_fmt_time(packed, length, o, c))
 
 
+_lib.kaya_kdoc_read.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                                ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_kdoc_read.restype = ctypes.c_size_t
+_lib.kaya_kdoc_write.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                                 ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_kdoc_write.restype = ctypes.c_size_t
+
+
+def _kdoc_values(call: Callable[..., int], data: bytes) -> list[Any]:
+    needed = call(data, len(data), None, 0)
+    out = ctypes.create_string_buffer(needed)
+    call(data, len(data), out, needed)
+    raw = out.raw[:needed]
+    count = int.from_bytes(raw[0:4], "little")
+    values: list[Any] = []
+    at = 8
+    for _ in range(count):
+        value, at = wire.parse_value(raw, at)
+        values.append(value)
+    return values
+
+
+def kdoc_read(data: bytes) -> list[Any]:
+    """kaya_kdoc_read's values list (docs/rich-document-plan.md RD13)."""
+    return _kdoc_values(_lib.kaya_kdoc_read, data)
+
+
+def kdoc_write(document: bytes) -> list[Any]:
+    """kaya_kdoc_write's values list: refusal, then the file's text."""
+    return _kdoc_values(_lib.kaya_kdoc_write, document)
+
+
 def fmt_date_time(date: int, time: int, length: int) -> str:
     return _filled("kaya_fmt_date_time",
                    lambda o, c: _lib.kaya_fmt_date_time(date, time, length, o, c))

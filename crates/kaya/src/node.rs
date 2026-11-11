@@ -188,6 +188,8 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("imagePixels", image_pixels),
         ("imageDominant", image_dominant),
         ("imagePalette", image_palette),
+        ("kdocRead", kdoc_read),
+        ("kdocWrite", kdoc_write),
         ("catalog", catalog),
         ("tr", tr),
         // The capture worker's two listeners and their teardown
@@ -727,6 +729,25 @@ unsafe extern "C" fn image_palette(env: Env, info: CbInfo) -> Value {
         (api.napi_create_typedarray)(env, NAPI_FLOAT64_ARRAY, pairs.len(), ab, 0, &mut out);
     }
     out
+}
+
+/// kaya_kdoc_read and kaya_kdoc_write's values lists, as their bytes
+/// (docs/rich-document-plan.md RD13; bindings/js/kaya/runtime.ts decodes).
+unsafe fn kdoc_call(env: Env, info: CbInfo, what: &str, call: unsafe extern "C" fn(*const u8, usize, *mut u8, usize) -> usize) -> Value {
+    let [b] = unsafe { args::<1>(env, info) };
+    let input = try_or_throw!(env, unsafe { bytes_arg(env, b, what) });
+    let needed = unsafe { call(input.as_ptr(), input.len(), ptr::null_mut(), 0) };
+    let mut out = vec![0u8; needed];
+    unsafe { call(input.as_ptr(), input.len(), out.as_mut_ptr(), needed) };
+    unsafe { uint8array(env, &out) }
+}
+
+unsafe extern "C" fn kdoc_read(env: Env, info: CbInfo) -> Value {
+    unsafe { kdoc_call(env, info, "kdocRead", capi::kaya_kdoc_read) }
+}
+
+unsafe extern "C" fn kdoc_write(env: Env, info: CbInfo) -> Value {
+    unsafe { kdoc_call(env, info, "kdocWrite", capi::kaya_kdoc_write) }
 }
 
 unsafe extern "C" fn catalog(env: Env, info: CbInfo) -> Value {

@@ -2030,6 +2030,82 @@ if (isMainThread) {
     }, /formatRange/),
   );
 
+  // THE RICH DOCUMENT (docs/rich-document-plan.md §11, RD13): the .kdoc is
+  // the core's bytes, the ranged fold snaps every paragraph attribute and
+  // folds its absence as a removal, and the acts are `format` under a name.
+  const KDOC =
+    '{\n  "kaya": "document",\n  "version": 1,\n  "requires": [],\n' +
+    '  "paragraphs": [\n' +
+    '    {"block": "heading1", "spans": [["Walks"]]},\n' +
+    '    {"list": "bullet", "spans": [["map"]]},\n' +
+    '    {"list": "bullet", "indent": 1, "spans": [["water", {"color": "#C4554D"}]]}\n' +
+    "  ]\n}\n";
+  const walks = new kaya.Document("Walks\nmap\nwater")
+    .block([0, 5], kaya.Block.HEADING1)
+    .list([6, 15], kaya.ListKind.BULLET)
+    .indent([10, 15], 1)
+    .color([10, 15], "#c4554d");
+  const walksFile = walks.toKdoc();
+  const walksBack = kaya.Document.fromKdoc(walksFile);
+  richCheck("toKdoc writes the bytes Rust writes for the same document, the colour upper-cased", Buffer.from(walksFile).toString("utf8") === KDOC);
+  richCheck(
+    "fromKdoc reads the file back editable, and a second write is the same bytes",
+    walksBack.readOnly === null && Buffer.from(walksBack.document.toKdoc()).toString("utf8") === KDOC,
+  );
+  let newerSaid = "";
+  try {
+    kaya.Document.fromKdoc(new Uint8Array(Buffer.from('{"kaya": "document", "version": 2, "paragraphs": []}', "utf8")));
+  } catch (e) {
+    newerSaid = (e as Error).message;
+  }
+  richCheck("fromKdoc refuses a version-2 file in the core's own sentence", newerSaid === "the document is version 2, newer than the version 1 this kaya reads");
+
+  shipped.length = 0;
+  app.build(() => {
+    quietEditor.setDocument(new kaya.Document("Walks\nmap\nwater"));
+    quietEditor.formatRange([7, 8], "list", kaya.ListKind.BULLET);
+    quietEditor.formatRange([0, 2], "color", "#abcdef");
+  });
+  richCheck(
+    "a ranged list act snaps to its whole paragraph, wire and fold agreeing; a ranged colour is upper-cased and not snapped",
+    shipped.flat().some((r) => sameBytes(r, wire.tx_format_text(quietEditor.id, 0, 1, 6, 9, ["list", "bullet"]))) &&
+      shipped.flat().some((r) => sameBytes(r, wire.tx_format_text(quietEditor.id, 0, 1, 0, 2, ["color", "#ABCDEF"]))) &&
+      spell(quietEditor.document().runs) === "0:2 color=#ABCDEF|6:9 list=bullet",
+  );
+  shipped.length = 0;
+  app.build(() => {
+    quietEditor.formatRange([7, 8], "list", kaya.ListKind.NONE);
+  });
+  richCheck(
+    "a ranged list act with `none` is the REMOVAL: removed 1 on the wire and the run gone from the fold",
+    shipped.flat().some((r) => sameBytes(r, wire.tx_format_text(quietEditor.id, 1, 1, 6, 9, ["list", ""]))) && spell(quietEditor.document().runs) === "0:2 color=#ABCDEF",
+  );
+  shipped.length = 0;
+  app.build(() => {
+    quietEditor.setList(kaya.ListKind.CHECK).indent().outdent().setParagraphAlign(kaya.ParagraphAlign.CENTER);
+    quietEditor.checkItems(true).checkItems(false).color("#c4554d").pickTextColor();
+  });
+  const docActs = shipped.flat();
+  const wantActs = [
+    wire.tx_format_text(quietEditor.id, 0, 0, 0, 0, ["list", "check"]),
+    wire.tx_format_text(quietEditor.id, 0, 0, 0, 0, ["indent", "+1"]),
+    wire.tx_format_text(quietEditor.id, 0, 0, 0, 0, ["indent", "-1"]),
+    wire.tx_format_text(quietEditor.id, 0, 0, 0, 0, ["align", "center"]),
+    wire.tx_format_text(quietEditor.id, 0, 0, 0, 0, ["checked", "true"]),
+    wire.tx_format_text(quietEditor.id, 1, 0, 0, 0, ["checked", ""]),
+    wire.tx_format_text(quietEditor.id, 0, 0, 0, 0, ["color", "#C4554D"]),
+    wire.tx_widget_command(quietEditor.id, wire.COMMAND_TEXT_COLOR),
+  ];
+  richCheck(
+    "the rich document's acts are `format` under their names, and pickTextColor is widget command 4",
+    docActs.length === wantActs.length && wantActs.every((w, i) => sameBytes(docActs[i]!, w)),
+  );
+  const docSel = new kaya.Selection([0, 3], [kaya.run([0, 3], "list", "numbered"), kaya.run([0, 3], "color", "#C4554D")]);
+  richCheck(
+    "a selection reads its list kind, alignment and colour",
+    docSel.list() === kaya.ListKind.NUMBERED && docSel.paragraphAlign() === kaya.ParagraphAlign.START && docSel.color() === "#C4554D" && new kaya.Selection([0, 0], []).color() === null,
+  );
+
   // THE NAMED ACTS (docs/rich-text-plan.md §18): sugar and nothing else —
   // each writes the record `format` writes under its own name, `link`
   // carrying the URL where the flags carry "true".

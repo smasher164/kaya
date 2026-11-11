@@ -349,6 +349,93 @@ precondition(
         + spellRuns(restoredNote.body.runs) + ", the bytes say \"\(rowDoc.text)\" / "
         + spellRuns(rowDoc.runs))
 
+// THE RICH DOCUMENT (docs/rich-document-plan.md §11, RD13): the .kdoc is
+// the core's bytes, the ranged fold snaps every paragraph attribute and
+// folds its absence as a removal, and the acts are format under a name.
+let kdocFile = "{\n  \"kaya\": \"document\",\n  \"version\": 1,\n  \"requires\": [],\n"
+    + "  \"paragraphs\": [\n"
+    + "    {\"block\": \"heading1\", \"spans\": [[\"Walks\"]]},\n"
+    + "    {\"list\": \"bullet\", \"spans\": [[\"map\"]]},\n"
+    + "    {\"list\": \"bullet\", \"indent\": 1, \"spans\": [[\"water\", {\"color\": \"#C4554D\"}]]}\n"
+    + "  ]\n}\n"
+let walks = KayaDocument("Walks\nmap\nwater")
+    .block(0..<5, .heading1)
+    .list(6..<15, .bullet)
+    .indent(10..<15, 1)
+    .color(10..<15, "#c4554d")
+let walksFile = String(decoding: walks.toKdoc(), as: UTF8.self)
+precondition(walksFile == kdocFile, "toKdoc wrote\n\(walksFile)\nand Rust writes\n\(kdocFile)")
+let walksBack = try KayaDocument.fromKdoc(Data(walksFile.utf8))
+precondition(walksBack.readOnly == nil, "a kaya-written .kdoc read back read-only: \(walksBack.readOnly ?? "")")
+precondition(String(decoding: walksBack.document.toKdoc(), as: UTF8.self) == kdocFile,
+    "a .kdoc read back wrote different bytes")
+var newerSaid = ""
+do {
+    _ = try KayaDocument.fromKdoc(Data("{\"kaya\": \"document\", \"version\": 2, \"paragraphs\": []}".utf8))
+} catch let refusal as KayaKdocRefusal {
+    newerSaid = refusal.sentence
+}
+precondition(newerSaid == "the document is version 2, newer than the version 1 this kaya reads",
+    "a version-2 .kdoc was refused with \"\(newerSaid)\"")
+
+func formatRecord(_ w: UInt64, _ removed: UInt32, _ ranged: UInt32, _ start: UInt64, _ stop: UInt64,
+                  _ name: String, _ value: String) -> Data {
+    var want = KayaTx()
+    want.formatText(w, removed, ranged, start, stop, [.str(name), .str(value)])
+    return want.bytes
+}
+
+app.build { tx in
+    let editor = tx.textarea(rich: true)
+    tx.setDocument(editor, KayaDocument("Walks\nmap\nwater"))
+    var start = tx.tx.bytes.count
+    tx.formatRange(editor, 7..<8, "list", "bullet")
+    tx.formatRange(editor, 0..<2, "color", "#abcdef")
+    precondition(
+        tx.tx.bytes[start...] == formatRecord(editor.id, 0, 1, 6, 9, "list", "bullet")
+            + formatRecord(editor.id, 0, 1, 0, 2, "color", "#ABCDEF"),
+        "a ranged list act did not snap to its paragraph, or a ranged colour was not upper-cased")
+    precondition(spellRuns(tx.app.document(editor).runs) == "0:2 color=#ABCDEF|6:9 list=bullet",
+        "the fold after a ranged list act reads \(spellRuns(tx.app.document(editor).runs))")
+    start = tx.tx.bytes.count
+    tx.formatRange(editor, 7..<8, "list", "none")
+    precondition(
+        tx.tx.bytes[start...] == formatRecord(editor.id, 1, 1, 6, 9, "list", "")
+            && spellRuns(tx.app.document(editor).runs) == "0:2 color=#ABCDEF",
+        "a ranged list act with none did not fold as the removal: \(spellRuns(tx.app.document(editor).runs))")
+
+    start = tx.tx.bytes.count
+    tx.setList(editor, .check)
+    tx.indent(editor)
+    tx.outdent(editor)
+    tx.setParagraphAlign(editor, .center)
+    tx.checkItems(editor, true)
+    tx.checkItems(editor, false)
+    tx.color(editor, "#c4554d")
+    tx.pickTextColor(editor)
+    var picker = KayaTx()
+    picker.widgetCommand(editor.id, UInt32(KAYA_COMMAND_TEXT_COLOR))
+    let want = formatRecord(editor.id, 0, 0, 0, 0, "list", "check")
+        + formatRecord(editor.id, 0, 0, 0, 0, "indent", "+1")
+        + formatRecord(editor.id, 0, 0, 0, 0, "indent", "-1")
+        + formatRecord(editor.id, 0, 0, 0, 0, "align", "center")
+        + formatRecord(editor.id, 0, 0, 0, 0, "checked", "true")
+        + formatRecord(editor.id, 1, 0, 0, 0, "checked", "")
+        + formatRecord(editor.id, 0, 0, 0, 0, "color", "#C4554D")
+        + picker.bytes
+    precondition(tx.tx.bytes[start...] == want,
+        "the rich document's acts queued other bytes than the seven format acts and the picker command")
+}
+
+let docSel = KayaSelection(range: 0..<3, attrs: [
+    KayaRun(range: 0..<3, name: "list", value: "numbered"),
+    KayaRun(range: 0..<3, name: "color", value: "#C4554D"),
+])
+precondition(
+    docSel.list == .numbered && docSel.paragraphAlign == .start && docSel.color == "#C4554D"
+        && KayaSelection(range: 0..<0, attrs: []).color == nil,
+    "a selection misread its list kind, alignment or colour")
+
 // The trap side, via re-exec (see the KAYA_GUARD_TRAP branch at the
 // top): a mirror read inside a For or When body being declared must
 // kill the process, an alias shortcut hitting the binding's one parser

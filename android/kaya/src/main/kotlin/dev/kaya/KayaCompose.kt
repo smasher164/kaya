@@ -3730,7 +3730,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x585cc259da5c8c75uL
+    private const val SPEC_HASH: ULong = 0x5f131b7e55fe0f95uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -15836,6 +15836,8 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         if (got == want) observed.add("${parts[2]} $want")
                         else failures.add("${parts[2]} is $got, wanted $want")
                     }
+                    "select_text", "expect_markers", "click_marker", "pick_text_color",
+                    "expect_text_ink" -> depthStub("richdoc")
                     "format" -> {
                         // `format <target> <start:end> <name>[=<value>] [off]`
                         // in BYTES (docs/rich-text-plan.md R9): select the

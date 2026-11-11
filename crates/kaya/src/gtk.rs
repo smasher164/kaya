@@ -19690,6 +19690,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // docs/emoji-picker-plan.md §2: GtkEmojiChooser, through the
                 // action a text widget installs for Ctrl+. — on an entry or a
                 // search field the action lives on its inner GtkText.
+                CommandKind::TextColor => crate::depth_stub("richdoc"),
                 CommandKind::EmojiPicker => {
                     let control = widget.control();
                     let target = match control.downcast_ref::<gtk4::Editable>() {
@@ -23324,6 +23325,21 @@ impl crate::harness::Stage for GtkStage {
     /// disagreement is a KAYA_DIAG naming both, which is R9's per-backend
     /// half. Not while a composition is live — the marked text is the
     /// widget's alone until it commits (R5).
+    fn select_text(&self, _: crate::harness::Target, _: crate::harness::TextRange) -> Result<(), String> {
+        crate::depth_stub("richdoc")
+    }
+    fn drawn_markers(&self, _: crate::harness::Target) -> Result<(String, String), String> {
+        crate::depth_stub("richdoc")
+    }
+    fn click_marker(&self, _: crate::harness::Target, _: u64) -> Result<(), String> {
+        crate::depth_stub("richdoc")
+    }
+    fn pick_text_color(&self, _: crate::harness::Target, _: &str) -> Result<(), String> {
+        crate::depth_stub("richdoc")
+    }
+    fn text_ink(&self, _: crate::harness::Target, _: crate::harness::TextRange) -> Result<String, String> {
+        crate::depth_stub("richdoc")
+    }
     fn rich_runs(&self, target: crate::harness::Target) -> String {
         Self::on_main(move |core| match rich_target_id(core, target) {
             Some(id) => {

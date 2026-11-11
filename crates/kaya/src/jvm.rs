@@ -175,6 +175,9 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
             // The one quantizer (docs/styling-pass-plan.md Y2).
             NativeMethod { name: "imageDominant".into(), sig: "([B)I".into(), fn_ptr: ring_image_dominant as *mut _ },
             NativeMethod { name: "imagePalette".into(), sig: "([BI)[D".into(), fn_ptr: ring_image_palette as *mut _ },
+            // The .kdoc pair (docs/rich-document-plan.md RD13).
+            NativeMethod { name: "kdocRead".into(), sig: "([B)[B".into(), fn_ptr: ring_kdoc_read as *mut _ },
+            NativeMethod { name: "kdocWrite".into(), sig: "([B)[B".into(), fn_ptr: ring_kdoc_write as *mut _ },
             // The reader's two pulls (docs/media-plan.md §8 ruling 4).
             NativeMethod { name: "readerPeaks".into(), sig: "(JJ)[S".into(), fn_ptr: ring_reader_peaks as *mut _ },
             NativeMethod { name: "imagePixels".into(), sig: "(J[I)[B".into(), fn_ptr: ring_image_pixels as *mut _ },
@@ -592,6 +595,27 @@ extern "system" fn ring_image_palette<'a>(
     let arr = env.new_double_array(pairs.len() as i32).expect("kaya: allocating the palette failed");
     env.set_double_array_region(&arr, 0, &pairs).expect("kaya: writing the palette failed");
     arr
+}
+
+/// KayaRing.kdocRead and kdocWrite: the C pair's values list, as its bytes.
+fn kdoc_call<'a>(
+    env: &JNIEnv<'a>,
+    input: JByteArray<'a>,
+    call: unsafe extern "C" fn(*const u8, usize, *mut u8, usize) -> usize,
+) -> JByteArray<'a> {
+    let input = env.convert_byte_array(&input).expect("kaya: reading the .kdoc input failed");
+    let len = unsafe { call(input.as_ptr(), input.len(), std::ptr::null_mut(), 0) };
+    let mut buf = vec![0u8; len];
+    unsafe { call(input.as_ptr(), input.len(), buf.as_mut_ptr(), len) };
+    env.byte_array_from_slice(&buf).expect("kaya: handing over the .kdoc answer failed")
+}
+
+extern "system" fn ring_kdoc_read<'a>(env: JNIEnv<'a>, _class: JClass<'a>, bytes: JByteArray<'a>) -> JByteArray<'a> {
+    kdoc_call(&env, bytes, crate::capi::kaya_kdoc_read)
+}
+
+extern "system" fn ring_kdoc_write<'a>(env: JNIEnv<'a>, _class: JClass<'a>, doc: JByteArray<'a>) -> JByteArray<'a> {
+    kdoc_call(&env, doc, crate::capi::kaya_kdoc_write)
 }
 
 extern "system" fn ring_catalog<'a>(env: JNIEnv<'a>, _class: JClass<'a>, app: JByteArray<'a>) {

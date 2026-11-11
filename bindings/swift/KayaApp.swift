@@ -2244,6 +2244,93 @@ public enum KayaBlock: String {
     var name: String { rawValue }
 }
 
+/// A list item's kind, the `list` attribute's value
+/// (docs/rich-document-plan.md RD2); `.none` is its absence, as `.body` is
+/// a block's.
+public enum KayaListKind: String {
+    case none
+    case bullet
+    case numbered
+    case check
+
+    var name: String { rawValue }
+}
+
+/// A paragraph's alignment, the `align` attribute's value; `.start` is its
+/// absence. Not KayaAlign, which places a container's children.
+public enum KayaParagraphAlign: String {
+    case start
+    case center
+    case end
+    case justify
+
+    var name: String { rawValue }
+}
+
+/// The attributes that cover whole paragraphs (RD1).
+func kayaParagraphAttr(_ name: String) -> Bool {
+    ["block", "list", "indent", "checked", "start", "align"].contains(name)
+}
+
+/// A value's one spelling (crates/kaya/src/richdoc.rs, canonical_value): a
+/// colour in upper case.
+func kayaCanonicalValue(_ name: String, _ value: String) -> String {
+    name == "color" ? value.uppercased() : value
+}
+
+/// Whether `value` spells the attribute's absence.
+func kayaAbsentValue(_ name: String, _ value: String) -> Bool {
+    switch (name, value) {
+    case ("block", "body"), ("list", "none"), ("indent", "0"), ("align", "start"): return true
+    default: return false
+    }
+}
+
+/// A `.kdoc` file read (docs/rich-document-plan.md §4): the document, and
+/// why it may only be read when it carries a name this kaya cannot keep
+/// through an edit (RD8); nil when editable.
+public struct KayaKdoc: Equatable, Sendable {
+    public var document: KayaDocument
+    public var readOnly: String?
+}
+
+/// A `.kdoc` file's bytes refused, in the core's one sentence.
+public struct KayaKdocRefusal: Error, CustomStringConvertible, LocalizedError {
+    public let sentence: String
+
+    public var description: String { sentence }
+    public var errorDescription: String? { sentence }
+}
+
+/// kaya_kdoc_read's and kaya_kdoc_write's values lists
+/// (docs/rich-document-plan.md RD13).
+private func kayaKdocValues(
+    _ input: Data, _ call: (UnsafePointer<UInt8>?, UInt, UnsafeMutablePointer<UInt8>?, UInt) -> UInt
+) -> [KayaValue] {
+    let raw = [UInt8](input)
+    let needed = raw.withUnsafeBufferPointer { call($0.baseAddress, UInt($0.count), nil, 0) }
+    var out = [UInt8](repeating: 0, count: Int(needed))
+    raw.withUnsafeBufferPointer { inp in
+        out.withUnsafeMutableBufferPointer { _ = call(inp.baseAddress, UInt(inp.count), $0.baseAddress, needed) }
+    }
+    var values: [KayaValue] = []
+    out.withUnsafeBytes { buf in
+        let count = Int(buf.loadUnaligned(fromByteOffset: 0, as: UInt32.self))
+        var at = 8
+        for _ in 0..<count {
+            let vtype = buf.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+            let vlen = Int(buf.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+            if vtype == UInt32(KAYA_VALUE_I64) {
+                values.append(.i64(buf.loadUnaligned(fromByteOffset: at + 8, as: Int64.self)))
+            } else {
+                values.append(.str(String(decoding: out[(at + 8)..<(at + 8 + vlen)], as: UTF8.self)))
+            }
+            at += 8 + ((vlen + 7) & ~7)
+        }
+    }
+    return values
+}
+
 /// What provoked an edit the widget reports (docs/rich-text-plan.md §2;
 /// the review page's ruling 3). THE RAW VALUES ARE WIRE VALUES
 /// (crates/kaya/src/wire.rs `EDIT_SOURCES`): KayaWire.swift carries no
@@ -2298,6 +2385,68 @@ public struct KayaDocument: Equatable, Sendable {
     /// A paragraph's kind; the range covers whole paragraphs or is refused.
     public func block(_ range: Range<Int>, _ kind: KayaBlock) -> KayaDocument {
         mark(range, "block", kind.name)
+    }
+
+    /// A list item over whole paragraphs (docs/rich-document-plan.md RD2).
+    public func list(_ range: Range<Int>, _ kind: KayaListKind) -> KayaDocument {
+        mark(range, "list", kind.name)
+    }
+
+    /// An indent level, 1 to 8, over whole paragraphs (RD3).
+    public func indent(_ range: Range<Int>, _ level: Int) -> KayaDocument {
+        mark(range, "indent", String(level))
+    }
+
+    /// A checklist item checked, over whole paragraphs.
+    public func checked(_ range: Range<Int>) -> KayaDocument { mark(range, "checked", "true") }
+
+    /// A numbered list's first number, on its first item.
+    public func start(_ range: Range<Int>, _ first: Int) -> KayaDocument {
+        mark(range, "start", String(first))
+    }
+
+    public func align(_ range: Range<Int>, _ align: KayaParagraphAlign) -> KayaDocument {
+        mark(range, "align", align.name)
+    }
+
+    /// A text colour, `#RRGGBB` as it reads on a light page (RD4, RD5).
+    public func color(_ range: Range<Int>, _ rgb: String) -> KayaDocument {
+        mark(range, "color", rgb.uppercased())
+    }
+
+    /// A `.kdoc` file's bytes read (docs/rich-document-plan.md §4); throws
+    /// KayaKdocRefusal carrying the core's one sentence when they are not
+    /// one, or name a newer major version.
+    public static func fromKdoc(_ bytes: Data) throws -> KayaKdoc {
+        let values = kayaKdocValues(bytes) { kaya_kdoc_read($0, $1, $2, $3) }
+        guard case .str(let refusal) = values[0], case .str(let why) = values[1],
+              case .str(let text) = values[2] else {
+            preconditionFailure("kaya: kaya_kdoc_read answered \(values.count) values out of shape")
+        }
+        if !refusal.isEmpty { throw KayaKdocRefusal(sentence: refusal) }
+        var doc = KayaDocument(text)
+        var i = 3
+        while i + 3 < values.count {
+            guard case .i64(let start) = values[i], case .i64(let end) = values[i + 1],
+                  case .str(let name) = values[i + 2], case .str(let value) = values[i + 3]
+            else { break }
+            doc.runs.append(KayaRun(range: kayaDecodedSpan("kdoc run", Int(start), Int(end)),
+                                    name: name, value: value))
+            i += 4
+        }
+        return KayaKdoc(document: doc, readOnly: why.isEmpty ? nil : why)
+    }
+
+    /// The document as a `.kdoc` file, the same bytes in nine bindings
+    /// (RD13); a precondition failure naming the run when it breaks a wall
+    /// setDocument holds.
+    public func toKdoc() -> Data {
+        let values = kayaKdocValues(kayaDocumentBlob(self)) { kaya_kdoc_write($0, $1, $2, $3) }
+        guard case .str(let refusal) = values[0], case .str(let file) = values[1] else {
+            preconditionFailure("kaya: kaya_kdoc_write answered \(values.count) values out of shape")
+        }
+        if !refusal.isEmpty { preconditionFailure("kaya: toKdoc: \(refusal)") }
+        return Data(file.utf8)
     }
 
     func attr(at byte: Int, _ name: String) -> String? {
@@ -2366,6 +2515,21 @@ public struct KayaSelection: Equatable {
     /// text and for paragraphs of different kinds.
     public var block: KayaBlock {
         attrs.first { $0.name == "block" }.flatMap { KayaBlock(rawValue: $0.value) } ?? .body
+    }
+
+    /// The list kind every touched paragraph shares; `.none` otherwise.
+    public var list: KayaListKind {
+        attrs.first { $0.name == "list" }.flatMap { KayaListKind(rawValue: $0.value) } ?? .none
+    }
+
+    /// The alignment every touched paragraph shares; `.start` otherwise.
+    public var paragraphAlign: KayaParagraphAlign {
+        attrs.first { $0.name == "align" }.flatMap { KayaParagraphAlign(rawValue: $0.value) } ?? .start
+    }
+
+    /// The colour holding over the whole selection, `#RRGGBB`.
+    public var color: String? {
+        attrs.first { $0.name == "color" }?.value
     }
 }
 
@@ -3362,13 +3526,13 @@ public final class KayaApp {
         kayaFoldEdit(&doc, start, end, inserted, runs)
         documents[widget] = doc
     }
-    /// A ranged act's range in the fold's text: a `block` covers the whole
-    /// paragraphs it touches, as the core snaps it
-    /// (docs/rich-text-plan.md §17).
+    /// A ranged act's range in the fold's text: a paragraph attribute
+    /// covers the whole paragraphs it touches, as the core snaps it
+    /// (docs/rich-text-plan.md §17, docs/rich-document-plan.md §11).
     fileprivate func rangedActBounds(
         _ widget: UInt64, _ range: Range<Int>, _ name: String
     ) -> Range<Int> {
-        guard name == "block" else { return range }
+        guard kayaParagraphAttr(name) else { return range }
         let bytes = Array((documents[widget]?.text ?? "").utf8)
         let start = min(range.lowerBound, bytes.count)
         let stop = min(range.upperBound, bytes.count)
@@ -5214,8 +5378,9 @@ public final class KayaAppTx {
 
     /// One attribute over a BYTE RANGE of the document, the selection left
     /// where it is: a document write, echoed by nothing, legal on a rich
-    /// label (docs/rich-text-plan.md §17). A `block` name covers the
-    /// range's whole paragraphs.
+    /// label (docs/rich-text-plan.md §17). A paragraph attribute covers the
+    /// range's whole paragraphs, and its absence (body, none, 0, start)
+    /// removes (docs/rich-document-plan.md §11).
     /// A flag attribute over a byte range, on or off.
     public func formatRange(_ w: KayaWidget, _ range: Range<Int>, _ name: String, _ on: Bool) {
         formatRange(w, range, name, on ? kayaFlagValue : "false")
@@ -5225,7 +5390,8 @@ public final class KayaAppTx {
         // A silent document write moves the fold, as applyEdit does
         // (docs/rich-text-plan.md §17).
         let at = app.rangedActBounds(w.id, range, name)
-        let mark: String? = name == "block" && value == "body" ? nil : value
+        let canonical = kayaCanonicalValue(name, value)
+        let mark: String? = kayaAbsentValue(name, canonical) ? nil : canonical
         app.absorbFormat(w.id, at.lowerBound, at.upperBound, name, mark)
         let (start, stop) = kayaRangeOffsets(at)
         tx.formatText(w.id, mark == nil ? 1 : 0, 1, start, stop,
@@ -5243,6 +5409,39 @@ public final class KayaAppTx {
     /// Make the selection's paragraphs `kind`; `.body` clears.
     public func setBlock(_ w: KayaWidget, _ kind: KayaBlock) {
         format(w, "block", kind.name)
+    }
+
+    /// Make the selection's paragraphs list items of `kind` (a heading or a
+    /// code block becomes body); `.none` ends the list. The core answers
+    /// through `KayaApp.onFormat` (docs/rich-document-plan.md §6, §11).
+    public func setList(_ w: KayaWidget, _ kind: KayaListKind) {
+        format(w, "list", kind.name)
+    }
+
+    /// One level deeper for each of the selection's paragraphs, to 8.
+    public func indent(_ w: KayaWidget) { format(w, "indent", "+1") }
+
+    /// One level shallower for each of the selection's paragraphs.
+    public func outdent(_ w: KayaWidget) { format(w, "indent", "-1") }
+
+    public func setParagraphAlign(_ w: KayaWidget, _ align: KayaParagraphAlign) {
+        format(w, "align", align.name)
+    }
+
+    /// Check or uncheck the selection's checklist items.
+    public func checkItems(_ w: KayaWidget, _ on: Bool) {
+        if on { format(w, "checked", "true") } else { unformat(w, "checked") }
+    }
+
+    /// The selection's text in `#RRGGBB` as it reads on a light page;
+    /// automatic ink is `unformat` of "color" (RD4).
+    public func color(_ w: KayaWidget, _ rgb: String) { format(w, "color", rgb.uppercased()) }
+
+    /// Present the platform's own colour picker over the selection; each
+    /// colour the user commits arrives as a "color" act through
+    /// `KayaApp.onFormat` (docs/rich-document-plan.md §5).
+    public func pickTextColor(_ w: KayaWidget) {
+        tx.widgetCommand(w.id, UInt32(KAYA_COMMAND_TEXT_COLOR))
     }
 
     /// What an `ownUndo` textarea's app answers for Edit>Undo: true

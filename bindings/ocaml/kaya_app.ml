@@ -460,6 +460,81 @@ end
 
 type run = Run.t
 
+(* Four values per run — start, stop, name, value — the shape both
+   writes and both occurrences carry. *)
+let run_values (runs : Run.t list) =
+  List.concat_map
+    (fun (r : Run.t) ->
+      [
+        Kaya_wire.I64 (Int64.of_int (fst r.range));
+        Kaya_wire.I64 (Int64.of_int (snd r.range));
+        Kaya_wire.Str r.name;
+        Kaya_wire.Str r.value;
+      ])
+    runs
+
+let rec runs_of_values values : Run.t list =
+  match values with
+  | Kaya_wire.I64 start :: Kaya_wire.I64 stop :: Kaya_wire.Str name
+    :: Kaya_wire.Str value :: rest ->
+      {
+        Run.range = decoded_span "run" (Int64.to_int start) (Int64.to_int stop);
+        name;
+        value;
+      }
+      :: runs_of_values rest
+  | _ -> []
+
+(* A list item's kind, the [list] attribute's value
+   (docs/rich-document-plan.md RD2); [None] is its absence, as [Body] is a
+   block's. A MODULE, as [Op] is, so [None] stays the option's outside it. *)
+module List_kind = struct
+  type t = None | Bullet | Numbered | Check
+
+  let name = function
+    | None -> "none"
+    | Bullet -> "bullet"
+    | Numbered -> "numbered"
+    | Check -> "check"
+end
+
+(* A paragraph's alignment, the [align] attribute's value; [Start] is its
+   absence. A MODULE because the layout [align] type already owns [Start],
+   [Center] and [End]. *)
+module Paragraph_align = struct
+  type t = Start | Center | End | Justify
+
+  let name = function
+    | Start -> "start"
+    | Center -> "center"
+    | End -> "end"
+    | Justify -> "justify"
+end
+
+(* The attributes that cover whole paragraphs (RD1). *)
+let paragraph_attr name =
+  List.mem name [ "block"; "list"; "indent"; "checked"; "start"; "align" ]
+
+(* A value's one spelling (crates/kaya/src/richdoc.rs, canonical_value): a
+   colour in upper case. *)
+let canonical_value name value =
+  if name = "color" then String.uppercase_ascii value else value
+
+(* Whether [value] spells the attribute's absence. *)
+let absent_value name value =
+  match (name, value) with
+  | "block", "body" | "list", "none" | "indent", "0" | "align", "start" -> true
+  | _ -> false
+
+let kdoc_values bytes =
+  let byte i = Char.code bytes.[i] in
+  let count = Kaya_wire.u32_at byte 0 in
+  let at = ref 8 in
+  List.init count (fun _ ->
+      let v, next = Kaya_wire.parse_value byte !at in
+      at := next;
+      v)
+
 (* A [rich] textarea's text and runs, kept current by the binding from
    the edits it delivers. *)
 module Document = struct
@@ -486,6 +561,57 @@ module Document = struct
 
   (* A paragraph's kind; the range covers whole paragraphs or is refused. *)
   let block range kind doc = mark range "block" (block_name kind) doc
+
+  (* A list item over whole paragraphs (docs/rich-document-plan.md RD2). *)
+  let list range kind doc = mark range "list" (List_kind.name kind) doc
+
+  (* An indent level, 1 to 8, over whole paragraphs (RD3). *)
+  let indent range level doc = mark range "indent" (string_of_int level) doc
+
+  (* A checklist item checked, over whole paragraphs. *)
+  let checked range doc = mark range "checked" "true" doc
+
+  (* A numbered list's first number, on its first item. *)
+  let start range first doc = mark range "start" (string_of_int first) doc
+
+  let align range align doc = mark range "align" (Paragraph_align.name align) doc
+
+  (* A text colour, [#RRGGBB] as it reads on a light page (RD4, RD5). *)
+  let color range rgb doc = mark range "color" (String.uppercase_ascii rgb) doc
+
+  (* A [.kdoc] file read (docs/rich-document-plan.md §4): the document, and
+     why it may only be read when it carries a name this kaya cannot keep
+     through an edit (RD8). *)
+  type kdoc = { document : t; read_only : string option }
+
+  (* Raises [Failure] carrying the core's one sentence when the bytes are
+     not a [.kdoc], or name a newer major version, as an asset miss does. *)
+  let of_kdoc bytes =
+    match kdoc_values (Kaya_runtime.kdoc_read bytes) with
+    | Kaya_wire.Str refusal :: _ when refusal <> "" -> failwith refusal
+    | Kaya_wire.Str _ :: Kaya_wire.Str why :: Kaya_wire.Str text :: runs ->
+        {
+          document = { text; runs = runs_of_values runs };
+          read_only = (if why = "" then None else Some why);
+        }
+    | values ->
+        invalid_arg
+          (Printf.sprintf "kaya: kaya_kdoc_read answered %d values out of shape"
+             (List.length values))
+
+  (* The document as a [.kdoc] file, the same bytes in nine bindings
+     (RD13); raises [Invalid_argument] naming the run when it breaks a wall
+     [set_document] holds. *)
+  let to_kdoc doc =
+    let b = Buffer.create 64 in
+    Kaya_wire.encode_values b (Kaya_wire.Str doc.text :: run_values doc.runs);
+    match kdoc_values (Kaya_runtime.kdoc_write (Buffer.contents b)) with
+    | [ Kaya_wire.Str ""; Kaya_wire.Str file ] -> file
+    | Kaya_wire.Str refusal :: _ -> invalid_arg ("kaya: to_kdoc: " ^ refusal)
+    | values ->
+        invalid_arg
+          (Printf.sprintf "kaya: kaya_kdoc_write answered %d values out of shape"
+             (List.length values))
 
   let attr_at doc byte name =
     Option.map
@@ -579,6 +705,38 @@ module Selection = struct
         with
         | Some b -> b
         | None -> Body)
+
+  (* The list kind every touched paragraph shares; [None] otherwise. *)
+  let list s =
+    match List.find_opt (fun (r : Run.t) -> r.name = "list") s.attrs with
+    | Some r -> (
+        match
+          List.find_opt
+            (fun k -> List_kind.name k = r.value)
+            [ List_kind.Bullet; List_kind.Numbered; List_kind.Check ]
+        with
+        | Some k -> k
+        | None -> List_kind.None)
+    | None -> List_kind.None
+
+  (* The alignment every touched paragraph shares; [Start] otherwise. *)
+  let paragraph_align s =
+    match List.find_opt (fun (r : Run.t) -> r.name = "align") s.attrs with
+    | Some r -> (
+        match
+          List.find_opt
+            (fun a -> Paragraph_align.name a = r.value)
+            Paragraph_align.[ Center; End; Justify ]
+        with
+        | Some a -> a
+        | None -> Paragraph_align.Start)
+    | None -> Paragraph_align.Start
+
+  (* The colour holding over the whole selection, [#RRGGBB]. *)
+  let color s =
+    Option.map
+      (fun (r : Run.t) -> r.value)
+      (List.find_opt (fun (r : Run.t) -> r.name = "color") s.attrs)
 end
 
 type selection = Selection.t
@@ -2528,31 +2686,6 @@ let reveal_range (Widget id) (start, stop) =
    [Run], [Document], [Edit] and [Format] are declared earlier, beside
    [block]/[block_name], the one thing [Document.block] needs. *)
 
-(* Four values per run — start, stop, name, value — the shape both
-   writes and both occurrences carry. *)
-let run_values (runs : Run.t list) =
-  List.concat_map
-    (fun (r : Run.t) ->
-      [
-        Kaya_wire.I64 (Int64.of_int (fst r.range));
-        Kaya_wire.I64 (Int64.of_int (snd r.range));
-        Kaya_wire.Str r.name;
-        Kaya_wire.Str r.value;
-      ])
-    runs
-
-let rec runs_of_values values : Run.t list =
-  match values with
-  | Kaya_wire.I64 start :: Kaya_wire.I64 stop :: Kaya_wire.Str name
-    :: Kaya_wire.Str value :: rest ->
-      {
-        Run.range = decoded_span "run" (Int64.to_int start) (Int64.to_int stop);
-        name;
-        value;
-      }
-      :: runs_of_values rest
-  | _ -> []
-
 (* A stamped copy's document is a record FIELD (docs/rich-text-plan.md
    §19): the field's Blob bytes are ONE flat value list — the text, then
    four values per run — the bytes [set_rich_text] already ships
@@ -2824,10 +2957,11 @@ let unformat (Widget id) name =
     (Kaya_wire.tx_format_text id 1 0 0L 0L
        [ Kaya_wire.Str name; Kaya_wire.Str "" ])
 
-(* A ranged act's range in the fold's text: a [block] covers the whole
-   paragraphs it touches, as the core snaps it. *)
+(* A ranged act's range in the fold's text: a paragraph attribute covers
+   the whole paragraphs it touches, as the core snaps it
+   (docs/rich-document-plan.md §11). *)
 let ranged_act_bounds app id (start, stop) name =
-  if name <> "block" then (start, stop)
+  if not (paragraph_attr name) then (start, stop)
   else
     let text = (the_document app id).text in
     let len = String.length text in
@@ -2839,12 +2973,14 @@ let ranged_act_bounds app id (start, stop) name =
 (* One attribute over a BYTE RANGE of the document, the selection left
    where it is: a document write, echoed by nothing, legal on a rich
    label, and the fold moves here as [apply_edit]'s does
-   (docs/rich-text-plan.md §17). A [block] covers the range's whole
-   paragraphs, and [block] with "body" takes the kind off. *)
+   (docs/rich-text-plan.md §17). A paragraph attribute covers the range's
+   whole paragraphs, and its absence ("body", "none", "0", "start") takes
+   it off (docs/rich-document-plan.md §11). *)
 let format_range (Widget id) range name value =
   let tx = the_tx () in
   let start, stop = ranged_act_bounds tx.app id range name in
-  let value = if name = "block" && value = "body" then None else Some value in
+  let value = canonical_value name value in
+  let value = if absent_value name value then None else Some value in
   absorb_format tx.app id (start, stop) name value;
   emit tx
     (Kaya_wire.tx_format_text id
@@ -2867,6 +3003,34 @@ let unformat_range (Widget id) range name =
 
 (* Make the selection's paragraphs [kind]; [Body] clears. *)
 let set_block widget kind = format widget "block" (block_name kind)
+
+(* Make the selection's paragraphs list items of [kind] (a heading or a
+   code block becomes body); [List_kind.None] ends the list. The core
+   answers through [~on_format] (docs/rich-document-plan.md §6, §11). *)
+let set_list widget kind = format widget "list" (List_kind.name kind)
+
+(* One level deeper for each of the selection's paragraphs, to 8. *)
+let indent widget = format widget "indent" "+1"
+
+(* One level shallower for each of the selection's paragraphs. *)
+let outdent widget = format widget "indent" "-1"
+
+let set_paragraph_align widget align =
+  format widget "align" (Paragraph_align.name align)
+
+(* Check or uncheck the selection's checklist items. *)
+let check_items widget on =
+  if on then format widget "checked" "true" else unformat widget "checked"
+
+(* The selection's text in [#RRGGBB] as it reads on a light page;
+   automatic ink is [unformat] of "color" (RD4). *)
+let color widget rgb = format widget "color" (String.uppercase_ascii rgb)
+
+(* Present the platform's own colour picker over the selection; each colour
+   the user commits arrives as a "color" act through [~on_format]
+   (docs/rich-document-plan.md §5). *)
+let pick_text_color (Widget id) =
+  emit (the_tx ()) (Kaya_wire.tx_widget_command id Kaya_wire.command_text_color)
 
 (* What an [~own_undo] textarea's app can take back right now, and put
    back: the route reads these (docs/rich-text-plan.md §14), so a write

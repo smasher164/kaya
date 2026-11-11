@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x585cc259da5c8c75;
+    public const ulong SpecHash = 0x5f131b7e55fe0f95;
     public const string Version = "0.0.0";
 
     public const uint ValueBool = 1;
@@ -334,6 +334,20 @@ static class KayaWire
     public const uint RichAttrCode = 5;
     public const uint RichAttrLink = 6;
     public const uint RichAttrBlock = 7;
+    public const uint RichAttrList = 8;
+    public const uint RichAttrIndent = 9;
+    public const uint RichAttrChecked = 10;
+    public const uint RichAttrStart = 11;
+    public const uint RichAttrAlign = 12;
+    public const uint RichAttrColor = 13;
+    public const uint ListKindNone = 0;
+    public const uint ListKindBullet = 1;
+    public const uint ListKindNumbered = 2;
+    public const uint ListKindCheck = 3;
+    public const uint ParagraphAlignStart = 0;
+    public const uint ParagraphAlignCenter = 1;
+    public const uint ParagraphAlignEnd = 2;
+    public const uint ParagraphAlignJustify = 3;
     public const uint BlockKindBody = 0;
     public const uint BlockKindHeading1 = 1;
     public const uint BlockKindHeading2 = 2;
@@ -449,6 +463,7 @@ static class KayaWire
     public const uint CommandClear = 1;
     public const uint CommandFocus = 2;
     public const uint CommandEmojiPicker = 3;
+    public const uint CommandTextColor = 4;
     public const ushort TxKindCreateSignal = 1;
     public const ushort TxKindWriteSignal = 2;
     public const ushort TxKindCreateWidget = 3;

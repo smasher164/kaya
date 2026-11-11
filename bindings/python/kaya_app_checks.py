@@ -4285,6 +4285,99 @@ rich_check("format_range takes the binding's own range spelling, refusing "
            "format_range" in _ranged_said
            and "range(start, stop)" in _ranged_said)
 
+# THE RICH DOCUMENT (docs/rich-document-plan.md §11, RD13): the .kdoc is
+# the core's bytes, the ranged fold snaps every paragraph attribute and
+# folds its absence as a removal, and the acts are `format` under a name.
+_KDOC = (
+    '{\n  "kaya": "document",\n  "version": 1,\n  "requires": [],\n'
+    '  "paragraphs": [\n'
+    '    {"block": "heading1", "spans": [["Walks"]]},\n'
+    '    {"list": "bullet", "spans": [["map"]]},\n'
+    '    {"list": "bullet", "indent": 1, "spans": [["water", {"color": "#C4554D"}]]}\n'
+    '  ]\n}\n').encode()
+_walks = (kaya.Document("Walks\nmap\nwater")
+          .block(range(0, 5), kaya.Block.HEADING1)
+          .list(range(6, 15), kaya.ListKind.BULLET)
+          .indent(range(10, 15), 1)
+          .color(range(10, 15), "#c4554d"))
+_walks_file = _walks.to_kdoc()
+_walks_back = kaya.Document.from_kdoc(_walks_file)
+rich_check("to_kdoc writes the bytes Rust writes for the same document, the "
+           "colour upper-cased",
+           _walks_file == _KDOC)
+rich_check("from_kdoc reads the file back editable, and a second write is "
+           "the same bytes",
+           _walks_back.read_only is None
+           and _walks_back.document.to_kdoc() == _KDOC)
+_newer_said = ""
+try:
+    kaya.Document.from_kdoc(
+        b'{"kaya": "document", "version": 2, "paragraphs": []}')
+except kaya.KayaValueError as e:
+    _newer_said = str(e)
+rich_check("from_kdoc refuses a version-2 file in the core's own sentence",
+           _newer_said == "the document is version 2, newer than the "
+           "version 1 this kaya reads")
+
+_range_records.clear()
+kaya.runtime.submit = lambda *recs: _range_records.extend(recs)
+with _range_app.build():
+    _ranged.set_document(kaya.Document("Walks\nmap\nwater"))
+    _ranged.format_range(range(7, 8), "list", kaya.ListKind.BULLET)
+    _ranged.format_range(range(0, 2), "color", "#abcdef")
+kaya.runtime.submit = _real_ship
+rich_check("a ranged list act snaps to its whole paragraph, wire and fold "
+           "agreeing; a ranged colour is upper-cased and not snapped",
+           kaya.wire.tx_format_text(_ranged.id, 0, 1, 6, 9,
+                                    ["list", "bullet"]) in _range_records
+           and kaya.wire.tx_format_text(_ranged.id, 0, 1, 0, 2,
+                                        ["color", "#ABCDEF"]) in _range_records
+           and _spell(_ranged.document().runs)
+           == "0:2 color=#ABCDEF|6:9 list=bullet")
+_range_records.clear()
+kaya.runtime.submit = lambda *recs: _range_records.extend(recs)
+with _range_app.build():
+    _ranged.format_range(range(7, 8), "list", kaya.ListKind.NONE)
+kaya.runtime.submit = _real_ship
+rich_check("a ranged list act with `none` is the REMOVAL: removed 1 on the "
+           "wire and the run gone from the fold",
+           kaya.wire.tx_format_text(_ranged.id, 1, 1, 6, 9, ["list", ""])
+           in _range_records
+           and _spell(_ranged.document().runs) == "0:2 color=#ABCDEF")
+
+_range_records.clear()
+kaya.runtime.submit = lambda *recs: _range_records.extend(recs)
+with _range_app.build():
+    _ranged.set_list(kaya.ListKind.CHECK)
+    _ranged.indent()
+    _ranged.outdent()
+    _ranged.set_paragraph_align(kaya.ParagraphAlign.CENTER)
+    _ranged.check_items(True)
+    _ranged.check_items(False)
+    _ranged.color("#c4554d")
+    _ranged.pick_text_color()
+kaya.runtime.submit = _real_ship
+rich_check("the rich document's acts are `format` under their names, and "
+           "pick_text_color is widget command 4",
+           _range_records == [
+               kaya.wire.tx_format_text(_ranged.id, 0, 0, 0, 0, [n, v])
+               for n, v in (("list", "check"), ("indent", "+1"),
+                            ("indent", "-1"), ("align", "center"),
+                            ("checked", "true"))]
+           + [kaya.wire.tx_format_text(_ranged.id, 1, 0, 0, 0,
+                                       ["checked", ""]),
+              kaya.wire.tx_format_text(_ranged.id, 0, 0, 0, 0,
+                                       ["color", "#C4554D"]),
+              kaya.wire.tx_widget_command(_ranged.id,
+                                          kaya.wire.COMMAND_TEXT_COLOR)])
+_sel = kaya.Selection(0, 3, [kaya.Run(0, 3, "list", "numbered"),
+                             kaya.Run(0, 3, "color", "#C4554D")])
+rich_check("a selection reads its list kind, alignment and colour",
+           _sel.list() == kaya.ListKind.NUMBERED
+           and _sel.paragraph_align() == kaya.ParagraphAlign.START
+           and _sel.color() == "#C4554D"
+           and kaya.Selection(0, 0, []).color() is None)
+
 # THE NAMED ACTS (docs/rich-text-plan.md §18): sugar and nothing else —
 # each writes the record `format` writes under its own name, `link`
 # carrying the URL where the flags carry "true".

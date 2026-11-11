@@ -835,6 +835,10 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
             command: CommandKind::EmojiPicker,
             ..
         } => UndoVerdict::Refused("emoji_picker"),
+        TxOp::WidgetCommand {
+            command: CommandKind::TextColor,
+            ..
+        } => UndoVerdict::Refused("text_color"),
         TxOp::UndoGroup { .. } => UndoVerdict::Refused("a second undo_group"),
         TxOp::CreateSignal { .. } => UndoVerdict::Refused("create_signal"),
         TxOp::CreateWidget { .. } => UndoVerdict::Refused("create_widget"),
@@ -1337,6 +1341,10 @@ pub(crate) struct Scene {
     /// One per textarea declared `rich`; every delta is derived from it
     /// (docs/rich-text-plan.md R1/R4).
     rich: HashMap<WidgetId, RichDoc>,
+    /// Ranged acts the core made on a rich textarea outside a transaction (a
+    /// key, the repair after an edit; docs/rich-document-plan.md §11), for
+    /// the backend to apply: `take_rich_ops`.
+    rich_ops: Vec<ApplyOp>,
     /// Some For's roots hide from a signal, or from an enclosing row's
     /// field: the writes that can move a site's shown rows without touching
     /// its instance (docs/hidden-plan.md H2).
@@ -1839,6 +1847,7 @@ fn check_command(kind: WidgetKind, command: CommandKind) {
         CommandKind::EmojiPicker => {
             matches!(kind, WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Search)
         }
+        CommandKind::TextColor => kind == WidgetKind::Textarea,
         CommandKind::Focus => matches!(
             kind,
             WidgetKind::Entry
@@ -1934,33 +1943,48 @@ fn split_char(text: &str, offset: usize) -> String {
 }
 
 /// Refuses a run past the range chokepoint (docs/ranges-units.md §7) or
-/// outside the vocabulary; `paragraphs` adds set_rich_text's paragraph wall.
+/// outside the vocabulary, and answers the runs in their one spelling
+/// (docs/rich-document-plan.md §11: `#c4554d` is `#C4554D`, `list=none` no
+/// run); `paragraphs` adds set_rich_text's paragraph wall and RD2's scope.
 fn check_runs(
     text: &str,
     widget: WidgetId,
     op: &str,
     runs: &[TextRun],
     paragraphs: bool,
-) -> Vec<NativeRun> {
-    runs.iter()
-        .map(|run| {
-            let named = format!("{op} run {:?}", run.name);
-            let native = check_range(text, widget, &named, TextRange::new(run.range.start, run.range.end));
-            check_attr_name(widget, op, &run.name);
-            if run.name == "block" {
-                check_block_value(widget, op, &run.value);
-                if paragraphs {
-                    check_paragraph_bounds(text, widget, op, run);
-                }
-            }
-            NativeRun {
-                start: native.start,
-                end: native.stop,
-                name: run.name.clone(),
-                value: run.value.clone(),
-            }
-        })
-        .collect()
+) -> (Vec<TextRun>, Vec<NativeRun>) {
+    let mut kept = Vec::with_capacity(runs.len());
+    let mut native_runs = Vec::with_capacity(runs.len());
+    for run in runs {
+        let named = format!("{op} run {:?}", run.name);
+        let native = check_range(text, widget, &named, TextRange::new(run.range.start, run.range.end));
+        check_attr_name(widget, op, &run.name);
+        let Some(value) = check_value(widget, op, &run.name, &run.value) else {
+            continue;
+        };
+        if paragraphs && crate::richdoc::is_paragraph_attr(&run.name) {
+            check_paragraph_bounds(text, widget, op, run);
+        }
+        native_runs.push(NativeRun { start: native.start, end: native.stop, name: run.name.clone(), value: value.clone() });
+        kept.push(TextRun { value, ..run.clone() });
+    }
+    if paragraphs {
+        let normal = crate::richdoc::normalize_runs(kept.clone());
+        let state = crate::richdoc::final_state(text, &normal);
+        if let Some(why) = crate::richdoc::structure_refusal(text, &normal, &state) {
+            panic!("kaya: {op} on {widget:?}: {why} (docs/rich-document-plan.md RD1, RD2)");
+        }
+    }
+    (kept, native_runs)
+}
+
+/// A value's one spelling, None for an absence spelled as a value (`body`,
+/// `none`, `0`, `start`), refused naming the vocabulary otherwise.
+fn check_value(widget: WidgetId, op: &str, name: &str, value: &str) -> Option<String> {
+    match crate::richdoc::canonical_value(name, value) {
+        Ok(v) => v,
+        Err(why) => panic!("kaya: {op} on {widget:?}: {why}"),
+    }
 }
 
 /// One vocabulary's words, for a refusal to print.
@@ -1970,8 +1994,10 @@ fn vocabulary(table: &[(i64, &'static str)]) -> String {
 
 fn check_attr_name(widget: WidgetId, op: &str, name: &str) {
     assert!(
-        crate::wire::RICH_ATTRS.iter().any(|(_, n)| *n == name),
-        "kaya: {op} on {widget:?}: {name:?} is not a kaya attribute — the vocabulary is {}",
+        crate::wire::RICH_ATTRS.iter().any(|(_, n)| *n == name) || crate::richdoc::is_extension(name),
+        "kaya: {op} on {widget:?}: {name:?} is not a kaya attribute — the vocabulary is {}, \
+         and an app's own name carries its reverse-DNS prefix (com.example.note; \
+         docs/rich-document-plan.md RD8)",
         vocabulary(crate::wire::RICH_ATTRS)
     );
 }
@@ -1995,24 +2021,25 @@ fn paragraph_bounds(text: &str, range: TextRange) -> TextRange {
     TextRange::new(para_start as u64, para_end as u64)
 }
 
-/// docs/rich-text-plan.md §2: a `block` run covers whole paragraphs.
+/// docs/rich-text-plan.md §2: a paragraph attribute covers whole paragraphs.
 fn check_paragraph_bounds(text: &str, widget: WidgetId, op: &str, run: &TextRun) {
+    let block = &run.name;
     let bytes = text.as_bytes();
     let start = run.range.start as usize;
     let end = run.range.end as usize;
     let starts = start == 0 || bytes[start - 1] == b'\n';
     assert!(
         starts,
-        "kaya: {op} on {widget:?}: the block run {start}..{end} does not START on a \
-         paragraph boundary — byte {start} follows {}, and a block attribute covers whole \
+        "kaya: {op} on {widget:?}: the {block} run {start}..{end} does not START on a \
+         paragraph boundary — byte {start} follows {}, and a paragraph attribute covers whole \
          paragraphs (start at 0 or just after a newline)",
         split_char(text, start - 1)
     );
     let ends = end == text.len() || bytes[end] == b'\n' || bytes[end - 1] == b'\n';
     assert!(
         ends,
-        "kaya: {op} on {widget:?}: the block run {start}..{end} does not END on a paragraph \
-         boundary — byte {end} is inside a paragraph, and a block attribute covers whole \
+        "kaya: {op} on {widget:?}: the {block} run {start}..{end} does not END on a paragraph \
+         boundary — byte {end} is inside a paragraph, and a paragraph attribute covers whole \
          paragraphs (end at the text's end, at a newline, or just after one)"
     );
 }
@@ -2041,6 +2068,9 @@ pub(crate) struct RichDoc {
     last_edit: Option<String>,
     /// The last text_selected published (docs/phone-format-plan.md §3).
     published: Option<(TextRange, Vec<(String, String)>)>,
+    /// A rich paste's text and runs, armed by the arm before it inserts the
+    /// text; the next report inserting exactly that text takes these runs.
+    paste: Option<(String, Vec<TextRun>)>,
 }
 
 fn spell_runs(runs: &[TextRun]) -> String {
@@ -2303,40 +2333,346 @@ impl RichDoc {
         self.selection
     }
 
-    /// The inheritance rule: typed text takes the byte before it, except a
-    /// link; armed typing attributes win (docs/rich-text-plan.md R4). AND A
-    /// HEADING ENDS AT RETURN (R10): at the end of a heading paragraph, the
-    /// bytes from the first newline on carry no block; a quote or code
-    /// block continues, and a Return inside a heading splits it.
+    /// The empty final paragraph's attributes: what the newline before it
+    /// continues, under a pending arm at the text's end.
+    fn final_state(&self) -> BTreeMap<String, String> {
+        let mut state = crate::richdoc::final_state(&self.text, &self.runs);
+        if self.pending_at as usize == self.text.len() {
+            for (name, value) in &self.pending_on {
+                if crate::richdoc::is_paragraph_attr(name) {
+                    state.insert(name.clone(), value.clone());
+                }
+            }
+            for name in &self.pending_off {
+                state.remove(name);
+            }
+        }
+        state
+    }
+
+    fn para_attrs(&self, para: &crate::richdoc::Para) -> BTreeMap<String, String> {
+        crate::richdoc::para_attrs(&self.runs, para, &self.final_state())
+    }
+
+    /// The inheritance rule (docs/rich-document-plan.md RD7, §11): inline
+    /// marks come from the byte before by each mark's expand rule, paragraph
+    /// attributes from the paragraph the text lands in, armed typing
+    /// attributes win at their caret. From the inserted text's first newline
+    /// on, a Return at a paragraph's END carries what continues (a heading
+    /// ends, R10; an item's check and start do not carry), and a Return
+    /// inside a paragraph splits it, both halves keeping all but `start`.
     fn typed_runs(&self, start: usize, inserted: &str) -> Vec<TextRun> {
         if inserted.is_empty() {
             return Vec::new();
         }
-        let mut attrs = if start == 0 { BTreeMap::new() } else { self.attrs_at(start - 1) };
-        attrs.remove("link");
+        let mut inline: BTreeMap<String, String> = if start == 0 {
+            BTreeMap::new()
+        } else {
+            self.attrs_at(start - 1)
+                .into_iter()
+                .filter(|(n, _)| !crate::richdoc::is_paragraph_attr(n) && crate::richdoc::expands_at_end(n))
+                .collect()
+        };
+        let paras = crate::richdoc::paragraphs(&self.text);
+        let here = paras[crate::richdoc::para_index(&paras, start)];
+        let mut para = self.para_attrs(&here);
         if start as u64 == self.pending_at {
             for (name, value) in &self.pending_on {
-                attrs.insert(name.clone(), value.clone());
+                if crate::richdoc::is_paragraph_attr(name) {
+                    para.insert(name.clone(), value.clone());
+                } else {
+                    inline.insert(name.clone(), value.clone());
+                }
             }
             for name in &self.pending_off {
-                attrs.remove(name);
+                para.remove(name);
+                inline.remove(name);
             }
         }
-        let heading_ends = attrs.get("block").is_some_and(|kind| kind.starts_with("heading"))
-            && (start >= self.text.len() || self.text.as_bytes()[start] == b'\n');
-        let block_end = match inserted.find('\n') {
-            Some(at) if heading_ends => at as u64,
-            _ => inserted.len() as u64,
+        let at_end = start >= self.text.len() || self.text.as_bytes()[start] == b'\n';
+        let newline = inserted.find('\n');
+        let after: BTreeMap<String, String> = match newline {
+            Some(_) if at_end => crate::richdoc::continuing(&para),
+            Some(_) => para.iter().filter(|(n, _)| n.as_str() != "start").map(|(n, v)| (n.clone(), v.clone())).collect(),
+            None => BTreeMap::new(),
         };
-        attrs
-            .into_iter()
-            .map(|(name, value)| {
-                let end = if name == "block" { block_end } else { inserted.len() as u64 };
-                TextRun { range: 0..end, name, value }
-            })
-            .filter(|run| run.range.end > run.range.start)
-            .collect()
+        let len = inserted.len() as u64;
+        let cut = newline.map_or(len, |at| at as u64);
+        let mut out: Vec<TextRun> = Vec::new();
+        for (name, value) in inline {
+            out.push(TextRun { range: 0..len, name, value });
+        }
+        for (name, value) in para {
+            out.push(TextRun { range: 0..cut, name, value });
+        }
+        for (name, value) in after {
+            out.push(TextRun { range: cut..len, name, value });
+        }
+        out.retain(|run| run.range.end > run.range.start);
+        let mut out = crate::richdoc::normalize_runs(out);
+        out.sort_by(|a, b| (a.range.start, &a.name).cmp(&(b.range.start, &b.name)));
+        out
     }
+
+    /// Whether every byte of `a..b` holds what byte `a` holds for `name`.
+    fn uniform(&self, name: &str, a: usize, b: usize) -> bool {
+        let want = self.attrs_at(a).get(name).cloned();
+        self.runs.iter().filter(|r| r.name == name).all(|r| {
+            let (s, e) = (r.range.start as usize, r.range.end as usize);
+            let overlaps = s < b && e > a;
+            !overlaps || (Some(&r.value) == want.as_ref() && s <= a && e >= b)
+        })
+    }
+
+    /// One paragraph attribute set over a paragraph's carrier (the empty
+    /// final paragraph's is the newline before it), or armed when the text
+    /// is empty; recorded when it moved anything.
+    fn set_para(&mut self, para: &crate::richdoc::Para, name: &str, value: Option<&str>, changes: &mut Vec<ParaChange>) {
+        let len = self.text.len();
+        let carrier = para.carrier().or_else(|| self.text.ends_with('\n').then_some((len - 1, len)));
+        match carrier {
+            Some((a, b)) => {
+                let now = self.attrs_at(a).get(name).cloned();
+                if now.as_deref() == value && self.uniform(name, a, b) {
+                    return;
+                }
+                self.format(a, b, name, value);
+                changes.push(ParaChange { range: TextRange::new(a as u64, b as u64), name: name.to_owned(), value: value.map(str::to_owned) });
+            }
+            None => {
+                let now = self.final_state().get(name).cloned();
+                if now.as_deref() == value {
+                    return;
+                }
+                let at = self.text.len() as u64;
+                if self.pending_at != at {
+                    self.pending_on.clear();
+                    self.pending_off.clear();
+                }
+                self.pending_at = at;
+                match value {
+                    Some(v) => {
+                        self.pending_off.remove(name);
+                        self.pending_on.insert(name.to_owned(), v.to_owned());
+                    }
+                    None => {
+                        self.pending_on.remove(name);
+                        self.pending_off.insert(name.to_owned());
+                    }
+                }
+                changes.push(ParaChange { range: TextRange::new(at, at), name: name.to_owned(), value: value.map(str::to_owned) });
+            }
+        }
+    }
+
+    /// The paragraphs a selection touches, as the block act counts them.
+    fn touched(&self, sel: TextRange) -> Vec<crate::richdoc::Para> {
+        let paras = crate::richdoc::paragraphs(&self.text);
+        let len = self.text.len();
+        let start = (sel.start as usize).min(len);
+        let end = (sel.stop as usize).min(len);
+        let last = if end > start { end - 1 } else { start };
+        let first = crate::richdoc::para_index(&paras, start);
+        let last = crate::richdoc::para_index(&paras, last).max(first);
+        paras[first..=last].to_vec()
+    }
+
+    /// A paragraph act over `sel`'s paragraphs (docs/rich-document-plan.md
+    /// §6, §11): a list replaces a heading or code block (Notes' one style per
+    /// paragraph) and drops what its kind cannot carry; `indent` takes a level
+    /// or `+1`/`-1`; `checked` and `start` touch only items of their kind.
+    fn paragraph_act(&mut self, sel: TextRange, name: &str, value: Option<&str>) -> Vec<ParaChange> {
+        let changes = self.paragraph_act_raw(sel, name, value);
+        self.canon_first(sel.start as usize, sel.stop as usize, changes)
+    }
+
+    fn paragraph_act_raw(&mut self, sel: TextRange, name: &str, value: Option<&str>) -> Vec<ParaChange> {
+        let mut changes = Vec::new();
+        for para in self.touched(sel) {
+            let now = self.para_attrs(&para);
+            match name {
+                "list" => match value {
+                    Some(kind) => {
+                        if now.get("block").is_some_and(|b| b.starts_with("heading") || b == "code_block") {
+                            self.set_para(&para, "block", None, &mut changes);
+                        }
+                        self.set_para(&para, "list", Some(kind), &mut changes);
+                        if kind != "check" {
+                            self.set_para(&para, "checked", None, &mut changes);
+                        }
+                        if kind != "numbered" {
+                            self.set_para(&para, "start", None, &mut changes);
+                        }
+                    }
+                    None => {
+                        for n in ["list", "checked", "start"] {
+                            self.set_para(&para, n, None, &mut changes);
+                        }
+                    }
+                },
+                "indent" => {
+                    let level: i64 = now.get("indent").and_then(|v| v.parse().ok()).unwrap_or(0);
+                    let next = match value {
+                        Some("+1") => level + 1,
+                        Some("-1") => level - 1,
+                        Some(v) => v.parse().unwrap_or(level),
+                        None => 0,
+                    }
+                    .clamp(0, i64::from(crate::richdoc::MAX_INDENT));
+                    let next = next.to_string();
+                    self.set_para(&para, "indent", (next != "0").then_some(next.as_str()), &mut changes);
+                }
+                "checked" | "start" => {
+                    let kind = if name == "checked" { "check" } else { "numbered" };
+                    if now.get("list").map(String::as_str) == Some(kind) {
+                        self.set_para(&para, name, value, &mut changes);
+                    }
+                }
+                "block" => {
+                    let leaves_list = value.is_some_and(|b| b.starts_with("heading") || b == "code_block");
+                    if leaves_list {
+                        for n in ["list", "checked", "start"] {
+                            self.set_para(&para, n, None, &mut changes);
+                        }
+                    }
+                }
+                _ => self.set_para(&para, name, value, &mut changes),
+            }
+        }
+        changes
+    }
+
+    /// A key a rich textarea's arm offers the core before the platform acts
+    /// on it (docs/rich-document-plan.md §6): None leaves the key to the
+    /// platform; Some is the act it became, the key swallowed.
+    fn key_act(&mut self, key: u32, sel: TextRange) -> Option<Vec<ParaChange>> {
+        let changes = self.key_act_raw(key, sel)?;
+        Some(self.canon_first(sel.start as usize, sel.stop as usize, changes))
+    }
+
+    fn key_act_raw(&mut self, key: u32, sel: TextRange) -> Option<Vec<ParaChange>> {
+        let paras = self.touched(sel);
+        let collapsed = sel.start == sel.stop;
+        let first = *paras.first()?;
+        let is_item = |doc: &RichDoc, p: &crate::richdoc::Para| doc.para_attrs(p).contains_key("list");
+        match key {
+            crate::capi::KAYA_TEXT_KEY_RETURN if collapsed && first.is_empty() && is_item(self, &first) => {
+                let mut changes = Vec::new();
+                for n in ["list", "checked", "start", "indent"] {
+                    self.set_para(&first, n, None, &mut changes);
+                }
+                Some(changes)
+            }
+            crate::capi::KAYA_TEXT_KEY_BACKSPACE
+                if collapsed && sel.start as usize == first.start && is_item(self, &first) =>
+            {
+                Some(self.paragraph_act(sel, "list", None))
+            }
+            crate::capi::KAYA_TEXT_KEY_TAB | crate::capi::KAYA_TEXT_KEY_SHIFT_TAB
+                if paras.iter().all(|p| is_item(self, p)) =>
+            {
+                let step = if key == crate::capi::KAYA_TEXT_KEY_TAB { "+1" } else { "-1" };
+                Some(self.paragraph_act(sel, "indent", Some(step)))
+            }
+            crate::capi::KAYA_TEXT_KEY_CHECK => {
+                let now = self.para_attrs(&first);
+                if now.get("list").map(String::as_str) != Some("check") {
+                    return None;
+                }
+                let flip = (!now.contains_key("checked")).then_some(crate::protocol::FLAG_VALUE);
+                let mut changes = Vec::new();
+                self.set_para(&first, "checked", flip, &mut changes);
+                Some(changes)
+            }
+            _ => None,
+        }
+    }
+
+    /// The newlines between paragraphs `first..=last` (and their neighbours)
+    /// carried the canonical way (§11, the file's own rule): a paragraph
+    /// attribute rides the newline after a non-empty paragraph exactly when
+    /// that paragraph and the next both hold it with one value. An empty paragraph's terminator is
+    /// its carrier and the newline before the empty final paragraph is that
+    /// paragraph's, so neither is touched.
+    fn canon_newlines(&mut self, start: usize, end: usize, changes: &mut Vec<ParaChange>) {
+        let paras = crate::richdoc::paragraphs(&self.text);
+        let len = self.text.len();
+        let first = crate::richdoc::para_index(&paras, start.min(len)).saturating_sub(1);
+        let last = (crate::richdoc::para_index(&paras, end.min(len)) + 1).min(paras.len() - 1);
+        for i in first..last {
+            let (p, q) = (paras[i], paras[i + 1]);
+            if p.is_empty() || (q.is_empty() && !q.terminated) {
+                continue;
+            }
+            let n = p.end;
+            let before = self.attrs_at(p.start);
+            let after = match q.carrier() {
+                Some((a, _)) => self.attrs_at(a),
+                None => continue,
+            };
+            let on_n = self.attrs_at(n);
+            for name in crate::richdoc::PARAGRAPH_ATTRS {
+                let want = match (before.get(*name), after.get(*name)) {
+                    (Some(a), Some(b)) if a == b => Some(a.clone()),
+                    _ => None,
+                };
+                if on_n.get(*name) != want.as_ref() {
+                    self.format(n, n + 1, name, want.as_deref());
+                    changes.push(ParaChange { range: TextRange::new(n as u64, n as u64 + 1), name: (*name).to_owned(), value: want });
+                }
+            }
+        }
+    }
+
+    /// After a user edit: every paragraph the edit touched made uniform from
+    /// its first byte (AppKit's paragraph-style rule; §11), so a join takes
+    /// the first paragraph's attributes.
+    fn repair_paragraphs(&mut self, start: usize, end: usize) -> Vec<ParaChange> {
+        let paras = crate::richdoc::paragraphs(&self.text);
+        let first = crate::richdoc::para_index(&paras, start.min(self.text.len()));
+        let last = crate::richdoc::para_index(&paras, end.min(self.text.len()));
+        let mut changes = Vec::new();
+        for para in &paras[first..=last] {
+            if para.is_empty() {
+                continue;
+            }
+            let want = self.attrs_at(para.start);
+            for name in crate::richdoc::PARAGRAPH_ATTRS {
+                let value = want.get(*name).map(String::as_str);
+                if !self.uniform(name, para.start, para.end) {
+                    self.format(para.start, para.end, name, value);
+                    changes.push(ParaChange {
+                        range: TextRange::new(para.start as u64, para.end as u64),
+                        name: (*name).to_owned(),
+                        value: value.map(str::to_owned),
+                    });
+                }
+            }
+        }
+        self.canon_first(start, end, changes)
+    }
+
+    /// `changes` with the canonical newlines' own changes published FIRST, so
+    /// the act itself is the last thing the app hears.
+    fn canon_first(&mut self, start: usize, end: usize, changes: Vec<ParaChange>) -> Vec<ParaChange> {
+        if changes.is_empty() {
+            return changes;
+        }
+        let mut out = Vec::new();
+        self.canon_newlines(start, end, &mut out);
+        out.extend(changes);
+        out
+    }
+}
+
+/// A paragraph attribute the core moved itself (a paragraph act, a key, the
+/// repair after an edit): a ranged act for the arm and a text_formatted for
+/// the app; an empty range is the empty final paragraph's armed state.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ParaChange {
+    pub(crate) range: TextRange,
+    pub(crate) name: String,
+    pub(crate) value: Option<String>,
 }
 
 /// docs/rich-text-plan.md R5's transform, one offset.
@@ -3608,7 +3944,7 @@ impl Scene {
             panic!("kaya: `document` binds a Blob field; {id:?} was handed {value:?}");
         };
         let (text, runs) = crate::wire::read_document_blob(&blob.0);
-        let native = check_runs(&text, id, "document", &runs, true);
+        let (runs, native) = check_runs(&text, id, "document", &runs, true);
         let doc = self.rich.entry(id).or_insert_with(|| RichDoc::seeded(""));
         doc.text = text.clone();
         doc.runs = runs;
@@ -6241,6 +6577,9 @@ impl Scene {
                         .get(&widget)
                         .unwrap_or_else(|| panic!("kaya: command on unknown widget {widget:?}"));
                     check_command(kind, command);
+                    if command == CommandKind::TextColor {
+                        self.require_rich(widget, "text_color");
+                    }
                     // Momentary by construction: nothing is recorded, so
                     // nothing replays on rebuild — the op forwards and is
                     // forgotten.
@@ -6275,7 +6614,7 @@ impl Scene {
                 TxOp::SetRichText { widget, text, runs } => {
                     self.require_rich(widget, "set_rich_text");
                     self.refuse_block_runs_on_a_label(widget, "set_rich_text", &runs);
-                    let native = check_runs(&text, widget, "set_rich_text", &runs, true);
+                    let (runs, native) = check_runs(&text, widget, "set_rich_text", &runs, true);
                     let doc = self.rich.entry(widget).or_default();
                     doc.text = text.clone();
                     doc.runs = runs.clone();
@@ -6291,7 +6630,7 @@ impl Scene {
                     let doc = self.rich.get(&widget).expect("just required");
                     let text = doc.shadow_text();
                     let native_range = check_range(&text, widget, "apply_edit", range);
-                    let native_runs = check_runs(&inserted, widget, "apply_edit", &runs, false);
+                    let (runs, native_runs) = check_runs(&inserted, widget, "apply_edit", &runs, false);
                     let doc = self.rich.get_mut(&widget).expect("just required");
                     if doc.composing {
                         // docs/rich-text-plan.md R5: held, never refused.
@@ -6320,10 +6659,43 @@ impl Scene {
                          with set_document, apply_edit or format_range (docs/rich-text-plan.md R8)"
                     );
                     check_attr_name(widget, "format_text", &name);
-                    if name == "block" {
-                        if let Some(kind) = &value {
-                            check_block_value(widget, "format_text", kind);
+                    let relative = name == "indent" && matches!(value.as_deref(), Some("+1" | "-1"));
+                    let value = match value {
+                        Some(v) if !relative => check_value(widget, "format_text", &name, &v),
+                        other => other,
+                    };
+                    if crate::richdoc::is_paragraph_attr(&name) && name != "block" {
+                        self.refuse_block_runs_on_a_label(widget, "format_text", &[TextRun::new(0, 0, name.as_str(), "")]);
+                        let doc = self.rich.get_mut(&widget).expect("just required");
+                        match range {
+                            None => {
+                                let sel = doc.selection;
+                                let changes = doc.paragraph_act(sel, &name, value.as_deref());
+                                self.publish_para_changes(widget, changes);
+                                out.extend(self.take_rich_ops());
+                            }
+                            Some(range) => {
+                                assert!(
+                                    !relative,
+                                    "kaya: format_text on {widget:?}: a relative indent ({}) is the widget's act \
+                                     over its selection, and a ranged act names the level (docs/rich-document-plan.md §11)",
+                                    value.as_deref().unwrap_or("")
+                                );
+                                let text = doc.text.clone();
+                                let range = paragraph_bounds(&text, range);
+                                let native = check_range(&text, widget, "format_text", range);
+                                doc.format(range.start as usize, range.stop as usize, &name, value.as_deref());
+                                let state = doc.final_state();
+                                if let Some(why) = crate::richdoc::structure_refusal(&doc.text, &doc.runs, &state) {
+                                    panic!("kaya: format_text on {widget:?}: {why} (docs/rich-document-plan.md RD2)");
+                                }
+                                out.push(ApplyOp::FormatText { id: widget, name, value, range: Some(native) });
+                            }
                         }
+                        self.refresh_selected(widget);
+                        continue;
+                    }
+                    if name == "block" {
                         if range.is_some() {
                             self.refuse_block_runs_on_a_label(
                                 widget,
@@ -7248,11 +7620,11 @@ impl Scene {
         if self.widgets.get(&widget) != Some(&WidgetKind::Label) {
             return;
         }
-        if let Some(run) = runs.iter().find(|r| r.name == "block") {
+        if let Some(run) = runs.iter().find(|r| crate::richdoc::is_paragraph_attr(&r.name)) {
             panic!(
-                "kaya: {op} on {widget:?}, a LABEL, carries the block run {}..{} ({}) — a \
+                "kaya: {op} on {widget:?}, a LABEL, carries the {} run {}..{} ({}) — a \
                  label's document is inline only (docs/rich-text-plan.md R8)",
-                run.range.start, run.range.end, run.value
+                run.name, run.range.start, run.range.end, run.value
             );
         }
     }
@@ -7319,7 +7691,10 @@ impl Scene {
             Some(at_caret) if at_caret != (start, end, inserted.clone()) => at_caret,
             _ => (start, end, inserted),
         };
-        let runs = doc.typed_runs(start, &inserted);
+        let runs = match &doc.paste {
+            Some((text, runs)) if *text == inserted => runs.clone(),
+            _ => doc.typed_runs(start, &inserted),
+        };
         #[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
         crate::vtrace::note("rich.edit", format_args!(
             "widget={} before_bytes={} after_bytes={} selection={}:{} edit={}:{} inserted={:?} runs={:?}",
@@ -7332,6 +7707,7 @@ impl Scene {
         }
         let doc = self.rich.get_mut(&widget).expect("just read");
         let range = TextRange::new(start as u64, end as u64);
+        doc.paste = None;
         doc.splice(start, end, &inserted, &runs);
         let caret = (start + inserted.len()) as u64;
         doc.selection = TextRange::new(caret, caret);
@@ -7341,6 +7717,8 @@ impl Scene {
         }
         let source = doc.source.take().unwrap_or(crate::wire::EDIT_SOURCE_USER as u32);
         doc.last_edit = Some(spell_edit(range, &inserted, &runs, source));
+        let changes = doc.repair_paragraphs(start, start + inserted.len());
+        self.publish_para_changes(widget, changes);
         self.refresh_selected(widget);
         Some(RichEdit { range, inserted, runs, source })
     }
@@ -7383,7 +7761,7 @@ impl Scene {
             // The range addresses the text before this held edit lands.
             let before = doc.text.clone();
             let native_range = check_range(&before, widget, "apply_edit", range);
-            let native_runs = check_runs(&inserted, widget, "apply_edit", &runs, false);
+            let (_, native_runs) = check_runs(&inserted, widget, "apply_edit", &runs, false);
             let selection = doc.apply_edit(range, &inserted, &runs);
             let after = doc.text.clone();
             let native_selection =
@@ -7509,21 +7887,122 @@ impl Scene {
         // A paragraph going back to body IS the block attribute taken off:
         // `body` is never a run (normalize drops it), so the two spellings an
         // arm can report are one act (docs/rich-text-plan.md §7).
-        let value = match (name, value) {
-            ("block", Some("body")) => None,
-            ("block", Some(kind)) => {
-                check_block_value(widget, "text_formatted", kind);
-                Some(kind)
-            }
-            (_, v) => v,
+        let value = match value {
+            Some(v) => check_value(widget, "text_formatted", name, v),
+            None => None,
         };
         if range.start == range.stop {
             return None;
         }
         let doc = self.rich.get_mut(&widget).expect("just read");
-        doc.format(range.start as usize, range.stop as usize, name, value);
+        doc.format(range.start as usize, range.stop as usize, name, value.as_deref());
+        if name == "block" {
+            let changes = doc.paragraph_act(range, "block", value.as_deref());
+            self.publish_para_changes(widget, changes);
+        }
         self.refresh_selected(widget);
-        Some((range, name.to_owned(), value.map(str::to_owned)))
+        Some((range, name.to_owned(), value))
+    }
+
+    /// The core's own paragraph acts, out: a ranged act per change for the
+    /// arm (`rich_ops`) and a text_formatted per change for the app; an armed
+    /// change on the empty final paragraph goes to the arm as a selection
+    /// act, which arms its typing attribute, and to the app as nothing.
+    fn publish_para_changes(&mut self, widget: WidgetId, changes: Vec<ParaChange>) {
+        if changes.is_empty() {
+            return;
+        }
+        let text = self.rich.get(&widget).map(|d| d.text.clone()).unwrap_or_default();
+        let identity = self.field_identity(widget);
+        for change in changes {
+            if change.range.start == change.range.stop {
+                self.rich_ops.push(ApplyOp::FormatText { id: widget, name: change.name, value: change.value, range: None });
+                continue;
+            }
+            let native = check_range(&text, widget, "a paragraph act", change.range);
+            self.rich_ops.push(ApplyOp::FormatText {
+                id: widget,
+                name: change.name.clone(),
+                value: change.value.clone(),
+                range: Some(native),
+            });
+            if let Some((id, path)) = identity.clone() {
+                self.asks.push(if path.is_empty() {
+                    Occurrence::TextFormatted { id: WidgetId(id), range: change.range, name: change.name, value: change.value }
+                } else {
+                    Occurrence::InstanceTextFormatted {
+                        node: crate::protocol::TemplateNodeId(id),
+                        path,
+                        range: change.range,
+                        name: change.name,
+                        value: change.value,
+                    }
+                });
+            }
+        }
+    }
+
+    /// What a backend applies after a core-made act (`publish_para_changes`).
+    pub(crate) fn take_rich_ops(&mut self) -> Vec<ApplyOp> {
+        std::mem::take(&mut self.rich_ops)
+    }
+
+    /// A key a rich textarea's arm offers before acting on it
+    /// (`RichDoc::key_act`); true when the core took it.
+    pub(crate) fn rich_key(&mut self, widget: WidgetId, key: u32, start: u64, end: u64) -> bool {
+        let Some(doc) = self.rich.get_mut(&widget) else {
+            return false;
+        };
+        let len = doc.text.len() as u64;
+        let sel = TextRange::new(start.min(len), end.min(len));
+        doc.selection = sel;
+        let Some(changes) = doc.key_act(key, sel) else {
+            return false;
+        };
+        self.publish_para_changes(widget, changes);
+        self.refresh_selected(widget);
+        true
+    }
+
+    /// Every list marker the arm draws, in bytes (`richdoc::markers`).
+    pub(crate) fn rich_markers(&self, widget: WidgetId) -> Option<Vec<crate::richdoc::Marker>> {
+        let doc = self.rich.get(&widget)?;
+        Some(crate::richdoc::markers(&doc.text, &doc.runs, &doc.final_state()))
+    }
+
+    /// `expect_markers`' observation of the core's own markers.
+    pub(crate) fn rich_markers_string(&self, widget: WidgetId) -> Option<String> {
+        self.rich_markers(widget).map(|m| crate::richdoc::spell_markers(&m))
+    }
+
+    /// A copy's rich flavour of `start..end` (bytes): RTF or HTML.
+    pub(crate) fn rich_copy(&self, widget: WidgetId, start: u64, end: u64, html: bool) -> Option<String> {
+        let doc = self.rich.get(&widget)?;
+        let len = doc.text.len();
+        let (a, b) = ((start as usize).min(len), (end as usize).min(len));
+        if a >= b || !doc.text.is_char_boundary(a) || !doc.text.is_char_boundary(b) {
+            return None;
+        }
+        let (text, runs) = crate::richdoc::clip::slice(&doc.text, &doc.runs, a, b);
+        Some(if html { crate::richdoc::clip::html_write(&text, &runs) } else { crate::richdoc::clip::rtf_write(&text, &runs) })
+    }
+
+    /// A paste's rich flavour read (RTF preferred, then HTML) and armed for
+    /// the report that inserts it; answers the plain text the arm inserts,
+    /// or None when neither flavour reads as text.
+    pub(crate) fn rich_paste(&mut self, widget: WidgetId, rtf: Option<&[u8]>, html: Option<&str>) -> Option<String> {
+        let doc = self.rich.get_mut(&widget)?;
+        let read = rtf
+            .map(crate::richdoc::clip::rtf_read)
+            .filter(|(t, _)| !t.is_empty())
+            .or_else(|| html.map(crate::richdoc::clip::html_read).filter(|(t, _)| !t.is_empty()))?;
+        let runs = read
+            .1
+            .into_iter()
+            .filter(|r| crate::wire::RICH_ATTRS.iter().any(|(_, n)| *n == r.name))
+            .collect();
+        doc.paste = Some((read.0.clone(), runs));
+        Some(read.0)
     }
 
     /// The field a text_changed's identity tag names. A STAMPED COPY ANSWERS
@@ -20438,6 +20917,186 @@ mod tests {
         let edit = scene.note_rich_text(textarea, "said\nmore\nbody").unwrap();
         assert_eq!(spell_runs(&edit.runs), "0:5 block=quote");
         assert_eq!(scene.rich_runs_string(textarea).as_deref(), Some("0:9 block=quote"));
+    }
+
+    /// docs/rich-document-plan.md §6, §11: Return at a list item's end makes
+    /// the next item, without the check or the start; Return in the empty
+    /// item ends the list; Backspace at an item's start takes the list off;
+    /// Tab and Shift+Tab move the level; a click on the box toggles it.
+    #[test]
+    fn list_items_continue_end_and_move_by_key() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        let w = WidgetId(1);
+        scene.apply(vec![set_document(
+            "buy",
+            vec![run(0, 3, "list", "check"), run(0, 3, "checked", "true")],
+        )]);
+        scene.set_text_selection(w, 3, 3);
+        let edit = scene.note_rich_text(w, "buy
+").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "0:1 list=check");
+        assert_eq!(scene.rich_markers_string(w).as_deref(), Some("0:0 [x]|4:0 [ ]"));
+        let edit = scene.note_rich_text(w, "buy
+milk").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "0:4 list=check");
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some("0:3 checked|0:8 list=check"));
+        // Tab indents the item; Shift+Tab takes it back.
+        assert!(scene.rich_key(w, crate::capi::KAYA_TEXT_KEY_TAB, 6, 6));
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some("0:3 checked|0:8 list=check|4:8 indent=1"));
+        assert_eq!(scene.take_rich_ops().len(), 1);
+        assert!(scene.rich_key(w, crate::capi::KAYA_TEXT_KEY_SHIFT_TAB, 6, 6));
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some("0:3 checked|0:8 list=check"));
+        // A click on the second box checks it.
+        assert!(scene.rich_key(w, crate::capi::KAYA_TEXT_KEY_CHECK, 4, 4));
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some("0:8 checked|0:8 list=check"));
+        // Return at the end, then Return in the empty item ends the list.
+        scene.set_text_selection(w, 8, 8);
+        scene.note_rich_text(w, "buy
+milk
+").unwrap();
+        assert_eq!(scene.rich_markers_string(w).as_deref(), Some("0:0 [x]|4:0 [x]|9:0 [ ]"));
+        assert!(scene.rich_key(w, crate::capi::KAYA_TEXT_KEY_RETURN, 9, 9));
+        assert_eq!(scene.rich_markers_string(w).as_deref(), Some("0:0 [x]|4:0 [x]"));
+        let ops = scene.take_rich_ops();
+        assert!(
+            ops.iter().any(|op| matches!(op, ApplyOp::FormatText { name, value: None, range: Some(r), .. } if name == "list" && (r.start, r.stop) == (8, 9))),
+            "the empty final item's carrier is the newline before it: {ops:?}"
+        );
+        let edit = scene.note_rich_text(w, "buy
+milk
+so").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "", "the list ended");
+        // Return in a key the core does not take is the platform's.
+        assert!(!scene.rich_key(w, crate::capi::KAYA_TEXT_KEY_RETURN, 11, 11));
+        assert!(!scene.rich_key(w, crate::capi::KAYA_TEXT_KEY_TAB, 11, 11));
+        // Backspace at the start of an item takes the list off, keeping the text.
+        assert!(scene.rich_key(w, crate::capi::KAYA_TEXT_KEY_BACKSPACE, 4, 4));
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some("0:3 checked|0:3 list=check"));
+        // Deleting the last paragraph's text brings back no ended list.
+        scene.set_text_selection(w, 11, 11);
+        scene.note_rich_text(w, "buy\nmilk\n").unwrap();
+        assert_eq!(scene.rich_markers_string(w).as_deref(), Some("0:0 [x]"));
+    }
+
+    /// docs/rich-document-plan.md §11: a join takes the first paragraph's
+    /// attributes, and the app hears the repair as text_formatted.
+    #[test]
+    fn a_join_takes_the_first_paragraphs_attributes() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        let w = WidgetId(1);
+        scene.apply(vec![set_document(
+            "one
+two",
+            vec![run(0, 3, "block", "heading1"), run(4, 7, "list", "bullet")],
+        )]);
+        scene.take_asks();
+        scene.set_text_selection(w, 4, 4);
+        scene.note_rich_text(w, "onetwo").unwrap();
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some("0:6 block=heading1"));
+        let asks = scene.take_asks();
+        let formatted: Vec<String> = asks
+            .iter()
+            .filter_map(|o| match o {
+                Occurrence::TextFormatted { range, name, value, .. } => {
+                    Some(format!("{}:{} {name}={}", range.start, range.stop, value.as_deref().unwrap_or("off")))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(formatted, vec!["0:6 block=heading1", "0:6 list=off"]);
+        assert_eq!(scene.take_rich_ops().len(), 2);
+    }
+
+    /// docs/rich-document-plan.md §11: a paragraph act from the app resolves
+    /// in the core over the selection's paragraphs.
+    #[test]
+    fn a_list_act_replaces_a_heading_and_indent_steps() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        let w = WidgetId(1);
+        scene.apply(vec![set_document("Title
+body", vec![run(0, 5, "block", "heading1")])]);
+        scene.set_text_selection(w, 2, 7);
+        let out = scene.apply(vec![TxOp::FormatText { widget: w, name: "list".into(), value: Some("numbered".into()), range: None }]);
+        assert_eq!(out.len(), 4, "{out:?}");
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some("0:10 list=numbered"));
+        assert_eq!(scene.rich_markers_string(w).as_deref(), Some("0:0 1.|6:0 2."));
+        scene.apply(vec![TxOp::FormatText { widget: w, name: "indent".into(), value: Some("+1".into()), range: None }]);
+        assert_eq!(scene.rich_markers_string(w).as_deref(), Some("0:1 a.|6:1 b."));
+        scene.apply(vec![TxOp::FormatText { widget: w, name: "color".into(), value: Some("#c4554d".into()), range: Some(TextRange::new(0, 2)) }]);
+        assert!(scene.rich_runs_string(w).unwrap().contains("0:2 color=#C4554D"));
+    }
+
+    /// docs/rich-document-plan.md §11: after the core's own acts the mirror is
+    /// in the file's canonical form, so a `.kdoc` round trip reads the same.
+    #[test]
+    fn acts_leave_the_canonical_form_a_file_reads_back() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        let w = WidgetId(1);
+        scene.apply(vec![set_document("a\nb\nc\nd", vec![run(0, 7, "list", "bullet")])]);
+        scene.set_text_selection(w, 0, 5);
+        scene.apply(vec![TxOp::FormatText { widget: w, name: "list".into(), value: Some("numbered".into()), range: None }]);
+        scene.set_text_selection(w, 2, 2);
+        scene.apply(vec![TxOp::FormatText { widget: w, name: "indent".into(), value: Some("+1".into()), range: None }]);
+        assert!(scene.rich_key(w, crate::capi::KAYA_TEXT_KEY_BACKSPACE, 4, 4));
+        let doc = scene.rich.get(&w).unwrap();
+        let file = crate::richdoc::kdoc::write(&doc.text, &doc.runs).unwrap();
+        let back = crate::richdoc::kdoc::read(file.as_bytes()).unwrap();
+        assert_eq!(spell_runs(&back.runs), scene.rich_runs_string(w).unwrap(), "{file}");
+    }
+
+    #[test]
+    #[should_panic(expected = "is a heading1 and a list item")]
+    fn a_listed_heading_is_refused_at_the_declaration() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("Title", vec![run(0, 5, "block", "heading1"), run(0, 5, "list", "bullet")])]);
+    }
+
+    #[test]
+    #[should_panic(expected = "carries alpha 80")]
+    fn a_translucent_colour_is_refused_naming_the_alpha() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("ab", vec![run(0, 2, "color", "#C4554D80")])]);
+    }
+
+    /// docs/rich-document-plan.md RD7: code and a link grow at neither edge,
+    /// a colour grows at its end, an app's extension at neither.
+    #[test]
+    fn each_mark_grows_by_its_own_rule() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        let w = WidgetId(1);
+        scene.apply(vec![set_document(
+            "ab",
+            vec![run(0, 2, "code", "true"), run(0, 2, "color", "#016FEF"), run(0, 2, "com.example.note", "n1")],
+        )]);
+        let edit = scene.note_rich_text(w, "abc").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "0:1 color=#016FEF");
+    }
+
+    /// docs/rich-document-plan.md §7: a paste's runs are its own, and the
+    /// copy writes both flavours from the mirror.
+    #[test]
+    fn a_rich_paste_carries_its_runs_and_a_copy_writes_both_flavours() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        let w = WidgetId(1);
+        scene.apply(vec![set_document("ab", vec![])]);
+        let text = scene.rich_paste(w, None, Some("<p>x<b>y</b></p>")).unwrap();
+        assert_eq!(text, "xy");
+        scene.set_text_edit_source(w, crate::wire::EDIT_SOURCE_PASTE as u32);
+        scene.set_text_selection(w, 2, 2);
+        let edit = scene.note_rich_text(w, "abxy").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "1:2 bold");
+        assert_eq!(scene.last_edit_string(w).as_deref(), Some("2:2 <xy> paste [1:2 bold]"));
+        let rtf = scene.rich_copy(w, 1, 4, false).unwrap();
+        assert!(rtf.starts_with("{\\rtf1") && rtf.contains("{\\b y}"), "{rtf}");
+        assert_eq!(scene.rich_copy(w, 1, 4, true).unwrap(), "<meta charset=\"utf-8\"><p>bx<b>y</b></p>");
     }
 
     /// The caret places an ambiguous diff, and never a diff it cannot explain.

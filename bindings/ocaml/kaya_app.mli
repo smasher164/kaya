@@ -250,6 +250,24 @@ type dropped = {
 (* One paragraph kind; drawn, never stored. *)
 type block = Body | Heading1 | Heading2 | Heading3 | Quote | Code_block
 
+(* A list item's kind, the [list] attribute's value; [None] is its
+   absence, as [Body] is a block's. A MODULE, as [Op] is, so [None] stays
+   the option's outside it. *)
+module List_kind : sig
+  type t = None | Bullet | Numbered | Check
+
+  val name : t -> string
+end
+
+(* A paragraph's alignment, the [align] attribute's value; [Start] is its
+   absence. A MODULE because the layout [align] already owns [Start],
+   [Center] and [End]. *)
+module Paragraph_align : sig
+  type t = Start | Center | End | Justify
+
+  val name : t -> string
+end
+
 (* One attribute over one span; [value] is "true" for the flags, a URL
    for [link], a kind for [block]. *)
 module Run : sig
@@ -284,7 +302,30 @@ module Document : sig
   (* A paragraph's kind; the range covers whole paragraphs or is refused. *)
   val block : int * int -> block -> t -> t
 
+  (* The rich document's paragraph attributes (docs/rich-document-plan.md
+     RD1 to RD3): over whole paragraphs; an indent level is 1 to 8. *)
+  val list : int * int -> List_kind.t -> t -> t
+  val indent : int * int -> int -> t -> t
+  val checked : int * int -> t -> t
+  val start : int * int -> int -> t -> t
+  val align : int * int -> Paragraph_align.t -> t -> t
+
+  (* A text colour, [#RRGGBB] as it reads on a light page (RD4, RD5). *)
+  val color : int * int -> string -> t -> t
+
   val attr_at : t -> int -> string -> string option
+
+  (* A [.kdoc] file read: the document, and why it may only be read when
+     it carries a name this kaya cannot keep through an edit (RD8). *)
+  type kdoc = { document : t; read_only : string option }
+
+  (* Raises [Failure] carrying the core's one sentence when the bytes are
+     not a [.kdoc], or name a newer major version. *)
+  val of_kdoc : string -> kdoc
+
+  (* The same bytes in nine bindings (RD13); raises [Invalid_argument]
+     naming the run when the document breaks a wall [set_document] holds. *)
+  val to_kdoc : t -> string
 end
 
 type document = Document.t
@@ -341,6 +382,15 @@ module Selection : sig
   (* The paragraph kind every touched paragraph shares; [Body] for body
      text and for paragraphs of different kinds. *)
   val block : t -> block
+
+  (* The list kind every touched paragraph shares; [None] otherwise. *)
+  val list : t -> List_kind.t
+
+  (* The alignment every touched paragraph shares; [Start] otherwise. *)
+  val paragraph_align : t -> Paragraph_align.t
+
+  (* The colour holding over the whole selection, [#RRGGBB]. *)
+  val color : t -> string option
 end
 
 type selection = Selection.t
@@ -986,6 +1036,22 @@ val unformat_range : widget -> int * int -> string -> unit
 
 (* Make the selection's paragraphs [kind]; [Body] clears. *)
 val set_block : widget -> block -> unit
+
+(* The rich document's acts over the selection
+   (docs/rich-document-plan.md §6, §11): [format] with their names.
+   [List_kind.None] ends a list; [indent]/[outdent] move one level;
+   automatic ink is [unformat] of "color". *)
+val set_list : widget -> List_kind.t -> unit
+val indent : widget -> unit
+val outdent : widget -> unit
+val set_paragraph_align : widget -> Paragraph_align.t -> unit
+val check_items : widget -> bool -> unit
+val color : widget -> string -> unit
+
+(* Present the platform's own colour picker over the selection; each
+   colour the user commits arrives as a "color" act through
+   [~on_format] (docs/rich-document-plan.md §5). *)
+val pick_text_color : widget -> unit
 
 (* What an [~own_undo] textarea's app can take back right now, and put
    back: a write re-reads Edit>Undo's and Edit>Redo's enablement. *)

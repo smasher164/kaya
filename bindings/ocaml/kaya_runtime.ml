@@ -575,6 +575,29 @@ let asset_miss_sentence name =
     String.init len (fun i -> CArray.get buf i)
   end
 
+(* The .kdoc pair's values lists, as their bytes
+   (docs/rich-document-plan.md RD13). *)
+let kaya_kdoc_read =
+  foreign ~from:lib "kaya_kdoc_read"
+    (string @-> size_t @-> ptr char @-> size_t @-> returning size_t)
+
+let kaya_kdoc_write =
+  foreign ~from:lib "kaya_kdoc_write"
+    (string @-> size_t @-> ptr char @-> size_t @-> returning size_t)
+
+let kdoc_call call input =
+  let n = Unsigned.Size_t.of_int (String.length input) in
+  let len =
+    Unsigned.Size_t.to_int
+      (call input n (Ctypes.from_voidp Ctypes.char Ctypes.null) (Unsigned.Size_t.of_int 0))
+  in
+  let buf = CArray.make char len in
+  ignore (call input n (CArray.start buf) (Unsigned.Size_t.of_int len));
+  String.init len (fun i -> CArray.get buf i)
+
+let kdoc_read bytes = kdoc_call kaya_kdoc_read bytes
+let kdoc_write doc = kdoc_call kaya_kdoc_write doc
+
 (* Open an asset by name; the sentence is the core's, verbatim. *)
 let open_asset name =
   let handle =

@@ -75,6 +75,7 @@ mod protocol;
 mod typed_number;
 mod range;
 mod ring;
+mod richdoc;
 // The row-windowing band machine (docs/virtualization-plan.md §1-§2).
 mod rowwindow;
 mod scene;
@@ -151,7 +152,7 @@ pub use app::{
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
     CatalogHome, MenuRole, Platform, Role, SizeClass, Shape, Sort, Symbol, SymbolKind, Tint, TintKind, ToggleRef, Tpl, TplSource, Tx,
     ValueKind,
-    props, Dropped, Op, Block, Document, Edit, EditSource, Format, Run, Selection,
+    props, Dropped, Op, Block, Document, Edit, EditSource, Format, Kdoc, ListKind, ParagraphAlign, Run, Selection,
     AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, FontDialogRef, FontFutureRef, SaveFutureRef,
     TaskOutcome, TaskScope,
     // docs/media-plan.md: the player, the video view and the session.

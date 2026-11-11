@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x585cc259da5c8c75L;
+    public static final long SPEC_HASH = 0x5f131b7e55fe0f95L;
     public static final String VERSION = "0.0.0";
 
     public static final int VALUE_BOOL = 1;
@@ -335,6 +335,20 @@ public final class KayaWire {
     public static final int RICH_ATTR_CODE = 5;
     public static final int RICH_ATTR_LINK = 6;
     public static final int RICH_ATTR_BLOCK = 7;
+    public static final int RICH_ATTR_LIST = 8;
+    public static final int RICH_ATTR_INDENT = 9;
+    public static final int RICH_ATTR_CHECKED = 10;
+    public static final int RICH_ATTR_START = 11;
+    public static final int RICH_ATTR_ALIGN = 12;
+    public static final int RICH_ATTR_COLOR = 13;
+    public static final int LIST_KIND_NONE = 0;
+    public static final int LIST_KIND_BULLET = 1;
+    public static final int LIST_KIND_NUMBERED = 2;
+    public static final int LIST_KIND_CHECK = 3;
+    public static final int PARAGRAPH_ALIGN_START = 0;
+    public static final int PARAGRAPH_ALIGN_CENTER = 1;
+    public static final int PARAGRAPH_ALIGN_END = 2;
+    public static final int PARAGRAPH_ALIGN_JUSTIFY = 3;
     public static final int BLOCK_KIND_BODY = 0;
     public static final int BLOCK_KIND_HEADING1 = 1;
     public static final int BLOCK_KIND_HEADING2 = 2;
@@ -450,6 +464,7 @@ public final class KayaWire {
     public static final int COMMAND_CLEAR = 1;
     public static final int COMMAND_FOCUS = 2;
     public static final int COMMAND_EMOJI_PICKER = 3;
+    public static final int COMMAND_TEXT_COLOR = 4;
     public static final short TX_KIND_CREATE_SIGNAL = 1;
     public static final short TX_KIND_WRITE_SIGNAL = 2;
     public static final short TX_KIND_CREATE_WIDGET = 3;

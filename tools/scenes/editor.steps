@@ -210,6 +210,18 @@ expect label@matches-2 "4 of 4"
 # EACH STYLE TOGGLES, and its check is what holds over the selection
 # (docs/phone-format-plan.md §3): the platform's own check mark, read off
 # the real menu.
+#
+# A TEXT FILE OPENS PLAIN, and the Format menu acts on a rich tab only
+# (docs/rich-document-plan.md RD11, TextEdit's model): Make Rich Text turns
+# the journal into body paragraphs as written, in the reading look, and the
+# document is unsaved, since its next Save writes a .kdoc.
+expect_menu "Format>Bold" disabled
+menu_activate "Format>Make Rich Text"
+expect_menu "Format>Make Rich Text" disabled
+expect_menu "Format>Make Plain Text" enabled
+expect_runs textarea@buffer-2 ""
+expect_document_dirty "notes" true
+expect_face textarea@buffer-2 proportional
 expect_menu "Format>Bold" enabled
 expect_menu "Format>Bold" unchecked
 shortcut "primary+b"
@@ -242,7 +254,7 @@ shortcut "primary+alt+0"
 expect_runs textarea@buffer-2 "1294:1297 bold|1295:1297 italic"
 expect_menu "Format>Paragraph Style>Heading 1" unchecked
 expect_menu "Format>Paragraph Style>Body" checked
-expect_document_dirty "notes" false
+expect_document_dirty "notes" true
 # The status bar: the last message, the find's tally, the words and the caret's place.
 expect_order row@statusbar-2 "saved, 1297 bytes|4 of 4|255 words|Ln 52, Col 24 (3 selected)"
 
@@ -280,6 +292,11 @@ expect label@matches-2 ""
 # above and below, 14 at the sides, clear of a window's rounded corner.
 expect_inset row@statusbar-2 6 14
 expect_height_fits row@statusbar-2
+# BACK TO PLAIN: the plain write above left no runs, so there is nothing to
+# lose and nothing is asked.
+menu_activate "Format>Make Plain Text"
+expect_menu "Format>Bold" disabled
+expect_face textarea@buffer-2 named
 
 # ---- the View menu: the gutter and the zoom ------------------------
 #
@@ -296,17 +313,16 @@ expect_gutter textarea@buffer-2 off
 menu_activate "View>Line Numbers"
 expect_gutter textarea@buffer-2 on
 expect_menu "View>Line Numbers" checked
-# Writing Mode (docs/looks-plan.md §3.7, §3.8): the platform's own text face a
-# zoom step up, no gutter, the text at a reading measure centred in the box;
-# off, the coding face, the gutter and the zoom come back.
-menu_activate "View>Writing Mode"
-expect_menu "View>Writing Mode" checked
+# Writing Mode is the look a RICH tab wears (docs/looks-plan.md §3.7, §3.8;
+# docs/rich-document-plan.md RD11): the platform's own text face a zoom step
+# up, no gutter, the text at a reading measure centred in the box; made
+# plain again, the coding face, the gutter and the zoom come back.
+menu_activate "Format>Make Rich Text"
 expect_face textarea@buffer-2 proportional
 expect_gutter textarea@buffer-2 off
 expect_scaled textarea@buffer-2 1.1
 expect_measure textarea@buffer-2 480
-menu_activate "View>Writing Mode"
-expect_menu "View>Writing Mode" unchecked
+menu_activate "Format>Make Plain Text"
 expect_face textarea@buffer-2 named
 expect_gutter textarea@buffer-2 on
 expect_scaled textarea@buffer-2 1
@@ -398,29 +414,75 @@ expect_windows 1
 expect_documents "draft|untitled"
 expect_document_dirty "untitled" true
 
-# ---- Writing Mode over Markdown (docs/looks-plan.md §6) -------------
+# ---- a rich document (docs/rich-document-plan.md §8) ----------------
 #
-# The Markdown stays text and is drawn styled: a heading line takes its
-# heading block, a `> ` line a quote, `**` spans bold and `*` spans italic,
-# the marks kept. WRITING MODE IN A TAB JUST OPENED: the Mac's gutter came
-# back on the first resize the styling caused (docs/traps.md, the Writing
-# Mode gutter), so the gutter is read here, before anything else touches it.
-# After the window's close, so the phones' cut leaves it out: a phone's leg
-# ran out of its 120 seconds on this second picker under a matrix's load.
-file_dialog_goto $TMP/kaya-editor-$PID
-menu_activate "File>Open…"
-expect_file_dialog kaya-editor-$PID decoy draft essay notes
-file_choose essay
-expect_document "essay"
+# View>Writing Mode is the preference that new documents are rich (RD11).
+# A shopping list made a list by the Format menu, an item indented by Tab,
+# numbered by its chord, a word in a preset colour, Return at the last
+# item's end and Return in the empty item (the list ends), saved as a .kdoc
+# and read back byte for byte. After the window's close, so the phones' cut
+# leaves it out (the second picker's budget, above).
 menu_activate "View>Writing Mode"
 expect_menu "View>Writing Mode" checked
-expect_gutter textarea@buffer-4 off
-expect_runs textarea@buffer-4 "0:18 block=heading1|36:45 italic|93:108 bold|120:136 block=heading2|238:253 block=heading2|255:298 block=quote|319:325 italic|375:386 bold"
+menu_activate "File>New"
+expect label@status-4 "new file"
+click textarea@buffer-4
+expect_focused textarea@buffer-4
+expect_menu "Format>Bold" enabled
+expect_face textarea@buffer-4 proportional
+type "milk"
+press return
+type "eggs"
+press return
+type "bread"
+select_text textarea@buffer-4 0:15
+menu_activate "Format>List>Bulleted"
+expect_runs textarea@buffer-4 "0:15 list=bullet"
+expect_markers textarea@buffer-4 "0:0 •|5:0 •|10:0 •"
+expect_menu "Format>List>Bulleted" checked
+select_text textarea@buffer-4 5:5
+press tab
+expect_markers textarea@buffer-4 "0:0 •|5:1 ◦|10:0 •"
+select_text textarea@buffer-4 0:15
+shortcut "primary+shift+7"
+expect_markers textarea@buffer-4 "0:0 1.|5:1 a.|10:0 2."
+select_text textarea@buffer-4 0:4
+menu_activate "Format>Text Colour>Red"
+expect_runs textarea@buffer-4 "0:4 color=#DD1F24|0:15 list=numbered|5:9 indent=1"
+select_text textarea@buffer-4 15:15
+press return
+expect_markers textarea@buffer-4 "0:0 1.|5:1 a.|10:0 2.|16:0 3."
+press return
+expect_markers textarea@buffer-4 "0:0 1.|5:1 a.|10:0 2."
+type "done"
+expect textarea@buffer-4 "milk\neggs\nbread\ndone"
+expect_runs textarea@buffer-4 "0:4 color=#DD1F24|0:15 list=numbered|5:9 indent=1"
+file_dialog_goto $TMP/kaya-editor-$PID
+menu_activate "File>Save As…"
+file_dialog_name list
+file_save
+expect label@status-4 "saved, 285 bytes"
+menu_activate "File>Close Tab"
+expect_documents "draft|untitled"
+file_dialog_goto $TMP/kaya-editor-$PID
+menu_activate "File>Open…"
+expect_file_dialog kaya-editor-$PID decoy draft essay list notes
+file_choose list
+expect_document "list"
+expect textarea@buffer-5 "milk\neggs\nbread\ndone"
+expect_runs textarea@buffer-5 "0:4 color=#DD1F24|0:15 list=numbered|5:9 indent=1"
+expect_markers textarea@buffer-5 "0:0 1.|5:1 a.|10:0 2."
+menu_activate "File>Close Tab"
+# The essay is a .kdoc the app wrote at launch; it opens rich.
+file_dialog_goto $TMP/kaya-editor-$PID
+menu_activate "File>Open…"
+file_choose essay
+expect_document "essay"
+expect_runs textarea@buffer-6 "0:16 block=heading1|33:40 italic|67:80 block=heading2|81:173 list=bullet|114:144 indent=1|125:129 color=#016FEF|174:215 block=quote"
+expect_markers textarea@buffer-6 "81:0 •|114:1 ◦|145:0 •"
+menu_activate "File>Close Tab"
 menu_activate "View>Writing Mode"
 expect_menu "View>Writing Mode" unchecked
-expect_gutter textarea@buffer-4 on
-expect_runs textarea@buffer-4 ""
-menu_activate "File>Close Tab"
 expect_documents "draft|untitled"
 expect_document "untitled"
 
