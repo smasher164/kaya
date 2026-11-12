@@ -1427,7 +1427,10 @@ reach a TalkBack or Orca user as run-on text with no numbers or states; both
 halves read kaya's own model, so no platform guesswork is involved. It is a
 slice of its own, after this build.
 
-### RD19. What VoiceOver and Narrator are told of a drawn list marker (asked 2026-11-12)
+### RD19. What VoiceOver and Narrator are told of a drawn list marker (RULED 2026-11-12: A)
+
+RULED A as recommended (the maintainer, 2026-11-12: "i agree with your
+recommendations").
 
 The mechanism, short: RD18 put what a list item tells beyond its text
 (`bullet, 2 of 3`, `checked, 1 of 2`) on GTK, as the text view's accessible
@@ -1466,7 +1469,10 @@ Compose. What their screen readers are told today, read with the same verbs
 RECOMMEND A. Invariant 1 (one observable semantics), and on WinUI the
 elements already exist and only lack their names.
 
-### RD20. Whether a Document kept in a model field keeps its extra (asked 2026-11-12)
+### RD20. Whether a Document kept in a model field keeps its extra (RULED 2026-11-12: B)
+
+RULED B as recommended (the maintainer, 2026-11-12: "i agree with your
+recommendations").
 
 The mechanism, short: RD17 put a file's unknown top-level members on every
 binding's Document as `extra`, and the binding's own fold keeps it while the
