@@ -1525,7 +1525,11 @@ an older one, and a notes app that keeps its documents in rows is the first
 consumer the rich document was built for. C is the cheap honest floor if B
 waits.
 
-### RD21. What WinUI's screen-reader scene reads of the field's text (ASKED 2026-11-12)
+### RD21. What WinUI's screen-reader scene reads of the field's text (RULED 2026-11-12: A)
+
+RULED A (the maintainer, 2026-11-12: "A, but ledger C as an option, cause i
+didn't realize we stopped using the accessibility reader on windows"). C is
+kept on docs/deferred.md as an option, not a plan.
 
 The mechanism, short: `richdocax.steps` reads the field's accessible text
 (`expect_ax_text`) because Compose once drew a U+200B where a newline was, and
