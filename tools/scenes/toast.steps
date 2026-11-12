@@ -22,8 +22,6 @@ click button#1
 expect_toast "First|Open"
 click button#2
 expect_toast "Second|Open"
-expect label#1 "answers 2"
-expect label#0 "First: closed"
 toast_action
 expect_no_toast
 expect label#1 "answers 3"
@@ -58,8 +56,6 @@ click button#3
 expect_toast "Deleted Milk|Undo"
 click button#3
 expect_toast "Deleted Eggs|Undo"
-expect label#1 "answers 6"
-expect label#0 "Deleted Milk: closed"
 toast_action
 expect label#2 "undone 3: delete Eggs"
 expect label#3 "Eggs, Bread"

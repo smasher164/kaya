@@ -596,6 +596,11 @@ fn main() {
         // The secure field's masked read asks the peer's Value pattern
         // what it publishes (docs/secure-entry-plan.md §3).
         "Microsoft.UI.Xaml.Automation.Provider.IValueProvider".to_string(),
+        // expect_ax_text asks the field's peer for its Text pattern
+        // (docs/rich-document-plan.md RD19).
+        "Microsoft.UI.Xaml.Automation.Peers.PatternInterface".to_string(),
+        "Microsoft.UI.Xaml.Automation.Provider.ITextProvider".to_string(),
+        "Microsoft.UI.Xaml.Automation.Provider.ITextRangeProvider".to_string(),
         // THE SEMANTIC ICONS (docs/styling-plan.md D6): every `Icon`
         // setter takes an IconElement, and BOTH routes are needed —
         // `Symbol` covers 17 of kaya's 20 concepts, and info, warning and

@@ -22,6 +22,11 @@ func spell(_ runs: [KayaRun]) -> String {
     }.joined(separator: "|")
 }
 
+/// Row b's patch, read from a file that carries a member this kaya does not
+/// know, so the row holds a Document with an extra
+/// (docs/rich-document-plan.md RD20).
+let patched = #"{"kaya": "document", "version": 1, "com.example.theme": "dusk", "paragraphs": [{"spans": [["Patched", {"italic": true}]]}]}"#
+
 func keyText(_ key: KayaValue) -> String {
     if case .str(let s) = key { return s }
     return "\(key)"
@@ -63,11 +68,16 @@ KayaApp.run { app in
                 tx.button("patch b") { t in  // button#0
                     t.undoable("patch b")
                     notes.patch(t, .str("b")).set(
-                        \.body, KayaDocument("Patched").italic(0..<7))
+                        \.body, try KayaDocument.fromKdoc(Data(patched.utf8)).document)
                 }
                 tx.button("read a") { t in  // button#1
                     let note = row(t, .str("a"))
                     t.write(view, .str("\(note.body.text) | \(spell(note.body.runs))"))
+                }
+                tx.button("save b") { t in  // button#2
+                    let back = try KayaDocument.fromKdoc(row(t, .str("b")).body.toKdoc()).document
+                    let extra = back.extra.replacingOccurrences(of: "\"", with: "'")
+                    t.write(view, .str("saved \(back.text), extra \(extra)"))
                 }
             }
             for r in notes.rows {

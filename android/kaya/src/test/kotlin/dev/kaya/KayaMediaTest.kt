@@ -19,6 +19,17 @@ class KayaMediaTest {
     }
 
     @Test
+    fun aRebufferWhileTheAppsPlayStandsIsStillPlaying() {
+        val buffering = androidx.media3.common.Player.STATE_BUFFERING
+        val ready = androidx.media3.common.Player.STATE_READY
+        assertEquals(true, kayaPlayingAsReported(false, true, buffering, true))
+        assertEquals(false, kayaPlayingAsReported(false, true, buffering, false))
+        assertEquals(false, kayaPlayingAsReported(false, false, buffering, true))
+        assertEquals(false, kayaPlayingAsReported(false, false, ready, true))
+        assertEquals(true, kayaPlayingAsReported(true, true, ready, true))
+    }
+
+    @Test
     fun aTrackLanguageIsBcp47AndUndWhenNoneIsNamed() {
         assertEquals("en", kayaLanguageTag("en"))
         assertEquals("fr", kayaLanguageTag("fr"))

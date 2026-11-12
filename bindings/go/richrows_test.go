@@ -17,13 +17,15 @@ type note struct {
 
 // The bytes the wire rules spell — {u32 count, u32 reserved}, then per
 // value {u32 tag, u32 len, payload, padded to 8} — for
-// NewDocument("ab").Mark(0,1,"bold","true").Mark(1,2,"link","u"): nine
-// values, the text and four per run. Written out here rather than
+// NewDocument("ab").Mark(0,1,"bold","true").Mark(1,2,"link","u") with the
+// extra {"k":1}: ten values laid out as spec.rs' DOCUMENT_FIELD, the extra,
+// the text and four per run. Written out here rather than
 // encoded, so this compares the encoder with the protocol and not with
 // itself; bindings/python/kaya_app_checks.py and
-// bindings/js/kaya_app_checks.ts freeze the same 152 bytes.
+// bindings/js/kaya_app_checks.ts freeze the same 168 bytes.
 var referenceDocumentBlob = []byte{
-	0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+	0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00,
+	0x7b, 0x22, 0x6b, 0x22, 0x3a, 0x31, 0x7d, 0x00, 0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
 	0x61, 0x62, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
 	0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
@@ -36,7 +38,9 @@ var referenceDocumentBlob = []byte{
 }
 
 func seeded() Document {
-	return NewDocument("ab").Mark(0, 1, "bold", "true").Mark(1, 2, "link", "u")
+	doc := NewDocument("ab").Mark(0, 1, "bold", "true").Mark(1, 2, "link", "u")
+	doc.Extra = `{"k":1}`
+	return doc
 }
 
 func TestADocumentFieldIsABlobOfTheWireRulesList(t *testing.T) {
@@ -46,6 +50,10 @@ func TestADocumentFieldIsABlobOfTheWireRulesList(t *testing.T) {
 	if got := documentBlob(seeded()); !bytes.Equal(got, referenceDocumentBlob) {
 		t.Errorf("documentBlob gave %d bytes\n%v\nwant %d\n%v",
 			len(got), got, len(referenceDocumentBlob), referenceDocumentBlob)
+	}
+	// RD20: a row an undo restored decodes to the whole Document, extra too.
+	if back := documentOf(referenceDocumentBlob); !back.Equal(seeded()) {
+		t.Errorf("documentOf gave %+v, want %+v", back, seeded())
 	}
 	// The record encoder reaches the same bytes through the field's own
 	// schema slot, which is the path a row insert takes.

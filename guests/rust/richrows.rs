@@ -5,6 +5,10 @@
 
 use kaya::PathKey;
 
+/// Row b's patch, read from a file that carries a member this kaya does not
+/// know, so the row holds a Document with an `extra` (docs/rich-document-plan.md RD20).
+const PATCHED: &str = r#"{"kaya": "document", "version": 1, "com.example.theme": "dusk", "paragraphs": [{"spans": [["Patched", {"italic": true}]]}]}"#;
+
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Note {
     title: String,
@@ -16,6 +20,7 @@ enum Msg {
     Acted(kaya::Path),
     Patch,
     Read,
+    Save,
     /// An undo or redo moved the row back: the app reads ITS OWN mirror of
     /// row b, which is the fold a restored Blob field lands in.
     Restored,
@@ -58,6 +63,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     msgs.on_click(patch, Msg::Patch);
                     let read = tx.button("read a").id();
                     msgs.on_click(read, Msg::Read);
+                    let save = tx.button("save b").id();
+                    msgs.on_click(save, Msg::Save);
                 });
                 for mut row in notes.rows(tx) {
                     row.column(|t| {
@@ -110,11 +117,18 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }),
             Msg::Patch => ctx.apply(|tx| {
                 tx.undoable("patch b");
-                notes.patch(tx, "b").body(kaya::Document::new("Patched").mark(0..7, "italic", true));
+                let file = kaya::Document::from_kdoc(PATCHED.as_bytes()).expect("the scene's file reads");
+                notes.patch(tx, "b").body(file.document);
             }),
             Msg::Read => ctx.apply(|tx| {
                 let note = row(tx, "a");
                 let shown = format!("{} | {}", note.body.text, spell(&note.body.runs));
+                tx.write(view, shown);
+            }),
+            Msg::Save => ctx.apply(|tx| {
+                let note = row(tx, "b");
+                let back = kaya::Document::from_kdoc(&note.body.to_kdoc()).expect("kaya wrote a .kdoc it cannot read");
+                let shown = format!("saved {}, extra {}", back.document.text, back.document.extra.replace('"', "'"));
                 tx.write(view, shown);
             }),
             Msg::Restored => ctx.apply(|tx| {

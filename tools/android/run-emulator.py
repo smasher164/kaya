@@ -19,6 +19,7 @@ import atexit
 import contextlib
 import datetime
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -2026,6 +2027,7 @@ def run_apk_on(serial, name, apk, component, script, extras,
     if (not flush_socket_kills(serial, package, log)
             and media_server.serves(script)):
         return False
+    bank_hal_failures(serial, name)
     adb(serial, "logcat", "-c", stdout=log, stderr=log)
     # THE HARNESS'S EYES OUTSIDE THIS APP: the picker is a separate APK
     # and the platform stops one app reading another's UI, so picker
@@ -2965,6 +2967,61 @@ def lane_microphone(serial, mic):
 
 
 HAL_AUDIO_TAG = "android.hardware.audio@7.1-impl.ranchu"
+HAL_HISTORY_DIR = ROOT / "target/android-hal-history"
+
+
+def hal_failures(serial):
+    """The audio HAL's failed reads the device's log buffer holds now:
+    (count, first time, last time)."""
+    dump = out_of(["timeout", "10", "adb", "-s", serial, "logcat", "-d", "-v", "time",
+                   "-s", f"{HAL_AUDIO_TAG}:*"]).replace("\r", "")
+    times = [m.group(1) for line in dump.splitlines() if "pcm_readi failed" in line
+             for m in [re.match(r"(\S+ \d\d:\d\d:\d\d)", line)] if m]
+    return len(times), (times[0] if times else ""), (times[-1] if times else "")
+
+
+def boot_id(serial):
+    return out_of(["timeout", "10", "adb", "-s", serial, "shell", "cat",
+                   "/proc/sys/kernel/random/boot_id"]).strip()
+
+
+def bank_hal_failures(serial, leg):
+    """Before a leg's `logcat -c` wipes them, the HAL's failed reads are banked
+    per device BOOT in a file the next lane process reads too, so a capture
+    leg's account can say whether its input was broken before it opened
+    (docs/traps.md, the emulator's audio input)."""
+    count, first, last = hal_failures(serial)
+    if not count:
+        return
+    boot = boot_id(serial)
+    path = HAL_HISTORY_DIR / f"{serial}.json"
+    try:
+        held = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        held = {}
+    if held.get("boot") != boot:
+        held = {"boot": boot, "events": []}
+    held["events"].append({"before": leg, "failed": count, "first": first, "last": last})
+    HAL_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(held), encoding="utf-8")
+
+
+def hal_history(serial):
+    """What earlier legs in this device's boot banked (bank_hal_failures)."""
+    boot = boot_id(serial)
+    try:
+        held = json.loads((HAL_HISTORY_DIR / f"{serial}.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        held = {}
+    uptime = out_of(["timeout", "10", "adb", "-s", serial, "shell", "cat", "/proc/uptime"]).split()
+    up = f"up {float(uptime[0]):.0f}s" if uptime else "uptime unread"
+    events = held.get("events", []) if held.get("boot") == boot else []
+    head = f"; earlier in this boot ({up}, boot {boot[:8] or '?'})"
+    if not events:
+        return f"{head} no leg's log held a failed read"
+    return (f"{head} the HAL had already failed: "
+            + ", ".join(f"{e['failed']} read(s) {e['first']}..{e['last']} before {e['before']}"
+                        for e in events))
 
 
 def capture_audio_timeline(serial):
@@ -2996,7 +3053,7 @@ def capture_audio_timeline(serial):
              f"whatever was injected — measured under host load "
              f"(one-minute load {load:.1f} now; docs/traps.md)" if failed
              else f"; one-minute load {load:.1f} now")
-    return f"audio HAL: {failed} failed read(s){cause}; per second: {rows}"
+    return f"audio HAL: {failed} failed read(s){cause}; per second: {rows}{hal_history(serial)}"
 
 
 def lane_capture_state(serial):

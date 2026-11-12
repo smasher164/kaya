@@ -2696,13 +2696,13 @@ let reveal_range (Widget id) (start, stop) =
    [block]/[block_name], the one thing [Document.block] needs. *)
 
 (* A stamped copy's document is a record FIELD (docs/rich-text-plan.md
-   §19): the field's Blob bytes are ONE flat value list — the text, then
-   four values per run — the bytes [set_rich_text] already ships
-   (crates/kaya/src/wire.rs, [document_blob] / [read_document_blob]). *)
+   §19): the field's Blob bytes are ONE flat value list laid out as
+   crates/kaya/src/spec.rs' DOCUMENT_FIELD — the extra, the text, then four
+   values per run — the bytes [Document.to_kdoc] hands the core. *)
 let document_blob (doc : Document.t) =
   let b = Buffer.create 64 in
   Kaya_wire.encode_values b
-    (Kaya_wire.Str doc.text :: run_values doc.runs);
+    (Kaya_wire.Str doc.extra :: Kaya_wire.Str doc.text :: run_values doc.runs);
   Buffer.contents b
 
 let document_of_blob bytes : Document.t =
@@ -2720,11 +2720,13 @@ let document_of_blob bytes : Document.t =
     at := next
   done;
   match List.rev !values with
-  | Kaya_wire.Str text :: rest -> { Document.text; runs = runs_of_values rest; extra = "" }
+  | Kaya_wire.Str extra :: Kaya_wire.Str text :: rest ->
+      { Document.text; runs = runs_of_values rest; extra }
   | _ ->
       invalid_arg
         (Printf.sprintf
-           "kaya: a document blob starts with its text; this one holds %d value(s)"
+           "kaya: a document blob starts with its extra and its text (spec.rs \
+            DOCUMENT_FIELD); this one holds %d value(s)"
            count)
 
 (* The core's normal form (crates/kaya/src/scene.rs, [RichDoc::normalize]),

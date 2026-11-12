@@ -12,6 +12,11 @@ type NoteFields = kaya.Fields<typeof Note.schema>;
 
 const app = new kaya.App();
 
+/** Row b's patch, read from a file that carries a member this kaya does not
+ * know, so the row holds a Document with an extra
+ * (docs/rich-document-plan.md RD20). */
+const PATCHED = '{"kaya": "document", "version": 1, "com.example.theme": "dusk", "paragraphs": [{"spans": [["Patched", {"italic": true}]]}]}';
+
 /** The core's spelling of runs (`expect_runs`), so the row's field and
  * the core's mirror are compared as one string. */
 function spell(runs: readonly kaya.Run[]): string {
@@ -46,13 +51,19 @@ const { notes, last, view } = app.window({ title: "richrows", onUndone: onRestor
       kaya.button("patch b", {
         onClick: () => {
           kaya.undoable("patch b");
-          notes.patch("b", { body: new kaya.Document("Patched").mark([0, 7], "italic", true) });
+          notes.patch("b", { body: kaya.Document.fromKdoc(new TextEncoder().encode(PATCHED)).document });
         },
       });
       kaya.button("read a", {
         onClick: () => {
           const note = notes.get("a")!;
           view.set(`${note.body.text} | ${spell(note.body.runs)}`);
+        },
+      });
+      kaya.button("save b", {
+        onClick: () => {
+          const back = kaya.Document.fromKdoc(notes.get("b")!.body.toKdoc()).document;
+          view.set(`saved ${back.text}, extra ${back.extra.replaceAll('"', "'")}`);
         },
       });
     });

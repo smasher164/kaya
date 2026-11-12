@@ -99,7 +99,7 @@ g.counted("Go tests passed", passed, floor=TEST_FLOOR)
 blob_test = scratch / "bindings/go/richrows_test.go"
 blob_test.write_text(
     g.doctor("the document blob's first byte turned", blob_test.read_text(encoding="utf-8"),
-             r"var referenceDocumentBlob = \[\]byte\{\n\t0x09,", "var referenceDocumentBlob = []byte{\n\t0x0a,"),
+             r"var referenceDocumentBlob = \[\]byte\{\n\t0x0a,", "var referenceDocumentBlob = []byte{\n\t0x0b,"),
     encoding="utf-8")
 env = dict(os.environ)
 env["CGO_LDFLAGS"] = f"-L{TARGET / 'debug'} -Wl,-rpath,{TARGET / 'debug'}"

@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x5f131b7e55fe0f95
+let kayaSpecHash: UInt64 = 0x25d4a59421f21751
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -2777,6 +2777,25 @@ func kayaUtf16Offset(_ text: String, _ byte: Int) -> Int {
         let scalar = index.samePosition(in: text.unicodeScalars)
     else { return -1 }
     return scalar.utf16Offset(in: text)
+}
+
+/// What the core says the list item holding UTF-16 offset `utf16` tells beyond
+/// its text, "" outside one (docs/rich-document-plan.md RD18, RD19).
+@MainActor func kayaListItemSpeech(_ nodeId: UInt64, _ text: String, _ utf16: Int) -> String {
+    KayaHost.textItemSpeech(nodeId, kayaByteOffset(text, utf16))
+}
+
+/// The item's place among its siblings and its level, both from 1, out of the
+/// core's spelling (`checked, 2 of 3, level 2`).
+func kayaListItemPlace(_ speech: String) -> (index: Int, level: Int)? {
+    var index: Int?
+    var level = 1
+    for part in speech.components(separatedBy: ", ") {
+        let words = part.split(separator: " ")
+        if words.count == 3, words[1] == "of", let n = Int(words[0]) { index = n }
+        if words.count == 2, words[0] == "level", let n = Int(words[1]) { level = n }
+    }
+    return index.map { ($0, level) }
 }
 
 /// A set of platform ranges in the harness's spelling:
@@ -6799,6 +6818,11 @@ enum KayaHost {
     static func textMarkers(_ widget: UInt64) -> String {
         guard api != nil else { return "" }
         return String(decoding: readSized { api.text_markers(widget, $0, $1) }, as: UTF8.self)
+    }
+
+    static func textItemSpeech(_ widget: UInt64, _ byte: Int) -> String {
+        guard api != nil, byte >= 0 else { return "" }
+        return String(decoding: readSized { api.text_item_speech(widget, UInt64(byte), $0, $1) }, as: UTF8.self)
     }
 
     static func textCopy(_ widget: UInt64, _ start: Int, _ end: Int, html: Bool) -> Data {
@@ -17647,14 +17671,19 @@ private func kayaRunScript(_ script: String) {
                             if !itemRead { return view.accessibilityValue() ?? "<no value>" }
                             let ns = view.string as NSString
                             let paragraph = ns.paragraphRange(for: NSRange(location: view.selectedRange().location, length: 0))
-                            guard let said = view.accessibilityAttributedString(for: paragraph) else { return "<none>" }
-                            var parts: [String] = []
-                            if let prefix = said.attribute(.accessibilityListItemPrefix, at: 0, effectiveRange: nil) {
-                                parts.append("prefix \((prefix as? NSAttributedString)?.string ?? "\(prefix)")")
+                            if paragraph.length == 0 || (paragraph.length == 1 && ns.character(at: paragraph.location) == 10) {
+                                let announced = (view as? KayaTextView)?.emptyItemSaid ?? ""
+                                return announced.isEmpty ? "<none>" : announced
                             }
-                            if let index = said.attribute(.accessibilityListItemIndex, at: 0, effectiveRange: nil) { parts.append("index \(index)") }
-                            if let level = said.attribute(.accessibilityListItemLevel, at: 0, effectiveRange: nil) { parts.append("level \(level)") }
-                            return parts.isEmpty ? "<none>" : parts.joined(separator: ", ")
+                            guard let said = view.accessibilityAttributedString(for: paragraph), said.length > 0 else { return "<none>" }
+                            let prefix = said.attribute(.accessibilityListItemPrefix, at: 0, effectiveRange: nil)
+                            let index = said.attribute(.accessibilityListItemIndex, at: 0, effectiveRange: nil) as? NSNumber
+                            let level = said.attribute(.accessibilityListItemLevel, at: 0, effectiveRange: nil) as? NSNumber
+                            guard let prefix else { return index == nil && level == nil ? "<none>" : "index \(index.map { "\($0)" } ?? "-"), level \(level.map { "\($0)" } ?? "-") with no prefix" }
+                            let spoken = (prefix as? NSAttributedString)?.string ?? "\(prefix)"
+                            let place = kayaListItemPlace(spoken)
+                            if let place, index?.intValue == place.index - 1, level?.intValue == place.level - 1 { return spoken }
+                            return "prefix \"\(spoken)\" but index \(index.map { "\($0)" } ?? "-"), level \(level.map { "\($0)" } ?? "-")"
                         #else
                             guard let view = kayaLiveUITextView(node.id) else { return "<no text view for \(parts[1]) on screen>" }
                             if !itemRead { return view.accessibilityValue ?? "<no value>" }
@@ -31152,6 +31181,7 @@ struct KayaRootFrameReader: View {
     /// notification; zero while none is up.
     @MainActor var kayaKeyboardScreenFrame: CGRect = .zero
     @MainActor var kayaKeyboardFrames = 0
+    @MainActor var kayaKeyboardFrameAt: Date?
     @MainActor private var kayaKeyboardWatching = false
 
     @MainActor func kayaWatchKeyboard() {
@@ -31166,6 +31196,7 @@ struct KayaRootFrameReader: View {
             MainActor.assumeIsolated {
                 kayaKeyboardScreenFrame = end
                 kayaKeyboardFrames += 1
+                kayaKeyboardFrameAt = Date()
                 kayaKeyboardMoved()
             }
         }
@@ -31424,6 +31455,11 @@ struct KayaRootFrameReader: View {
             out += ", content \(Int(scroll.contentSize.width))x\(Int(scroll.contentSize.height)) inset "
                 + "\(Int(inset.top))/\(Int(inset.bottom)), caret \(kayaRectText(caret)), scroll "
                 + (scroll.isScrollEnabled ? "enabled" : "disabled")
+        }
+        if let own = rects.view as? KayaTextView {
+            let at = { (d: Date?) in d.map { String(format: "%.3f", $0.timeIntervalSince1970) } ?? "never" }
+            out += "; its last selection change at \(at(own.selectionChangedAt)), the last keyboard frame at "
+                + "\(at(kayaKeyboardFrameAt)), its geometries \(own.geometries.joined(separator: " | "))"
         }
         let cap = kayaScene.focusedId.flatMap { kayaScene.keyboardFieldCap[$0] }
         return out + "; A20's cap \(cap.map { "\(Int($0))" } ?? "none"), pan "
@@ -39615,6 +39651,36 @@ private final class KayaTextView: NSTextView, KayaRichPending {
     var pasteArmed: String?
     /// The markers last derived onto the storage, and the text they were for.
     var markersShown: (spelled: String, text: String)?
+    /// The empty list item holding the caret, as last announced: no character
+    /// can carry its list item attributes (RD19).
+    var emptyItemSaid = ""
+
+    /// RD19 (docs/rich-document-plan.md §11): each list item's first character
+    /// carries the core's account as AppKit's list item text attributes.
+    override func accessibilityAttributedString(for range: NSRange) -> NSAttributedString? {
+        guard let said = super.accessibilityAttributedString(for: range) else { return nil }
+        guard rich, said.length > 0 else { return said }
+        let ns = string as NSString
+        let marked = NSMutableAttributedString(attributedString: said)
+        var at = range.location
+        while at < NSMaxRange(range), at < ns.length {
+            let paragraph = ns.paragraphRange(for: NSRange(location: at, length: 0))
+            let offset = paragraph.location - range.location
+            if offset >= 0, offset < marked.length {
+                let speech = kayaListItemSpeech(nodeId, string, paragraph.location)
+                if let place = kayaListItemPlace(speech) {
+                    marked.addAttributes(
+                        [
+                            .accessibilityListItemPrefix: NSAttributedString(string: speech),
+                            .accessibilityListItemIndex: NSNumber(value: place.index - 1),
+                            .accessibilityListItemLevel: NSNumber(value: place.level - 1),
+                        ], range: NSRange(location: offset, length: 1))
+                }
+            }
+            at = NSMaxRange(paragraph)
+        }
+        return marked
+    }
 
     /// A rich view's paste reads the board's RTF, then its HTML, through the
     /// core's one normaliser (docs/rich-document-plan.md §7) and inserts the
@@ -39979,6 +40045,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
             let start = kayaByteOffset(text, range.location)
             let end = kayaByteOffset(text, NSMaxRange(range))
             if start >= 0, end >= 0 { KayaHost.textSelection(node.id, start, end) }
+            if let view = view as? KayaTextView { kayaRefreshEmptyItem(view) }
         }
 
         // The inheritance rule's one exception, on the platform that breaks it
@@ -40593,6 +40660,24 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     kayaWriteMarkers(storage, spelled)
     if let manager = view.textLayoutManager { kayaForgetDrawnMarkers(manager) }
     view.needsDisplay = true
+    kayaRefreshEmptyItem(view)
+}
+
+/// RD19: an EMPTY list item holding the caret is announced, since its list
+/// item attributes have no character to sit on.
+@MainActor private func kayaRefreshEmptyItem(_ view: KayaTextView) {
+    guard view.rich, !view.hasMarkedText() else { return }
+    let ns = view.string as NSString
+    let caret = min(view.selectedRange().location, ns.length)
+    let paragraph = ns.paragraphRange(for: NSRange(location: caret, length: 0))
+    let empty = paragraph.length == 0 || (paragraph.length == 1 && ns.character(at: paragraph.location) == 10)
+    let said = empty ? kayaListItemSpeech(view.nodeId, view.string, caret) : ""
+    guard said != view.emptyItemSaid else { return }
+    view.emptyItemSaid = said
+    guard !said.isEmpty, view.window?.firstResponder === view else { return }
+    NSAccessibility.post(
+        element: view, notification: .announcementRequested,
+        userInfo: [.announcement: said, .priority: NSAccessibilityPriorityLevel.high.rawValue])
 }
 
 /// The four keys the core is offered (KAYA_TEXT_KEY_*).
@@ -41048,6 +41133,10 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
             func textViewDidChangeSelection(_ textView: UITextView) {
                 guard let node else { return }
                 if restored, textView.markedTextRange == nil { node.keptSelection = textView.selectedRange }
+                // docs/traps.md, the caret a point under a squeezed field: a
+                // selection a key or the app set is kept in view as an edit is.
+                (textView as? KayaTextView)?.selectionChangedAt = Date()
+                DispatchQueue.main.async { kayaKeepCaretShown(textView) }
                 guard node.rich else { return }
                 kayaRearmTyping(textView)
                 let text = textView.text ?? ""
@@ -41055,6 +41144,7 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
                 let start = kayaByteOffset(text, range.location)
                 let end = kayaByteOffset(text, NSMaxRange(range))
                 if start >= 0, end >= 0 { KayaHost.textSelection(node.id, start, end) }
+                if let view = textView as? KayaTextView { kayaRefreshItemSaid(view) }
             }
 
             /// A user-driven focus change flows back so the model stays
@@ -41349,6 +41439,18 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
     /// delegate hook on UIKit (docs/rich-text-plan.md R4/R5).
     private final class KayaTextView: UITextView, KayaRichPending {
         var nodeId: UInt64 = 0
+        /// RD19 (docs/rich-document-plan.md §11): the caret's list item as the
+        /// core tells it, VoiceOver's hint and announced as it changes.
+        var itemSaid = ""
+        var selectionChangedAt: Date?
+        override var accessibilityHint: String? {
+            get {
+                let own = super.accessibilityHint ?? ""
+                if itemSaid.isEmpty { return own.isEmpty ? nil : own }
+                return own.isEmpty ? itemSaid : "\(itemSaid). \(own)"
+            }
+            set { super.accessibilityHint = newValue }
+        }
         var bodyFont: UIFont?
         /// docs/rich-text-plan.md: the widget publishes attributed content.
         var rich = false
@@ -42174,6 +42276,15 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
         kayaForgetDrawnMarkers(manager)
         manager.invalidateLayout(for: manager.documentRange)
         manager.textViewportLayoutController.layoutViewport()
+        kayaRefreshItemSaid(view)
+    }
+
+    @MainActor private func kayaRefreshItemSaid(_ view: KayaTextView) {
+        guard view.rich, view.markedTextRange == nil else { return }
+        let said = kayaListItemSpeech(view.nodeId, view.text ?? "", view.selectedRange.location)
+        guard said != view.itemSaid else { return }
+        view.itemSaid = said
+        if !said.isEmpty, view.isFirstResponder { UIAccessibility.post(notification: .announcement, argument: said) }
     }
 
     /// The four keys the core is offered (KAYA_TEXT_KEY_*), as UIKit delivers

@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x5f131b7e55fe0f95
+	SpecHash uint64 = 0x25d4a59421f21751
 	Version = "0.0.0"
 
 	ValueBool = 1

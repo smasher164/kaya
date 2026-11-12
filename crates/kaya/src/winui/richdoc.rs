@@ -39,7 +39,7 @@ thread_local! {
     static OVERLAYS: RefCell<HashMap<u64, Overlay>> = RefCell::new(HashMap::new());
     /// The core's markers as last read, so a scroll or a resize places them
     /// again without the core.
-    static WANTED: RefCell<HashMap<u64, Vec<crate::richdoc::Marker>>> = RefCell::new(HashMap::new());
+    static WANTED: RefCell<HashMap<u64, Vec<(crate::richdoc::Marker, Option<crate::richdoc::ItemPlace>)>>> = RefCell::new(HashMap::new());
     static DRAWN: RefCell<HashMap<u64, Vec<Drawn>>> = RefCell::new(HashMap::new());
     /// Set while the overlay writes a box's state, so its Checked and
     /// Unchecked are not taken as a user's click.
@@ -240,7 +240,17 @@ pub(super) fn draw_markers(core: &CoreState, widget: u64) -> windows_core::Resul
     if core.scene.rich_text(WidgetId(widget)) != Some(text.as_str()) {
         return Ok(());
     }
-    let markers = core.scene.rich_markers(WidgetId(widget)).unwrap_or_default();
+    let places = core.scene.rich_item_places(WidgetId(widget)).unwrap_or_default();
+    let markers = core
+        .scene
+        .rich_markers(WidgetId(widget))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| {
+            let place = places.iter().find(|p| p.start == m.start).cloned();
+            (m, place)
+        })
+        .collect();
     WANTED.with_borrow_mut(|m| m.insert(widget, markers));
     place(&field, widget)
 }
@@ -278,7 +288,7 @@ fn place(field: &RichEditBox, widget: u64) -> windows_core::Result<()> {
     let mut drawn = Vec::with_capacity(markers.len());
     PLACING.with(|p| p.set(true));
     let placed = (|| -> windows_core::Result<()> {
-        for marker in &markers {
+        for (marker, place) in &markers {
             let Some(at) = utf16_offset(&text, marker.start as usize) else { continue };
             let len = i32::from(marker.start < text.len() as u64);
             let Some((x, y, _, h)) = client_rect_in(field, &content, &to, at, len)? else { continue };
@@ -305,12 +315,9 @@ fn place(field: &RichEditBox, widget: u64) -> windows_core::Result<()> {
                 });
                 check.Checked(&handler)?;
                 check.Unchecked(&handler)?;
-                bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
-                    &check.cast::<bindings::Microsoft::UI::Xaml::DependencyObject>()?,
-                    &HSTRING::from(if checked { "checked" } else { "unchecked" }),
-                )?;
                 let (left, top) = (right - CHECK_SIZE, y + (h - CHECK_SIZE) / 2.0);
                 let element: UIElement = check.cast()?;
+                name_item(&element, place.as_ref())?;
                 Canvas::SetLeft(&element, left)?;
                 Canvas::SetTop(&element, top)?;
                 children.Append(&element)?;
@@ -331,6 +338,7 @@ fn place(field: &RichEditBox, widget: u64) -> windows_core::Result<()> {
             block.SetFontSize(f64::from(size) * 96.0 / 72.0)?;
             block.SetFontFamily(&FontFamily::CreateInstanceWithName(&HSTRING::from(face.as_str()))?)?;
             let element: UIElement = block.cast()?;
+            name_item(&element, place.as_ref())?;
             element.Measure(bindings::Windows::Foundation::Size { Width: f32::INFINITY, Height: f32::INFINITY })?;
             let width = f64::from(element.DesiredSize()?.Width);
             let (left, top) = (right - width, y);
@@ -360,6 +368,18 @@ fn place(field: &RichEditBox, widget: u64) -> windows_core::Result<()> {
     PLACING.with(|p| p.set(false));
     DRAWN.with_borrow_mut(|map| map.insert(widget, drawn));
     placed
+}
+
+/// RD19 (docs/rich-document-plan.md §11): Narrator meets a drawn marker as
+/// its item's account and place in the list, never as the bare glyph.
+fn name_item(element: &UIElement, place: Option<&crate::richdoc::ItemPlace>) -> windows_core::Result<()> {
+    use bindings::Microsoft::UI::Xaml::Automation::AutomationProperties as A;
+    let Some(place) = place else { return Ok(()) };
+    let at: bindings::Microsoft::UI::Xaml::DependencyObject = element.cast()?;
+    A::SetName(&at, &HSTRING::from(place.said.as_str()))?;
+    A::SetPositionInSet(&at, place.position as i32)?;
+    A::SetSizeOfSet(&at, place.size as i32)?;
+    A::SetLevel(&at, place.level as i32)
 }
 
 /// The record `expect_markers` reads, spelled as the core spells its own.

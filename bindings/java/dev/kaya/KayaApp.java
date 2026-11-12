@@ -6318,7 +6318,7 @@ public final class KayaApp {
          * bindings (RD13); throws IllegalStateException naming the run when
          * it breaks a wall {@link Tx#setDocument} holds. */
         public byte[] toKdoc() {
-            List<Object> values = kdocValues(KayaRing.kdocWrite(documentBlob(this, extra)));
+            List<Object> values = kdocValues(KayaRing.kdocWrite(documentBlob(this)));
             if (!"".equals(values.get(0))) {
                 throw new IllegalStateException("kaya: toKdoc: " + values.get(0));
             }
@@ -12481,7 +12481,8 @@ public final class KayaApp {
     /**
      * A Document's BYTES as a record field holds them
      * (docs/rich-text-plan.md §19, crates/kaya/src/wire.rs
-     * {@code document_blob}): one counted value list — the text, then
+     * {@code document_blob}): one counted value list laid out as
+     * crates/kaya/src/spec.rs' DOCUMENT_FIELD — the extra, the text, then
      * four values per run. Hand-packed because KayaWire's value encoder
      * is the generated file's own; the bytes are pinned against the wire
      * rules in tools/checks/java-abort/dev/kaya/IdSpaceCheck.java.
@@ -12504,24 +12505,24 @@ public final class KayaApp {
         for (int i = 0; i < count; i++) {
             values.add(KayaWire.parseValue(bytes, b, cursor));
         }
-        if (values.isEmpty() || !(values.get(0) instanceof String text)) {
+        if (values.size() < 2 || !(values.get(0) instanceof String extra)
+                || !(values.get(1) instanceof String text)) {
             throw new IllegalArgumentException(
-                    "kaya: a document blob starts with its text; this one holds "
+                    "kaya: a document blob starts with its extra and its text (spec.rs DOCUMENT_FIELD); this one holds "
                             + values.size() + " value(s)");
         }
         List<TextRun> runs = new ArrayList<>();
-        for (int i = 1; i + 3 < values.size(); i += 4) {
+        for (int i = 2; i + 3 < values.size(); i += 4) {
             runs.add(new TextRun(
                     decodedSpan("document blob run", (Long) values.get(i),
                             (Long) values.get(i + 1)),
                     (String) values.get(i + 2), (String) values.get(i + 3)));
         }
-        return new Document(text, runs);
+        return new Document(text, runs, extra);
     }
 
-    static byte[] documentBlob(Document document, String... head) {
-        List<Object> values = new ArrayList<>(List.of(head));
-        values.add(document.content);
+    static byte[] documentBlob(Document document) {
+        List<Object> values = new ArrayList<>(List.of(document.extra, document.content));
         for (TextRun run : document.marks) {
             values.add(run.range().start);
             values.add(run.range().stop);

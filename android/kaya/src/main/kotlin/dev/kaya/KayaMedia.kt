@@ -178,7 +178,7 @@ internal class KayaMediaPlayer(val id: Long, context: Context) : Player.Listener
 
     private val tick = object : Runnable {
         override fun run() {
-            if (!exo.isPlaying) return
+            if (!reportedPlaying) return
             val at = exo.currentPosition
             kayaPlayerReport(id) { KayaPresent.playerPosition(id, at) }
             main.postDelayed(this, MEDIA_POSITION_TICK_MS.toLong())
@@ -272,6 +272,7 @@ internal class KayaMediaPlayer(val id: Long, context: Context) : Player.Listener
 
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
         KayaVTrace.note("player_state", "player $id playWhenReady -> $playWhenReady (reason $reason): ${held()}")
+        reportPlaying()
     }
 
     fun seek(ms: Long, report: Boolean) {
@@ -283,6 +284,7 @@ internal class KayaMediaPlayer(val id: Long, context: Context) : Player.Listener
 
     override fun onPlaybackStateChanged(state: Int) {
         KayaVTrace.note("player_state", "player $id state -> $state: ${held()}")
+        reportPlaying()
         when (state) {
             Player.STATE_READY -> {
                 if (!loaded) {
@@ -316,9 +318,18 @@ internal class KayaMediaPlayer(val id: Long, context: Context) : Player.Listener
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
         KayaVTrace.note("player_state", "player $id isPlaying -> $isPlaying: ${held()}")
-        kayaPlayerReport(id) { KayaPresent.playerRate(id, isPlaying) }
+        reportPlaying()
+    }
+
+    private var reportedPlaying = false
+
+    private fun reportPlaying() {
+        val playing = kayaPlayingAsReported(exo.isPlaying, exo.playWhenReady, exo.playbackState, loaded)
+        if (playing == reportedPlaying) return
+        reportedPlaying = playing
+        kayaPlayerReport(id) { KayaPresent.playerRate(id, playing) }
         main.removeCallbacks(tick)
-        if (isPlaying) {
+        if (playing) {
             main.post(tick)
         } else if (loaded) {
             val at = exo.currentPosition
@@ -535,6 +546,13 @@ private class KayaRenderersFactory(context: Context) : DefaultRenderersFactory(c
 }
 
 /** A language as BCP 47 through the platform's own canonicalizer; "und" for none. */
+/** docs/media-plan.md §2 rules 1 and 3: a rebuffer while the app's play
+ * stands is still `playing`, as AVPlayer's waiting, WinUI's Buffering and
+ * GStreamer's unhandled buffering read on the other arms; ExoPlayer's
+ * isPlaying drops through it (docs/traps.md, the pause that became Play). */
+internal fun kayaPlayingAsReported(isPlaying: Boolean, playWhenReady: Boolean, state: Int, loaded: Boolean): Boolean =
+    isPlaying || (loaded && playWhenReady && state == Player.STATE_BUFFERING)
+
 internal fun kayaLanguageTag(raw: String?): String {
     if (raw.isNullOrEmpty() || raw == "und") return "und"
     return java.util.Locale.forLanguageTag(raw).toLanguageTag().ifEmpty { "und" }

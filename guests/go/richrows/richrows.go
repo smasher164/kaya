@@ -18,6 +18,11 @@ type Note struct {
 	Body  kaya.Document
 }
 
+// patched is row b's patch, read from a file that carries a member this
+// kaya does not know, so the row holds a Document with an Extra
+// (docs/rich-document-plan.md RD20).
+const patched = `{"kaya": "document", "version": 1, "com.example.theme": "dusk", "paragraphs": [{"spans": [["Patched", {"italic": true}]]}]}`
+
 // spell is the core's spelling of runs (expect_runs), so the row's field
 // and the core's mirror are compared as one string.
 func spell(runs []kaya.TextRun) string {
@@ -69,11 +74,24 @@ func App() *kaya.App {
 			tx.Row(func() {
 				tx.Button("patch b", func(tx *kaya.Tx) { // button#0
 					tx.Undoable("patch b")
-					NotePatch(notes, tx, "b").Body(kaya.NewDocument("Patched").Italic(0, 7))
+					file, err := kaya.FromKdoc([]byte(patched))
+					if err != nil {
+						panic(fmt.Sprintf("richrows: the scene's file reads: %v", err))
+					}
+					NotePatch(notes, tx, "b").Body(file.Document)
 				})
 				tx.Button("read a", func(tx *kaya.Tx) { // button#1
 					note := row(tx, "a")
 					tx.Write(view, fmt.Sprintf("%s | %s", note.Body.Text, spell(note.Body.Runs)))
+				})
+				tx.Button("save b", func(tx *kaya.Tx) { // button#2
+					note := row(tx, "b")
+					back, err := kaya.FromKdoc(note.Body.ToKdoc())
+					if err != nil {
+						panic(fmt.Sprintf("richrows: kaya wrote a .kdoc it cannot read: %v", err))
+					}
+					extra := strings.ReplaceAll(back.Document.Extra, `"`, "'")
+					tx.Write(view, fmt.Sprintf("saved %s, extra %s", back.Document.Text, extra))
 				})
 			})
 

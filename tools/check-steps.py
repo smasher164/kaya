@@ -1365,6 +1365,40 @@ def tall_lint(text, path):
     return []
 
 
+# A TOAST'S ACTION FOLLOWS ITS READ AT ONCE: a toast lives seconds (GTK and
+# WinUI 5, Compose 4, docs/toast-plan.md T6) and every read between may poll
+# 15 s, so a read there turns a slow host into a missing toast (docs/traps.md,
+# the toast outlived by its reads).
+def toast_action_lint(text, path):
+    bad = []
+    before = None
+    for n, raw in enumerate(text.split("\n"), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        verb = line.split()[0]
+        if verb == "toast_action" and before != "expect_toast":
+            bad.append(f"{path}:{n}: toast_action follows {before or 'nothing'}, not its "
+                       f"expect_toast — read the state after the action, or before the "
+                       f"step that raised the toast")
+        before = verb
+    return bad
+
+
+toast_findings = [f for p in STEPS
+                  for f in toast_action_lint(STEPS_TEXT[p], steps_rel(p))]
+if toast_findings:
+    print("\n".join(toast_findings), file=sys.stderr)
+    status = 1
+_toast_doc = 'toggle a\nexpect_toast "x|Undo"\n# a comment\nexpect label#0 "y"\ntoast_action\n'
+_toast_seen = toast_action_lint(_toast_doc, "-")
+print(f"check-steps: toast self-test a read between expect_toast and toast_action, "
+      f"{len(_toast_seen)} finding(s)")
+if len(_toast_seen) != 1 or toast_action_lint(_toast_doc.replace('expect label#0 "y"\n', ""), "-"):
+    selftest_fail("a toast_action after a read passed, or one at its expect_toast was refused")
+_toast_actions = sum(STEPS_TEXT[p].count("toast_action") for p in STEPS)
+print(f"check-steps: {_toast_actions} toast_action(s) follow their expect_toast")
+
 winui_text = read_rel("crates/kaya/src/winui/mod.rs")
 tall_out = tall_lint(winui_text, "crates/kaya/src/winui/mod.rs")
 if tall_out:
@@ -1394,6 +1428,9 @@ if not tall_lint(tall_doctored, "-"):
 # ONE door with `AdjustCrlf | NoHidden` baked in — the identity
 # `StoryLength - 1 == len(GetText(...))` holds only for that flag pair and
 # only while nothing hidden is in the story.
+TOM_GET_TEXT = re.compile(r"\.GetText\((?!-?\d+\))")
+
+
 def winui_hidden_text_lint(text, path):
     bad = []
     for call in ("SetLink(", ".Link()"):
@@ -1413,8 +1450,9 @@ def winui_hidden_text_lint(text, path):
                    f"drops the undeletable final paragraph mark and any "
                    f"hidden run")
     # ONE CHOKEPOINT, and it is Editable::text: any other GetText forgets a
-    # flag and is off by one with no error anywhere.
-    calls = text.count(".GetText(")
+    # flag and is off by one with no error anywhere. A UIA text range's
+    # GetText takes a length, never TOM's flags (expect_ax_text, RD19).
+    calls = len(TOM_GET_TEXT.findall(text))
     if calls != 1:
         bad.append(f"{path}: makes {calls} TOM GetText call(s), want exactly "
                    f"1 — every read of a textarea's story goes through "
@@ -1478,7 +1516,9 @@ print(f"check-steps: hidden-text self-test the read moved out of "
 if _n != 1 or _n2 != 1 or not winui_hidden_text_lint(_h5, "-"):
     selftest_fail("a winui story read outside Editable::text passed")
 print("check-steps: the winui story has one read door "
-      f"({winui_text.count('.GetText(')} GetText call) and no "
+      f"({len(TOM_GET_TEXT.findall(winui_text))} TOM GetText call, "
+      f"{winui_text.count('.GetText(') - len(TOM_GET_TEXT.findall(winui_text))} "
+      f"UIA range read) and no "
       f"ITextRange::Link")
 
 # A GUEST ASKED FOR A SCENE IT DOES NOT CARRY STOPS AT LAUNCH, naming it in

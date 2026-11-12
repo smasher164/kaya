@@ -7065,11 +7065,10 @@ pub extern "C" fn kaya_ink_from_dark(rgb: u32) -> u32 {
 
 /// Guest side: a `.kdoc` file's bytes read (docs/rich-document-plan.md §4,
 /// RD13). Answers a values list: Str refusal ("" when it read), Str
-/// read-only reason ("" when the document can be edited), Str extra (the
-/// unknown top-level members as one JSON object's text, "" when none; RD17),
-/// then the document as a document field carries it (Str text, then I64
-/// start, I64 end, Str name, Str value per run, UTF-8 bytes). kaya_text_runs'
-/// contract.
+/// read-only reason ("" when the document can be edited), then the document
+/// as a document field carries it (spec::DOCUMENT_FIELD: its extra, the
+/// unknown top-level members as one JSON object's text, RD17; its text; its
+/// runs in UTF-8 bytes). kaya_text_runs' contract.
 ///
 /// # Safety
 /// `bytes` must describe a valid byte range or be NULL/0; `out` must point at
@@ -7101,9 +7100,8 @@ pub unsafe extern "C" fn kaya_kdoc_read(bytes: *const u8, len: usize, out: *mut 
     unsafe { fill(&wire::values_bytes(&values), out, cap) }
 }
 
-/// Guest side: a document written as a `.kdoc`. `doc` is a values list: Str
-/// extra, then the document as kaya_kdoc_read answers it after its three
-/// strings. Answers a values list: Str refusal ("" when it wrote), Str the
+/// Guest side: a document written as a `.kdoc`. `doc` is a document field's
+/// values list (spec::DOCUMENT_FIELD). Answers a values list: Str refusal ("" when it wrote), Str the
 /// file's UTF-8 text. kaya_text_runs' contract.
 ///
 /// # Safety
@@ -7112,8 +7110,8 @@ pub unsafe extern "C" fn kaya_kdoc_read(bytes: *const u8, len: usize, out: *mut 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kaya_kdoc_write(doc: *const u8, len: usize, out: *mut u8, cap: usize) -> usize {
     let input = if doc.is_null() || len == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(doc, len) } };
-    let written = crate::fault::guard("reading a document to write as a .kdoc", || wire::read_kdoc_input(input))
-        .ok_or_else(|| "the input is not the document's extra followed by a document field's encoding".to_owned())
+    let written = crate::fault::guard("reading a document to write as a .kdoc", || wire::read_document_blob(input))
+        .ok_or_else(|| "the input is not a document field's encoding (spec::DOCUMENT_FIELD)".to_owned())
         .and_then(|(extra, text, runs)| crate::richdoc::kdoc::write(&text, &runs, &extra));
     let values = match written {
         Ok(json) => vec![crate::protocol::Value::Str(String::new()), crate::protocol::Value::Str(json)],

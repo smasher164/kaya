@@ -415,6 +415,22 @@ pub(crate) fn markers(text: &str, runs: &[TextRun], final_state: &BTreeMap<Strin
 /// one unbroken run of list paragraphs; a deeper item does not part them, a
 /// shallower one or another kind at their level does.
 pub(crate) fn item_speech(text: &str, runs: &[TextRun], final_state: &BTreeMap<String, String>) -> Vec<(u64, String)> {
+    item_places(text, runs, final_state).into_iter().map(|p| (p.start, p.said)).collect()
+}
+
+/// One list item's account for assistive technology: `said` is
+/// [`item_speech`]'s string; `position` and `size` its place among its
+/// siblings and `level` its depth, all from 1 (RD19's WinUI properties).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ItemPlace {
+    pub start: u64,
+    pub said: String,
+    pub position: usize,
+    pub size: usize,
+    pub level: u32,
+}
+
+pub(crate) fn item_places(text: &str, runs: &[TextRun], final_state: &BTreeMap<String, String>) -> Vec<ItemPlace> {
     let mut items: Vec<(Marker, usize)> = Vec::new();
     let mut run = 0usize;
     let all = markers(text, runs, final_state);
@@ -459,11 +475,12 @@ pub(crate) fn item_speech(text: &str, runs: &[TextRun], final_state: &BTreeMap<S
                 t if BULLETS.contains(&t) => "bullet",
                 t => t,
             };
-            let mut out = format!("{word}, {} of {}", before + 1, before + after + 1);
+            let (position, size) = (before + 1, before + after + 1);
+            let mut said = format!("{word}, {position} of {size}");
             if m.level > 0 {
-                out.push_str(&format!(", level {}", m.level + 1));
+                said.push_str(&format!(", level {}", m.level + 1));
             }
-            (m.start, out)
+            ItemPlace { start: m.start, said, position, size, level: m.level + 1 }
         })
         .collect()
 }
@@ -524,6 +541,16 @@ mod tests {
                 "20:bullet, 1 of 1",
             ]
         );
+    }
+
+    /// RD19's WinUI properties: the same places as numbers, from 1.
+    #[test]
+    fn each_item_place_carries_its_position_size_and_level() {
+        let text = "a\nb\nc";
+        let runs = vec![run(0, 5, "list", "bullet"), run(2, 3, "indent", "1")];
+        let got: Vec<(u64, usize, usize, u32)> =
+            item_places(text, &runs, &BTreeMap::new()).into_iter().map(|p| (p.start, p.position, p.size, p.level)).collect();
+        assert_eq!(got, [(0, 1, 2, 1), (2, 1, 1, 2), (4, 2, 2, 1)]);
     }
 
     #[test]

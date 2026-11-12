@@ -24,6 +24,13 @@ public final class Richrows {
      * (android/javahost/build.gradle.kts). */
     private static final String FIRST = "H\u00e9llo world";
 
+    /** Row b's patch, read from a file that carries a member this kaya
+     * does not know, so the row holds a Document with an extra
+     * (docs/rich-document-plan.md RD20). */
+    private static final String PATCHED =
+            "{\"kaya\": \"document\", \"version\": 1, \"com.example.theme\": \"dusk\", "
+            + "\"paragraphs\": [{\"spans\": [[\"Patched\", {\"italic\": true}]]}]}";
+
     /** The core's spelling of runs ({@code expect_runs}), so the row's
      * field and the core's mirror are compared as one string. */
     private static String spell(List<KayaApp.TextRun> runs) {
@@ -75,13 +82,17 @@ public final class Richrows {
                 tx.row(row -> {
                     tx.button("patch b", t -> { // button#0
                         t.undoable("patch b");
-                        NoteKaya.patch(t, notes, "b").body(
-                                new KayaApp.Document("Patched").italic(
-                                        KayaApp.TextRange.ofBytes(0, 7)));
+                        NoteKaya.patch(t, notes, "b").body(KayaApp.Document.fromKdoc(
+                                PATCHED.getBytes(java.nio.charset.StandardCharsets.UTF_8)).document());
                     });
                     tx.button("read a", t -> { // button#1
                         Note note = row(t, notes, "a");
                         t.write(view, note.body().text() + " | " + spell(note.body().runs()));
+                    });
+                    tx.button("save b", t -> { // button#2
+                        KayaApp.Document back = KayaApp.Document.fromKdoc(
+                                row(t, notes, "b").body().toKdoc()).document();
+                        t.write(view, "saved " + back.text() + ", extra " + back.extra().replace('"', '\''));
                     });
                 });
 

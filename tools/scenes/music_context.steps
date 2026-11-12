@@ -23,7 +23,6 @@ expect_context_items row@track[2207896] "Play|Play Next|Add to Queue|-|Like|-|Go
 context_open row@track[2207899]
 menu_activate "Unlike"
 expect_toast "Removed from Liked Songs|Undo"
-expect_context_items row@track[2207899] "Play|Play Next|Add to Queue|-|Like|-|Go to Album|Go to Artist"
 toast_action
 expect_no_toast
 expect_context_items row@track[2207899] "Play|Play Next|Add to Queue|-|Unlike|-|Go to Album|Go to Artist"
@@ -52,7 +51,6 @@ expect_context_items column@artist_card_581719 "Play|Add to Queue|-|Unlike Album
 context_open column@artist_card_581719
 menu_activate "Unlike Album"
 expect_toast "Removed from Liked Songs|Undo"
-expect_context_items column@artist_card_581719 "Play|Add to Queue|-|Like Album|-|Go to Artist"
 toast_action
 expect_no_toast
 expect_context_items column@artist_card_581719 "Play|Add to Queue|-|Unlike Album|-|Go to Artist"

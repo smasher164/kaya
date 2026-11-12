@@ -982,7 +982,8 @@ val select_range : widget -> int * int -> unit
 val reveal_range : widget -> int * int -> unit
 
 (* A stamped copy's document is a record FIELD (docs/rich-text-plan.md
-   §19): the field's Blob bytes are ONE flat value list. *)
+   §19): the field's Blob bytes are ONE flat value list, laid out as
+   crates/kaya/src/spec.rs' DOCUMENT_FIELD. *)
 val document_blob : Document.t -> string
 val document_of_blob : string -> Document.t
 

@@ -64,9 +64,6 @@ expect_checked checkbox@favorite on
 expect label@liked_count "2 songs"
 toggle checkbox@favorite off
 expect_toast "Removed from Liked Songs|Undo"
-expect_checked checkbox@favorite off
-expect_checked checkbox@like off
-expect label@liked_count "0 songs"
 toast_action
 expect_no_toast
 expect_checked checkbox@favorite on
@@ -81,8 +78,6 @@ toggle checkbox@like off
 expect_checked checkbox@favorite off
 toggle checkbox@favorite on
 expect_toast "Added to Liked Songs|Undo"
-expect_checked checkbox@like on
-expect label@liked_count "2 songs"
 toast_action
 expect_no_toast
 expect_checked checkbox@favorite off

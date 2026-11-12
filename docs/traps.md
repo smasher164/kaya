@@ -20567,3 +20567,67 @@ account a failed step prints (a nap overslept by seconds is the VM stopping;
 a long bus read is the walk). Twenty-five looped runs of the four
 music_header python legs (a hundred legs) under sixteen VM spinners, most
 beside a Mac loop, did not bring it back.
+
+## The pause that became Play on Compose (measured 2026-11-12)
+
+music_headerdark-python failed on Android with the player on the next track
+although the scene had pressed pause. The verb trace showed the click landing
+inside a 300 ms rebuffer: ExoPlayer's isPlaying went false with playWhenReady
+still true, KayaMedia reported every isPlaying flip as the player's rate, so
+the app's state read `paused`, and the music app's toggle sent Play. The
+emulator's audio output stalls under host load ("device stall time corrected"
+in logcat), and every stall is a rebuffer. The other three arms already read a
+stall as playing (AVPlayer's waitingToPlayAtSpecifiedRate reports nothing,
+WinUI's Buffering state returns early, GStreamer's playbin stays PLAYING with
+no buffering handler). GUARD: `kayaPlayingAsReported` (KayaMedia.kt) and
+KayaMediaTest's rebuffer case, which check-compose runs.
+
+## The emulator's audio clock under load (measured 2026-11-12)
+
+music_playlist-python read "Seven Chimes" where it wanted "Athens": the 20 s
+clip took 29.3 s of wall time on a loaded host (31 READY/BUFFERING flips) and
+the scene's settle plus its read's poll was 27 s. The scene now waits the
+clip's own length and keeps the poll as the margin (1.75x). A slower clock
+than that is the host, not kaya (the lane-health line's thermal and memory
+readings).
+
+## The iOS caret a point under a squeezed field (measured 2026-11-12)
+
+richdoc-swiftui's `press tab` found the caret line 1 pt below a 96 pt field.
+kayaKeepCaretShown nudges exactly that remainder, but ran only on an edit, a
+content-size change at the end, or a view that got shorter; a selection set
+by a key or the app was never kept, so whether the keyboard's squeeze or
+UIKit's own scroll ran last decided the point. GUARD: the keeper runs on every
+selection change; the keyboard wall's refusal prints the view's last selection
+change, the last keyboard frame and its geometries.
+
+## A toast outlived by its reads (measured 2026-11-12)
+
+A toast lives seconds (GTK and WinUI 5, Compose 4) and every scene read may
+poll 15 s, so a read between `expect_toast` and `toast_action` turns one slow
+read into a missing toast (the wayland music_headerdark red). GUARD:
+check-steps refuses a toast_action that does not follow its expect_toast.
+
+## An emulator microphone's history across legs (grown 2026-11-12)
+
+The capture leg's HAL account began at the leg's open, so a red could not say
+whether the input was broken before. Each leg's `logcat -c` now banks the
+HAL's failed reads per device boot (target/android-hal-history), and a
+capture leg's account names what earlier legs in the same boot saw. A quiet
+row on an idle host was green on 2026-11-12, but the lane had cold-booted the
+pool at admission, so that run did not decide per stream against per device.
+
+## AppKit's text view publishes no list item attributes (measured 2026-11-12)
+
+NSTextView's accessibilityAttributedString(for:) carries no AXListItemPrefix,
+index or level, even for a paragraph with an NSTextList, in TextKit 1 and 2
+(macOS 26.6, a probe). kaya puts them on itself (docs/rich-document-plan.md
+§11). NSAccessibilityConstants.h: the prefix is the prepended string or a
+label, the index and level count from 0.
+
+## WinUI's RichEditBox peer has no Text pattern in process (measured 2026-11-12)
+
+FrameworkElementAutomationPeer.CreatePeerForElement on a RichEditBox answers
+GetPattern(PatternInterface::Text) with null: Narrator's text comes from the
+native RichEdit's own provider. docs/rich-document-plan.md RD21.
+

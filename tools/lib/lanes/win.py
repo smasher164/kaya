@@ -69,7 +69,7 @@ OFF_SCENES = {"chatkeyboard": "Windows has no software keyboard on this lane (do
               "chatkeyboardland": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)",
               "editorkeyboard": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)",
               "windowmem": "TwoPaneView and NavigationView have no sidebar divider a user can drag (docs/tasks-s4-plan.md P8)",
-              "richdocax": "what Narrator is told of a drawn list marker waits on a ruling (docs/rich-document-plan.md RD19)"}
+              "richdocax": "the field's accessible text cannot be read in process; parked on a ruling (docs/rich-document-plan.md RD21)"}
 
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
 # exclusive.py): the drag family, already alone inside this lane for the

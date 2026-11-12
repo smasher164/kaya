@@ -15,12 +15,22 @@ import GHC.Generics (Generic)
 
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import KayaApp
 
 data Note = Note {title :: Text, body :: Document}
   deriving stock (Generic)
   deriving anyclass (KayaRecord)
 
+
+-- Row b's patch, read from a file that carries a member this kaya does not
+-- know, so the row holds a Document with an extra
+-- (docs/rich-document-plan.md RD20).
+patched :: Text
+patched = "{\"kaya\": \"document\", \"version\": 1, \"com.example.theme\": \"dusk\", \"paragraphs\": [{\"spans\": [[\"Patched\", {\"italic\": true}]]}]}"
+
+readKdoc :: Text -> Document
+readKdoc file = either (error . T.unpack) (\k -> k.document) (fromKdoc (TE.encodeUtf8 file))
 
 -- The core's spelling of runs (`expect_runs`), so the row's field and the
 -- core's mirror are compared as one string.
@@ -77,14 +87,21 @@ main = kayaMain $ \app -> do
             patch
               notes
               "b"
-              [set (field @"body" @Note) (italicRun (0, 7) (documentOf "Patched"))],
+              [set (field @"body" @Note) (readKdoc patched)],
           -- button#1 — the row the copy's own act folded into
           buttonOn "read a" . submitTx app $ do
             items <- recordItems notes
             let note = noteAt items "a"
             writeSignal
               view
-              ((body note).text <> " | " <> spell (body note).runs)
+              ((body note).text <> " | " <> spell (body note).runs),
+          -- button#2 — the row's Document saved, extra and all
+          buttonOn "save b" . submitTx app $ do
+            items <- recordItems notes
+            let back = either (error . T.unpack) (\k -> k.document) (fromKdoc (toKdoc (body (noteAt items "b"))))
+            writeSignal
+              view
+              ("saved " <> back.text <> ", extra " <> T.replace "\"" "'" back.extra)
         ]
     (rows, bodyNode) <- forEach (recordHandle notes) $ do
       titleLabel <- label (field @"title" @Note)

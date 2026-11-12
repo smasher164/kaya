@@ -378,7 +378,7 @@ impl KayaField for Document {
 
 impl From<&Document> for crate::protocol::Blob {
     fn from(d: &Document) -> Self {
-        crate::protocol::Blob(crate::wire::document_blob(&d.text, &d.runs))
+        crate::protocol::Blob(crate::wire::document_blob(&d.extra, &d.text, &d.runs))
     }
 }
 
@@ -390,8 +390,8 @@ impl From<Document> for crate::protocol::Blob {
 
 impl Document {
     pub(crate) fn from_blob(b: &crate::protocol::Blob) -> Document {
-        let (text, runs) = crate::wire::read_document_blob(&b.0);
-        Document { text, runs, extra: String::new() }
+        let (extra, text, runs) = crate::wire::read_document_blob(&b.0);
+        Document { text, runs, extra }
     }
 }
 

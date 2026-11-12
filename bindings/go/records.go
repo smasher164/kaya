@@ -209,13 +209,12 @@ func wireTag(t reflect.Type) (uint32, bool) {
 	return 0, false
 }
 
-// documentBlob is a Document's wire bytes: ONE flat value list — head, the
-// text, then four values per run (crates/kaya/src/wire.rs, document_blob,
-// read_kdoc_input).
-func documentBlob(doc Document, head ...any) []byte {
-	vals := make([]any, 0, len(head)+1+4*len(doc.Runs))
-	vals = append(vals, head...)
-	vals = append(vals, doc.Text)
+// documentBlob is a Document's wire bytes: ONE flat value list laid out as
+// crates/kaya/src/spec.rs' DOCUMENT_FIELD (the extra, the text, four values
+// per run).
+func documentBlob(doc Document) []byte {
+	vals := make([]any, 0, 2+4*len(doc.Runs))
+	vals = append(vals, doc.Extra, doc.Text)
 	for _, run := range doc.Runs {
 		vals = append(vals, int64(run.Range.Start), int64(run.Range.End), run.Name, run.Value)
 	}
@@ -236,19 +235,20 @@ func documentOf(data []byte) Document {
 	for i := range vals {
 		vals[i], at = parseValue(data, at)
 	}
-	text := ""
-	if len(vals) > 0 {
-		var isText bool
-		if text, isText = vals[0].(string); !isText {
-			vals = nil
-		}
+	var extra, text string
+	isText := len(vals) >= 2
+	if isText {
+		var ok bool
+		extra, ok = vals[0].(string)
+		text, isText = vals[1].(string)
+		isText = isText && ok
 	}
-	if len(vals) == 0 {
+	if !isText {
 		panic(fmt.Sprintf(
-			"kaya: a document blob starts with its text; this one holds %d value(s)", count))
+			"kaya: a document blob starts with its extra and its text (spec.rs DOCUMENT_FIELD); this one holds %d value(s)", count))
 	}
-	doc := Document{Text: text}
-	for i := 1; i+3 < len(vals); i += 4 {
+	doc := Document{Text: text, Extra: extra}
+	for i := 2; i+3 < len(vals); i += 4 {
 		doc.Runs = append(doc.Runs, TextRun{
 			Range: decodedSpan("document blob run",
 				int(vals[i].(int64)), int(vals[i+1].(int64))),

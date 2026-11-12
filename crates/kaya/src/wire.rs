@@ -3359,12 +3359,13 @@ fn read_runs(r: &mut Reader<'_>, count: usize, op: &str) -> Vec<TextRun> {
 
 
 /// A DOCUMENT AS A BLOB (docs/rich-text-plan.md §19): the bytes a stamped
-/// copy's `document` field holds are one flat value list — the text, then
-/// four values per run as `read_runs` reads them — so a Document field is
-/// a Blob field and the wire grows no value type. Every binding packs the
-/// same list; the core reads it here at stamp and at every field write.
-pub(crate) fn document_blob(text: &str, runs: &[TextRun]) -> Arc<[u8]> {
-    let mut values = Vec::with_capacity(1 + runs.len() * 4);
+/// copy's `document` field holds are one flat value list laid out as
+/// `spec::DOCUMENT_FIELD`, so a Document field is a Blob field and the wire
+/// grows no value type. Every binding packs the same list; the core reads it
+/// here at stamp and at every field write, and the `.kdoc` pair carries it.
+pub(crate) fn document_blob(extra: &str, text: &str, runs: &[TextRun]) -> Arc<[u8]> {
+    let mut values = Vec::with_capacity(2 + runs.len() * 4);
+    values.push(Value::Str(extra.to_owned()));
     values.push(Value::Str(text.to_owned()));
     for run in runs {
         values.push(Value::I64(run.range.start as i64));
@@ -3390,23 +3391,18 @@ pub(crate) fn values_bytes(values: &[Value]) -> Vec<u8> {
     b
 }
 
-/// `document_blob`'s inverse; a list that is not one is refused naming
-/// what it held, since a field can hold any bytes.
-pub(crate) fn read_document_blob(bytes: &[u8]) -> (String, Vec<TextRun>) {
-    let refuse = |_: u64| -> Option<Arc<[u8]>> { None };
-    let mut r = Reader { buf: bytes, at: 0, blobs: &refuse };
-    document_values(&r.path())
-}
-
-/// kaya_kdoc_write's input: the document's `extra` (docs/rich-document-plan.md
-/// RD17), then the document as a document field carries it.
-pub(crate) fn read_kdoc_input(bytes: &[u8]) -> (String, String, Vec<TextRun>) {
+/// `document_blob`'s inverse as (extra, text, runs); a list that is not one
+/// is refused naming what it held, since a field can hold any bytes.
+pub(crate) fn read_document_blob(bytes: &[u8]) -> (String, String, Vec<TextRun>) {
     let refuse = |_: u64| -> Option<Arc<[u8]>> { None };
     let mut r = Reader { buf: bytes, at: 0, blobs: &refuse };
     let values = r.path();
     let extra = match values.first() {
         Some(Value::Str(s)) => s.clone(),
-        other => panic!("kaya: a .kdoc write starts with the document's extra, this one with {other:?}"),
+        other => panic!(
+            "kaya: a document's bytes start with its extra (spec::DOCUMENT_FIELD), these with {other:?} ({} value(s))",
+            values.len()
+        ),
     };
     let (text, runs) = document_values(&values[1..]);
     (extra, text, runs)

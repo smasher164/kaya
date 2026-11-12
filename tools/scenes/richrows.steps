@@ -25,6 +25,12 @@ menu_activate "Edit>Redo"
 expect_runs textarea@body[b] "0:7 italic"
 expect textarea@body[b] "Patched"
 expect label#1 "Patched | 0:7 italic"
+# A DOCUMENT FIELD KEEPS ITS EXTRA (docs/rich-document-plan.md RD20): row b
+# holds a Document read from a file with a member this kaya does not know,
+# it came back from the redo's delta as a Blob, and a save from the row
+# writes that member back.
+click button#2
+expect label#1 "saved Patched, extra {'com.example.theme':'dusk'}"
 # THE COPY'S OWN ACT FOLDS INTO ITS ROW: the widget's act on a stamped copy
 # reaches the app with the row's key, the binding has already folded it into
 # the row's field, and the app reads the row back — never the widget.

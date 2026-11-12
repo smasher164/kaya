@@ -589,7 +589,7 @@ sealed class Document
     /// breaks a wall Tx.SetDocument holds.
     public byte[] ToKdoc()
     {
-        List<object> values = Kaya.KdocWrite(KayaApp.DocumentBlob(this, Extra));
+        List<object> values = Kaya.KdocWrite(KayaApp.DocumentBlob(this));
         if ((string)values[0] != "")
             throw new InvalidOperationException("kaya: ToKdoc: " + (string)values[0]);
         return System.Text.Encoding.UTF8.GetBytes((string)values[1]);
@@ -3014,13 +3014,14 @@ sealed class KayaApp
 
     /// A Document's BYTES as a record field holds them
     /// (docs/rich-text-plan.md §19, crates/kaya/src/wire.rs
-    /// `document_blob`): one counted value list — the text, then four
-    /// values per run. Hand-packed because KayaWire's value encoder is
+    /// `document_blob`): one counted value list laid out as
+    /// crates/kaya/src/spec.rs' DOCUMENT_FIELD — the extra, the text, then
+    /// four values per run. Hand-packed because KayaWire's value encoder is
     /// the generated file's own; guests/csharp/AbortCheck.cs compares
     /// these bytes against the wire rules read off by hand.
-    internal static byte[] DocumentBlob(Document document, params string[] head)
+    internal static byte[] DocumentBlob(Document document)
     {
-        var values = new List<object>(head) { document.Text };
+        var values = new List<object> { document.Extra, document.Text };
         foreach (TextRun run in document.Runs)
         {
             values.Add((long)run.Range.Start);
@@ -3075,16 +3076,16 @@ sealed class KayaApp
                 : System.Text.Encoding.UTF8.GetString(bytes, at + 8, vlen));
             at += 8 + ((vlen + 7) & ~7);
         }
-        if (values.Count == 0 || values[0] is not string text)
+        if (values.Count < 2 || values[0] is not string extra || values[1] is not string text)
             throw new ArgumentException(
-                "kaya: a document blob starts with its text; this one holds "
+                "kaya: a document blob starts with its extra and its text (spec.rs DOCUMENT_FIELD); this one holds "
                     + values.Count + " value(s)");
         var runs = new List<TextRun>();
-        for (int i = 1; i + 3 < values.Count; i += 4)
+        for (int i = 2; i + 3 < values.Count; i += 4)
             runs.Add(new TextRun(
                 TextRange.Bytes((long)values[i], (long)values[i + 1]),
                 (string)values[i + 2], (string)values[i + 3]));
-        return new Document(text, runs);
+        return new Document(text, runs, extra);
     }
 
     /// One delivered edit, folded into the live widget's mirror.

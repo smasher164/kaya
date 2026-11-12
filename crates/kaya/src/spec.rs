@@ -235,8 +235,8 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("can_undo", 34, PropKind::Bool),
     ("can_redo", 35, PropKind::Bool),
     // docs/rich-text-plan.md §19: a stamped copy's document, bound to a
-    // Blob field of its row. Template zone only; the live zone's document
-    // is set_rich_text.
+    // Blob field of its row, laid out as DOCUMENT_FIELD. Template zone only;
+    // the live zone's document is set_rich_text.
     ("document", 36, PropKind::Blob),
     // docs/submit-plan.md S2: a textarea whose Return SUBMITS (Shift+Return
     // inserts the newline; the phone keyboard's key says Send). Off, Return
@@ -532,6 +532,14 @@ pub const UNDO_DELTA_RUNS: &str = "\
     i64 path_len, path_len key values, key, record fields); \
     orders: groups(i64 size, i64 collection, i64 path_len, path_len key values, keys)";
 
+/// The bytes a Document field holds (the `document` prop's Blob, and the
+/// `.kdoc` pair's document): one flat value list in this order, fingerprinted
+/// for UNDO_DELTA_RUNS' reason (docs/rich-document-plan.md RD20).
+pub const DOCUMENT_FIELD: &str = "\
+    str extra (one JSON object's text, compact with sorted keys, \"\" for none); \
+    str text; \
+    runs: fours(i64 start, i64 end, str name, str value)";
+
 /// A deterministic fingerprint of the whole vocabulary: every record
 /// kind, field name and type, enum variant, and prop. The core exports
 /// it (capi::kaya_spec_hash), the generator bakes it into every wire
@@ -620,6 +628,8 @@ pub fn hash() -> u64 {
     // wrong places, which no assertion downstream can catch.
     eat(b"undo_delta_runs");
     eat(UNDO_DELTA_RUNS.as_bytes());
+    eat(b"document_field");
+    eat(DOCUMENT_FIELD.as_bytes());
     h
 }
 

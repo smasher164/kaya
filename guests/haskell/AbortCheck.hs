@@ -322,7 +322,7 @@ main = do
       handI64 n = pad8 (le 2 4 <> le 8 4 <> le n 8)
       reference =
         BS.concat
-          [ le 9 4, le 0 4, handStr "abc",
+          [ le 10 4, le 0 4, handStr "", handStr "abc",
             handI64 0, handI64 1, handStr "bold", handStr "true",
             handI64 1, handI64 3, handStr "link", handStr "u"
           ]
@@ -345,7 +345,7 @@ main = do
                       "a Document field packed " ++ show (BS.length packed)
                         ++ " byte(s) where the wire's own list is "
                         ++ show (BS.length reference)
-                        ++ " — the text as a Str, then four values per run"
+                        ++ " — the extra and the text as Strs, then four values per run (spec.rs DOCUMENT_FIELD)"
                 )
     other ->
       failWith

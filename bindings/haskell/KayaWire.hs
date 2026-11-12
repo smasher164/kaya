@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x5f131b7e55fe0f95
+specHash = 0x25d4a59421f21751
 kayaVersion :: String
 kayaVersion = "0.0.0"
 

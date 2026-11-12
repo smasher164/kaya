@@ -3613,7 +3613,7 @@ class Document:
         """The document as a `.kdoc` file, the same bytes in nine bindings
         (RD13); KayaValueError naming the run when it breaks a wall
         set_document holds."""
-        values = runtime.kdoc_write(_document_bytes(self, self.extra))
+        values = runtime.kdoc_write(_document_bytes(self))
         if values[0]:
             raise KayaValueError(f"kaya: to_kdoc: {values[0]}")
         return str(values[1]).encode("utf-8")
@@ -3660,11 +3660,11 @@ class Kdoc:
         return f"Kdoc(document={self.document!r}, read_only={self.read_only!r})"
 
 
-def _document_bytes(document: Document, *head: str) -> bytes:
-    """A Document's wire bytes: ONE flat value list — `head`, the text, then
-    four values per run (crates/kaya/src/wire.rs, `document_blob`,
-    `read_kdoc_input`)."""
-    values: list[Any] = [*head, document.text]
+def _document_bytes(document: Document) -> bytes:
+    """A Document's wire bytes: ONE flat value list laid out as
+    crates/kaya/src/spec.rs' DOCUMENT_FIELD (the extra, the text, four values
+    per run)."""
+    values: list[Any] = [document.extra, document.text]
     for run in document.runs:
         values += [run.range.start, run.range.stop, run.name, run.value]
     return wire._enc.values(values)
@@ -3694,12 +3694,12 @@ def _decode_document_field(data: object) -> Document:
     for _ in builtins.range(count):
         value, at = wire.parse_value(data, at)
         values.append(value)
-    if not values or not isinstance(values[0], str):
+    if len(values) < 2 or not isinstance(values[0], str) or not isinstance(values[1], str):
         raise KayaValueError(
-            "kaya: a document blob starts with its text; this one holds "
-            f"{len(values)} value(s)")
-    runs = [Run(*values[i:i + 4]) for i in builtins.range(1, len(values), 4)]
-    return Document(values[0], runs)
+            "kaya: a document blob starts with its extra and its text "
+            f"(spec.rs DOCUMENT_FIELD); this one holds {len(values)} value(s)")
+    runs = [Run(*values[i:i + 4]) for i in builtins.range(2, len(values), 4)]
+    return Document(values[1], runs, values[0])
 
 
 # A Document field IS a Blob field carrying `_document_bytes`' list, so

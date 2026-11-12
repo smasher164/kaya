@@ -23,8 +23,11 @@ expect label@dock_title "Seven Chimes"
 expect_ax button@play_pause "button/Pause"
 expect_tint label@track_name[1860160] accent
 expect_tint label@track_name[1860165] none
-# The clips are 20 s: past the first one's end the queue plays the next.
-settle 12000
+# The clips are 20 s: past the first one's end the queue plays the next. The
+# wait is the clip's own length and the read's poll the margin, since a
+# starved emulator plays 20 s of audio in up to 29 s (docs/traps.md, the
+# emulator's audio clock under load).
+settle 20000
 expect label@dock_title "Athens"
 expect_ax button@play_pause "button/Pause"
 expect_tint label@track_name[1860165] accent

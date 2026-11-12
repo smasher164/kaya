@@ -22393,6 +22393,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn GetPattern(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPattern)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
                         pub fn GetAcceleratorKey(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -22910,6 +22926,23 @@ pub mod Microsoft {
                                 )
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             })
+                        }
+                        pub fn GetPatternCore(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPatternCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
                         }
                         pub fn GetAcceleratorKeyCore(
                             &self,
@@ -23547,6 +23580,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn GetPattern(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPattern)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
                         pub fn GetAcceleratorKey(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -24051,6 +24100,23 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn GetPatternCore(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPatternCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetAcceleratorKeyCore(
@@ -24718,6 +24784,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn GetPattern(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPattern)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
                         pub fn GetAcceleratorKey(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -25222,6 +25304,23 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn GetPatternCore(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPatternCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetAcceleratorKeyCore(
@@ -25882,6 +25981,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn GetPattern(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPattern)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
                         pub fn GetAcceleratorKey(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -26386,6 +26501,23 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn GetPatternCore(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPatternCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetAcceleratorKeyCore(
@@ -27081,6 +27213,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn GetPattern(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPattern)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
                         pub fn GetAcceleratorKey(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -27585,6 +27733,23 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn GetPatternCore(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPatternCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetAcceleratorKeyCore(
@@ -28272,7 +28437,12 @@ pub mod Microsoft {
                             *mut core::ffi::c_void,
                         )
                             -> windows_core::HRESULT,
-                        GetPattern: usize,
+                        pub GetPattern: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            PatternInterface,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
                         RaiseAutomationEvent: usize,
                         RaisePropertyChangedEvent: usize,
                         pub GetAcceleratorKey: unsafe extern "system" fn(
@@ -28534,7 +28704,12 @@ pub mod Microsoft {
                     #[doc(hidden)]
                     pub struct IAutomationPeerOverrides_Vtbl {
                         pub base__: windows_core::IInspectable_Vtbl,
-                        GetPatternCore: usize,
+                        pub GetPatternCore: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            PatternInterface,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
                         pub GetAcceleratorKeyCore:
                             unsafe extern "system" fn(
                                 *mut core::ffi::c_void,
@@ -29233,6 +29408,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn GetPattern(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPattern)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
                         pub fn GetAcceleratorKey(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -29737,6 +29928,23 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn GetPatternCore(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPatternCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetAcceleratorKeyCore(
@@ -30395,6 +30603,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn GetPattern(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPattern)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
                         pub fn GetAcceleratorKey(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -30899,6 +31123,23 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn GetPatternCore(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPatternCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetAcceleratorKeyCore(
@@ -31617,6 +31858,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn GetPattern(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPattern)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
                         pub fn GetAcceleratorKey(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -32121,6 +32378,23 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn GetPatternCore(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPatternCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetAcceleratorKeyCore(
@@ -32830,6 +33104,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn GetPattern(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPattern)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
                         pub fn GetAcceleratorKey(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -33334,6 +33624,23 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn GetPatternCore(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPatternCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetAcceleratorKeyCore(
@@ -33968,6 +34275,54 @@ pub mod Microsoft {
                     unsafe impl Send for MenuFlyoutItemAutomationPeer {}
                     unsafe impl Sync for MenuFlyoutItemAutomationPeer {}
                     #[repr(transparent)]
+                    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                    pub struct PatternInterface(pub i32);
+                    impl PatternInterface {
+                        pub const Invoke: Self = Self(0i32);
+                        pub const Selection: Self = Self(1i32);
+                        pub const Value: Self = Self(2i32);
+                        pub const RangeValue: Self = Self(3i32);
+                        pub const Scroll: Self = Self(4i32);
+                        pub const ScrollItem: Self = Self(5i32);
+                        pub const ExpandCollapse: Self = Self(6i32);
+                        pub const Grid: Self = Self(7i32);
+                        pub const GridItem: Self = Self(8i32);
+                        pub const MultipleView: Self = Self(9i32);
+                        pub const Window: Self = Self(10i32);
+                        pub const SelectionItem: Self = Self(11i32);
+                        pub const Dock: Self = Self(12i32);
+                        pub const Table: Self = Self(13i32);
+                        pub const TableItem: Self = Self(14i32);
+                        pub const Toggle: Self = Self(15i32);
+                        pub const Transform: Self = Self(16i32);
+                        pub const Text: Self = Self(17i32);
+                        pub const ItemContainer: Self = Self(18i32);
+                        pub const VirtualizedItem: Self = Self(19i32);
+                        pub const Text2: Self = Self(20i32);
+                        pub const TextChild: Self = Self(21i32);
+                        pub const TextRange: Self = Self(22i32);
+                        pub const Annotation: Self = Self(23i32);
+                        pub const Drag: Self = Self(24i32);
+                        pub const DropTarget: Self = Self(25i32);
+                        pub const ObjectModel: Self = Self(26i32);
+                        pub const Spreadsheet: Self = Self(27i32);
+                        pub const SpreadsheetItem: Self = Self(28i32);
+                        pub const Styles: Self = Self(29i32);
+                        pub const Transform2: Self = Self(30i32);
+                        pub const SynchronizedInput: Self = Self(31i32);
+                        pub const TextEdit: Self = Self(32i32);
+                        pub const CustomNavigation: Self = Self(33i32);
+                    }
+                    impl windows_core::TypeKind for PatternInterface {
+                        type TypeKind = windows_core::CopyType;
+                    }
+                    impl windows_core::RuntimeType for PatternInterface {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::from_slice(
+                                b"enum(Microsoft.UI.Xaml.Automation.Peers.PatternInterface;i4)",
+                            );
+                    }
+                    #[repr(transparent)]
                     #[derive(Clone, Debug, Eq, PartialEq)]
                     pub struct SelectorBarItemAutomationPeer(windows_core::IUnknown);
                     windows_core::imp::interface_hierarchy!(
@@ -34007,6 +34362,22 @@ pub mod Microsoft {
                                     value.param().abi(),
                                 )
                                 .ok()
+                            }
+                        }
+                        pub fn GetPattern(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPattern)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetAcceleratorKey(
@@ -34513,6 +34884,23 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn GetPatternCore(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPatternCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetAcceleratorKeyCore(
@@ -35232,6 +35620,22 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn GetPattern(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this = &windows_core::Interface::cast::<IAutomationPeer>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPattern)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
                         pub fn GetAcceleratorKey(
                             &self,
                         ) -> windows_core::Result<windows_core::HSTRING> {
@@ -35736,6 +36140,23 @@ pub mod Microsoft {
                                     &mut result__,
                                 )
                                 .map(|| result__)
+                            }
+                        }
+                        pub fn GetPatternCore(
+                            &self,
+                            patterninterface: PatternInterface,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this =
+                                &windows_core::Interface::cast::<IAutomationPeerOverrides>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetPatternCore)(
+                                    windows_core::Interface::as_raw(this),
+                                    patterninterface,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
                             }
                         }
                         pub fn GetAcceleratorKeyCore(
@@ -36763,6 +37184,782 @@ pub mod Microsoft {
                             *mut core::ffi::c_void,
                         )
                             -> windows_core::HRESULT,
+                    }
+                    windows_core::imp::define_interface!(
+                        ITextProvider,
+                        ITextProvider_Vtbl,
+                        0x37e7dce6_fe7a_56a7_a47a_9462872c67ef
+                    );
+                    impl windows_core::RuntimeType for ITextProvider {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_interface::<Self>();
+                    }
+                    windows_core::imp::interface_hierarchy!(
+                        ITextProvider,
+                        windows_core::IUnknown,
+                        windows_core::IInspectable
+                    );
+                    impl ITextProvider {
+                        pub fn DocumentRange(&self) -> windows_core::Result<ITextRangeProvider> {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).DocumentRange)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn GetSelection(
+                            &self,
+                        ) -> windows_core::Result<windows_core::Array<ITextRangeProvider>>
+                        {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::MaybeUninit::zeroed();
+                                (windows_core::Interface::vtable(this).GetSelection)(
+                                    windows_core::Interface::as_raw(this),
+                                    windows_core::Array::<ITextRangeProvider>::set_abi_len(
+                                        core::mem::transmute(&mut result__),
+                                    ),
+                                    result__.as_mut_ptr() as *mut _ as _,
+                                )
+                                .map(|| result__.assume_init())
+                            }
+                        }
+                        pub fn GetVisibleRanges(
+                            &self,
+                        ) -> windows_core::Result<windows_core::Array<ITextRangeProvider>>
+                        {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::MaybeUninit::zeroed();
+                                (windows_core::Interface::vtable(this).GetVisibleRanges)(
+                                    windows_core::Interface::as_raw(this),
+                                    windows_core::Array::<ITextRangeProvider>::set_abi_len(
+                                        core::mem::transmute(&mut result__),
+                                    ),
+                                    result__.as_mut_ptr() as *mut _ as _,
+                                )
+                                .map(|| result__.assume_init())
+                            }
+                        }
+                        pub fn RangeFromPoint(
+                            &self,
+                            screenlocation : super::super::super::super::super::Windows::Foundation:: Point,
+                        ) -> windows_core::Result<ITextRangeProvider> {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).RangeFromPoint)(
+                                    windows_core::Interface::as_raw(this),
+                                    screenlocation,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                    }
+                    impl windows_core::RuntimeName for ITextProvider {
+                        const NAME: &'static str =
+                            "Microsoft.UI.Xaml.Automation.Provider.ITextProvider";
+                    }
+                    pub trait ITextProvider_Impl: windows_core::IUnknownImpl {
+                        fn DocumentRange(&self) -> windows_core::Result<ITextRangeProvider>;
+                        fn GetSelection(
+                            &self,
+                        ) -> windows_core::Result<windows_core::Array<ITextRangeProvider>>;
+                        fn GetVisibleRanges(
+                            &self,
+                        ) -> windows_core::Result<windows_core::Array<ITextRangeProvider>>;
+                        fn RangeFromPoint(
+                            &self,
+                            screenLocation : & super::super::super::super::super::Windows::Foundation:: Point,
+                        ) -> windows_core::Result<ITextRangeProvider>;
+                    }
+                    impl ITextProvider_Vtbl {
+                        pub const fn new<Identity: ITextProvider_Impl, const OFFSET: isize>() -> Self
+                        {
+                            unsafe extern "system" fn DocumentRange<
+                                Identity: ITextProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                                result__: *mut *mut core::ffi::c_void,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    match ITextProvider_Impl::DocumentRange(this) {
+                                        Ok(ok__) => {
+                                            result__.write(core::mem::transmute_copy(&ok__));
+                                            core::mem::forget(ok__);
+                                            windows_core::HRESULT(0)
+                                        }
+                                        Err(err) => err.into(),
+                                    }
+                                }
+                            }
+                            unsafe extern "system" fn GetSelection<
+                                Identity: ITextProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                                result_size__: *mut u32,
+                                result__: *mut *mut *mut core::ffi::c_void,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    match ITextProvider_Impl::GetSelection(this) {
+                                        Ok(ok__) => {
+                                            let (ok_data__, ok_data_len__) = ok__.into_abi();
+                                            result__.write(core::mem::transmute(ok_data__));
+                                            result_size__.write(ok_data_len__);
+                                            windows_core::HRESULT(0)
+                                        }
+                                        Err(err) => err.into(),
+                                    }
+                                }
+                            }
+                            unsafe extern "system" fn GetVisibleRanges<
+                                Identity: ITextProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                                result_size__: *mut u32,
+                                result__: *mut *mut *mut core::ffi::c_void,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    match ITextProvider_Impl::GetVisibleRanges(this) {
+                                        Ok(ok__) => {
+                                            let (ok_data__, ok_data_len__) = ok__.into_abi();
+                                            result__.write(core::mem::transmute(ok_data__));
+                                            result_size__.write(ok_data_len__);
+                                            windows_core::HRESULT(0)
+                                        }
+                                        Err(err) => err.into(),
+                                    }
+                                }
+                            }
+                            unsafe extern "system" fn RangeFromPoint<
+                                Identity: ITextProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                                screenlocation : super::super::super::super::super::Windows::Foundation:: Point,
+                                result__: *mut *mut core::ffi::c_void,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    match ITextProvider_Impl::RangeFromPoint(
+                                        this,
+                                        core::mem::transmute(&screenlocation),
+                                    ) {
+                                        Ok(ok__) => {
+                                            result__.write(core::mem::transmute_copy(&ok__));
+                                            core::mem::forget(ok__);
+                                            windows_core::HRESULT(0)
+                                        }
+                                        Err(err) => err.into(),
+                                    }
+                                }
+                            }
+                            Self {
+                                base__: windows_core::IInspectable_Vtbl::new::<
+                                    Identity,
+                                    ITextProvider,
+                                    OFFSET,
+                                >(),
+                                DocumentRange: DocumentRange::<Identity, OFFSET>,
+                                SupportedTextSelection: 0,
+                                GetSelection: GetSelection::<Identity, OFFSET>,
+                                GetVisibleRanges: GetVisibleRanges::<Identity, OFFSET>,
+                                RangeFromChild: 0,
+                                RangeFromPoint: RangeFromPoint::<Identity, OFFSET>,
+                            }
+                        }
+                        pub fn matches(iid: &windows_core::GUID) -> bool {
+                            iid == &<ITextProvider as windows_core::Interface>::IID
+                        }
+                    }
+                    #[repr(C)]
+                    #[doc(hidden)]
+                    pub struct ITextProvider_Vtbl {
+                        pub base__: windows_core::IInspectable_Vtbl,
+                        pub DocumentRange: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        SupportedTextSelection: usize,
+                        pub GetSelection: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut u32,
+                            *mut *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub GetVisibleRanges: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut u32,
+                            *mut *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        RangeFromChild: usize,
+                        pub RangeFromPoint: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            super::super::super::super::super::Windows::Foundation::Point,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                    }
+                    windows_core::imp::define_interface!(
+                        ITextRangeProvider,
+                        ITextRangeProvider_Vtbl,
+                        0x84210361_6ce2_5084_bf3b_28afa6e9851f
+                    );
+                    impl windows_core::RuntimeType for ITextRangeProvider {
+                        const SIGNATURE: windows_core::imp::ConstBuffer =
+                            windows_core::imp::ConstBuffer::for_interface::<Self>();
+                    }
+                    windows_core::imp::interface_hierarchy!(
+                        ITextRangeProvider,
+                        windows_core::IUnknown,
+                        windows_core::IInspectable
+                    );
+                    impl ITextRangeProvider {
+                        pub fn Clone(&self) -> windows_core::Result<ITextRangeProvider> {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).Clone)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn Compare<P0>(
+                            &self,
+                            textrangeprovider: P0,
+                        ) -> windows_core::Result<bool>
+                        where
+                            P0: windows_core::Param<ITextRangeProvider>,
+                        {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).Compare)(
+                                    windows_core::Interface::as_raw(this),
+                                    textrangeprovider.param().abi(),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn FindAttribute<P1>(
+                            &self,
+                            attributeid: i32,
+                            value: P1,
+                            backward: bool,
+                        ) -> windows_core::Result<ITextRangeProvider>
+                        where
+                            P1: windows_core::Param<windows_core::IInspectable>,
+                        {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FindAttribute)(
+                                    windows_core::Interface::as_raw(this),
+                                    attributeid,
+                                    value.param().abi(),
+                                    backward,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn FindText(
+                            &self,
+                            text: &windows_core::HSTRING,
+                            backward: bool,
+                            ignorecase: bool,
+                        ) -> windows_core::Result<ITextRangeProvider> {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FindText)(
+                                    windows_core::Interface::as_raw(this),
+                                    core::mem::transmute_copy(text),
+                                    backward,
+                                    ignorecase,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn GetAttributeValue(
+                            &self,
+                            attributeid: i32,
+                        ) -> windows_core::Result<windows_core::IInspectable>
+                        {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetAttributeValue)(
+                                    windows_core::Interface::as_raw(this),
+                                    attributeid,
+                                    &mut result__,
+                                )
+                                .and_then(|| windows_core::Type::from_abi(result__))
+                            }
+                        }
+                        pub fn GetBoundingRectangles(
+                            &self,
+                            returnvalue: &mut windows_core::Array<f64>,
+                        ) -> windows_core::Result<()> {
+                            let this = self;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).GetBoundingRectangles)(
+                                    windows_core::Interface::as_raw(this),
+                                    returnvalue.set_abi_len(),
+                                    returnvalue as *mut _ as _,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn GetText(
+                            &self,
+                            maxlength: i32,
+                        ) -> windows_core::Result<windows_core::HSTRING> {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).GetText)(
+                                    windows_core::Interface::as_raw(this),
+                                    maxlength,
+                                    &mut result__,
+                                )
+                                .map(|| core::mem::transmute(result__))
+                            }
+                        }
+                        pub fn Select(&self) -> windows_core::Result<()> {
+                            let this = self;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).Select)(
+                                    windows_core::Interface::as_raw(this),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn AddToSelection(&self) -> windows_core::Result<()> {
+                            let this = self;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).AddToSelection)(
+                                    windows_core::Interface::as_raw(this),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn RemoveFromSelection(&self) -> windows_core::Result<()> {
+                            let this = self;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).RemoveFromSelection)(
+                                    windows_core::Interface::as_raw(this),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn ScrollIntoView(&self, aligntotop: bool) -> windows_core::Result<()> {
+                            let this = self;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).ScrollIntoView)(
+                                    windows_core::Interface::as_raw(this),
+                                    aligntotop,
+                                )
+                                .ok()
+                            }
+                        }
+                    }
+                    impl windows_core::RuntimeName for ITextRangeProvider {
+                        const NAME: &'static str =
+                            "Microsoft.UI.Xaml.Automation.Provider.ITextRangeProvider";
+                    }
+                    pub trait ITextRangeProvider_Impl: windows_core::IUnknownImpl {
+                        fn Clone(&self) -> windows_core::Result<ITextRangeProvider>;
+                        fn Compare(
+                            &self,
+                            textRangeProvider: windows_core::Ref<'_, ITextRangeProvider>,
+                        ) -> windows_core::Result<bool>;
+                        fn FindAttribute(
+                            &self,
+                            attributeId: i32,
+                            value: windows_core::Ref<'_, windows_core::IInspectable>,
+                            backward: bool,
+                        ) -> windows_core::Result<ITextRangeProvider>;
+                        fn FindText(
+                            &self,
+                            text: &windows_core::HSTRING,
+                            backward: bool,
+                            ignoreCase: bool,
+                        ) -> windows_core::Result<ITextRangeProvider>;
+                        fn GetAttributeValue(
+                            &self,
+                            attributeId: i32,
+                        ) -> windows_core::Result<windows_core::IInspectable>;
+                        fn GetBoundingRectangles(
+                            &self,
+                            returnValue: &mut windows_core::Array<f64>,
+                        ) -> windows_core::Result<()>;
+                        fn GetText(
+                            &self,
+                            maxLength: i32,
+                        ) -> windows_core::Result<windows_core::HSTRING>;
+                        fn Select(&self) -> windows_core::Result<()>;
+                        fn AddToSelection(&self) -> windows_core::Result<()>;
+                        fn RemoveFromSelection(&self) -> windows_core::Result<()>;
+                        fn ScrollIntoView(&self, alignToTop: bool) -> windows_core::Result<()>;
+                    }
+                    impl ITextRangeProvider_Vtbl {
+                        pub const fn new<Identity: ITextRangeProvider_Impl, const OFFSET: isize>(
+                        ) -> Self {
+                            unsafe extern "system" fn Clone<
+                                Identity: ITextRangeProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                                result__: *mut *mut core::ffi::c_void,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    match ITextRangeProvider_Impl::Clone(this) {
+                                        Ok(ok__) => {
+                                            result__.write(core::mem::transmute_copy(&ok__));
+                                            core::mem::forget(ok__);
+                                            windows_core::HRESULT(0)
+                                        }
+                                        Err(err) => err.into(),
+                                    }
+                                }
+                            }
+                            unsafe extern "system" fn Compare<
+                                Identity: ITextRangeProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                                textrangeprovider: *mut core::ffi::c_void,
+                                result__: *mut bool,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    match ITextRangeProvider_Impl::Compare(
+                                        this,
+                                        core::mem::transmute_copy(&textrangeprovider),
+                                    ) {
+                                        Ok(ok__) => {
+                                            result__.write(core::mem::transmute_copy(&ok__));
+                                            windows_core::HRESULT(0)
+                                        }
+                                        Err(err) => err.into(),
+                                    }
+                                }
+                            }
+                            unsafe extern "system" fn FindAttribute<
+                                Identity: ITextRangeProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                                attributeid: i32,
+                                value: *mut core::ffi::c_void,
+                                backward: bool,
+                                result__: *mut *mut core::ffi::c_void,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    match ITextRangeProvider_Impl::FindAttribute(
+                                        this,
+                                        attributeid,
+                                        core::mem::transmute_copy(&value),
+                                        backward,
+                                    ) {
+                                        Ok(ok__) => {
+                                            result__.write(core::mem::transmute_copy(&ok__));
+                                            core::mem::forget(ok__);
+                                            windows_core::HRESULT(0)
+                                        }
+                                        Err(err) => err.into(),
+                                    }
+                                }
+                            }
+                            unsafe extern "system" fn FindText<
+                                Identity: ITextRangeProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                                text: *mut core::ffi::c_void,
+                                backward: bool,
+                                ignorecase: bool,
+                                result__: *mut *mut core::ffi::c_void,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    match ITextRangeProvider_Impl::FindText(
+                                        this,
+                                        core::mem::transmute(&text),
+                                        backward,
+                                        ignorecase,
+                                    ) {
+                                        Ok(ok__) => {
+                                            result__.write(core::mem::transmute_copy(&ok__));
+                                            core::mem::forget(ok__);
+                                            windows_core::HRESULT(0)
+                                        }
+                                        Err(err) => err.into(),
+                                    }
+                                }
+                            }
+                            unsafe extern "system" fn GetAttributeValue<
+                                Identity: ITextRangeProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                                attributeid: i32,
+                                result__: *mut *mut core::ffi::c_void,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    match ITextRangeProvider_Impl::GetAttributeValue(
+                                        this,
+                                        attributeid,
+                                    ) {
+                                        Ok(ok__) => {
+                                            result__.write(core::mem::transmute_copy(&ok__));
+                                            core::mem::forget(ok__);
+                                            windows_core::HRESULT(0)
+                                        }
+                                        Err(err) => err.into(),
+                                    }
+                                }
+                            }
+                            unsafe extern "system" fn GetBoundingRectangles<
+                                Identity: ITextRangeProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                                returnvalue_array_size: *mut u32,
+                                returnvalue: *mut *mut f64,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    ITextRangeProvider_Impl::GetBoundingRectangles(
+                                        this,
+                                        &mut windows_core::imp::array_proxy(
+                                            core::mem::transmute_copy(&returnvalue),
+                                            returnvalue_array_size,
+                                        ),
+                                    )
+                                    .into()
+                                }
+                            }
+                            unsafe extern "system" fn GetText<
+                                Identity: ITextRangeProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                                maxlength: i32,
+                                result__: *mut *mut core::ffi::c_void,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    match ITextRangeProvider_Impl::GetText(this, maxlength) {
+                                        Ok(ok__) => {
+                                            result__.write(core::mem::transmute_copy(&ok__));
+                                            core::mem::forget(ok__);
+                                            windows_core::HRESULT(0)
+                                        }
+                                        Err(err) => err.into(),
+                                    }
+                                }
+                            }
+                            unsafe extern "system" fn Select<
+                                Identity: ITextRangeProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    ITextRangeProvider_Impl::Select(this).into()
+                                }
+                            }
+                            unsafe extern "system" fn AddToSelection<
+                                Identity: ITextRangeProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    ITextRangeProvider_Impl::AddToSelection(this).into()
+                                }
+                            }
+                            unsafe extern "system" fn RemoveFromSelection<
+                                Identity: ITextRangeProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    ITextRangeProvider_Impl::RemoveFromSelection(this).into()
+                                }
+                            }
+                            unsafe extern "system" fn ScrollIntoView<
+                                Identity: ITextRangeProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                                aligntotop: bool,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    ITextRangeProvider_Impl::ScrollIntoView(this, aligntotop).into()
+                                }
+                            }
+                            Self {
+                                base__: windows_core::IInspectable_Vtbl::new::<
+                                    Identity,
+                                    ITextRangeProvider,
+                                    OFFSET,
+                                >(),
+                                Clone: Clone::<Identity, OFFSET>,
+                                Compare: Compare::<Identity, OFFSET>,
+                                CompareEndpoints: 0,
+                                ExpandToEnclosingUnit: 0,
+                                FindAttribute: FindAttribute::<Identity, OFFSET>,
+                                FindText: FindText::<Identity, OFFSET>,
+                                GetAttributeValue: GetAttributeValue::<Identity, OFFSET>,
+                                GetBoundingRectangles: GetBoundingRectangles::<Identity, OFFSET>,
+                                GetEnclosingElement: 0,
+                                GetText: GetText::<Identity, OFFSET>,
+                                Move: 0,
+                                MoveEndpointByUnit: 0,
+                                MoveEndpointByRange: 0,
+                                Select: Select::<Identity, OFFSET>,
+                                AddToSelection: AddToSelection::<Identity, OFFSET>,
+                                RemoveFromSelection: RemoveFromSelection::<Identity, OFFSET>,
+                                ScrollIntoView: ScrollIntoView::<Identity, OFFSET>,
+                                GetChildren: 0,
+                            }
+                        }
+                        pub fn matches(iid: &windows_core::GUID) -> bool {
+                            iid == &<ITextRangeProvider as windows_core::Interface>::IID
+                        }
+                    }
+                    #[repr(C)]
+                    #[doc(hidden)]
+                    pub struct ITextRangeProvider_Vtbl {
+                        pub base__: windows_core::IInspectable_Vtbl,
+                        pub Clone: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub Compare: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            *mut bool,
+                        )
+                            -> windows_core::HRESULT,
+                        CompareEndpoints: usize,
+                        ExpandToEnclosingUnit: usize,
+                        pub FindAttribute: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            i32,
+                            *mut core::ffi::c_void,
+                            bool,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub FindText: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut core::ffi::c_void,
+                            bool,
+                            bool,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub GetAttributeValue: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            i32,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub GetBoundingRectangles:
+                            unsafe extern "system" fn(
+                                *mut core::ffi::c_void,
+                                *mut u32,
+                                *mut *mut f64,
+                            )
+                                -> windows_core::HRESULT,
+                        GetEnclosingElement: usize,
+                        pub GetText: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            i32,
+                            *mut *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        Move: usize,
+                        MoveEndpointByUnit: usize,
+                        MoveEndpointByRange: usize,
+                        pub Select: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub AddToSelection: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub RemoveFromSelection: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                        )
+                            -> windows_core::HRESULT,
+                        pub ScrollIntoView: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            bool,
+                        )
+                            -> windows_core::HRESULT,
+                        GetChildren: usize,
                     }
                     windows_core::imp::define_interface!(
                         IToggleProvider,

@@ -170,7 +170,6 @@ module Kaya.Core
     runValues,
     runsOfValues,
     documentBlob,
-    documentBlobAfter,
     documentOfBlob,
     utf8Bytes,
     utf8Chars,
@@ -1205,18 +1204,14 @@ runsOfValues _ = []
 
 -- | A stamped copy's document is a record FIELD
 -- (docs\/rich-text-plan.md §19): the field's Blob bytes are ONE flat
--- value list — the text, then four values per run — the bytes
--- 'setDocument' already ships (crates\/kaya\/src\/wire.rs,
--- @document_blob@).
+-- value list laid out as crates\/kaya\/src\/spec.rs' @DOCUMENT_FIELD@ —
+-- the extra, the text, then four values per run — the bytes 'toKdoc'
+-- hands the core.
 documentBlob :: Document -> BS.ByteString
-documentBlob = documentBlobAfter []
-
--- | 'documentBlob' with @head@ before the text (@read_kdoc_input@).
-documentBlobAfter :: [W.Value] -> Document -> BS.ByteString
-documentBlobAfter front doc =
+documentBlob doc =
   BL.toStrict
     ( toLazyByteString
-        (W.encodeValues (front ++ W.VStr (T.unpack doc.text) : runValues doc.runs))
+        (W.encodeValues (W.VStr (T.unpack doc.extra) : W.VStr (T.unpack doc.text) : runValues doc.runs))
     )
 
 -- | @documentBlob@'s inverse, over the same 8-byte-aligned layout
@@ -1231,10 +1226,10 @@ documentOfBlob bytes
             ++ " byte(s)"
         )
   | otherwise = case walk 8 (le32 0) of
-      (W.VStr txt : rest) -> Document (T.pack txt) (runsOfValues rest) T.empty
+      (W.VStr extra : W.VStr txt : rest) -> Document (T.pack txt) (runsOfValues rest) (T.pack extra)
       vs ->
         error
-          ( "kaya: a document blob starts with its text; this one holds "
+          ( "kaya: a document blob starts with its extra and its text (spec.rs DOCUMENT_FIELD); this one holds "
               ++ show (length vs)
               ++ " value(s)"
           )

@@ -3969,7 +3969,7 @@ impl Scene {
         let Value::Blob(blob) = &value else {
             panic!("kaya: `document` binds a Blob field; {id:?} was handed {value:?}");
         };
-        let (text, runs) = crate::wire::read_document_blob(&blob.0);
+        let (_, text, runs) = crate::wire::read_document_blob(&blob.0);
         let (runs, native) = check_runs(&text, id, "document", &runs, true);
         let doc = self.rich.entry(id).or_insert_with(|| RichDoc::seeded(""));
         doc.text = text.clone();
@@ -8003,6 +8003,12 @@ impl Scene {
         let at = paras[crate::richdoc::para_index(&paras, (byte as usize).min(doc.text.len()))].start as u64;
         let spoken = crate::richdoc::item_speech(&doc.text, &doc.runs, &doc.final_state());
         Some(spoken.into_iter().find(|(start, _)| *start == at).map(|(_, s)| s).unwrap_or_default())
+    }
+
+    /// Every list item's account for assistive technology (`richdoc::item_places`).
+    pub(crate) fn rich_item_places(&self, widget: WidgetId) -> Option<Vec<crate::richdoc::ItemPlace>> {
+        let doc = self.rich.get(&widget)?;
+        Some(crate::richdoc::item_places(&doc.text, &doc.runs, &doc.final_state()))
     }
 
     /// `expect_markers`' observation of the core's own markers.
@@ -20045,7 +20051,7 @@ mod tests {
     // --- A stamped copy's document (docs/rich-text-plan.md §19) -----------
 
     fn document_blob_value(text: &str, runs: &[TextRun]) -> Value {
-        Value::Blob(crate::protocol::Blob(crate::wire::document_blob(text, runs)))
+        Value::Blob(crate::protocol::Blob(crate::wire::document_blob("", text, runs)))
     }
 
     /// The list a Document field holds reads back as the document it packed,
@@ -20056,12 +20062,13 @@ mod tests {
             TextRun::new(0, 6, "bold", "true"),
             TextRun::new(7, 11, "link", "https://kaya.dev"),
         ];
-        let blob = crate::wire::document_blob("Héllo world", &runs);
-        let (text, back) = crate::wire::read_document_blob(&blob);
+        let blob = crate::wire::document_blob(r#"{"com.example.theme":"dusk"}"#, "Héllo world", &runs);
+        let (extra, text, back) = crate::wire::read_document_blob(&blob);
+        assert_eq!(extra, r#"{"com.example.theme":"dusk"}"#);
         assert_eq!(text, "Héllo world");
         assert_eq!(back, runs);
-        let (empty, none) = crate::wire::read_document_blob(&crate::wire::document_blob("", &[]));
-        assert_eq!((empty.as_str(), none.len()), ("", 0));
+        let (no_extra, empty, none) = crate::wire::read_document_blob(&crate::wire::document_blob("", "", &[]));
+        assert_eq!((no_extra.as_str(), empty.as_str(), none.len()), ("", "", 0));
     }
 
     fn rich_rows_template(document: PropValue) -> Vec<TxOp> {

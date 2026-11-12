@@ -16,6 +16,11 @@ record Note(string Title, Document Body);
 
 static class RichrowsScene
 {
+    /// Row b's patch, read from a file that carries a member this kaya does
+    /// not know, so the row holds a Document with an Extra
+    /// (docs/rich-document-plan.md RD20).
+    const string Patched = """{"kaya": "document", "version": 1, "com.example.theme": "dusk", "paragraphs": [{"spans": [["Patched", {"italic": true}]]}]}""";
+
     /// The core's spelling of runs (`expect_runs`), so the row's field
     /// and the core's mirror are compared as one string.
     static string Spell(IReadOnlyList<TextRun> runs)
@@ -71,13 +76,17 @@ static class RichrowsScene
                     {
                         t.Undoable("patch b");
                         NoteKaya.Patch(t, notes, "b").Body(
-                            new Document("Patched")
-                                .Mark(TextRange.Bytes(0, 7), "italic", true));
+                            Document.FromKdoc(System.Text.Encoding.UTF8.GetBytes(Patched)).Document);
                     });
                     tx.Button("read a", onClick: t => // button#1
                     {
                         Note note = Row(t, notes, "a");
                         t.Write(view, $"{note.Body.Text} | {Spell(note.Body.Runs)}");
+                    });
+                    tx.Button("save b", onClick: t => // button#2
+                    {
+                        Document back = Document.FromKdoc(Row(t, notes, "b").Body.ToKdoc()).Document;
+                        t.Write(view, $"saved {back.Text}, extra {back.Extra.Replace('"', '\'')}");
                     });
                 });
 

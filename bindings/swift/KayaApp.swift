@@ -2450,7 +2450,7 @@ public struct KayaDocument: Equatable, Sendable {
     /// (RD13); a precondition failure naming the run when it breaks a wall
     /// setDocument holds.
     public func toKdoc() -> Data {
-        let values = kayaKdocValues(kayaDocumentBlob(self, head: [extra])) { kaya_kdoc_write($0, $1, $2, $3) }
+        let values = kayaKdocValues(kayaDocumentBlob(self)) { kaya_kdoc_write($0, $1, $2, $3) }
         guard case .str(let refusal) = values[0], case .str(let file) = values[1] else {
             preconditionFailure("kaya: kaya_kdoc_write answered \(values.count) values out of shape")
         }
@@ -2613,11 +2613,12 @@ func kayaFoldFormat(
 
 /// A Document's BYTES as a record field holds them
 /// (docs/rich-text-plan.md §19, crates/kaya/src/wire.rs `document_blob`):
-/// one counted value list — the text, then four values per run.
+/// one counted value list laid out as crates/kaya/src/spec.rs'
+/// DOCUMENT_FIELD — the extra, the text, then four values per run.
 /// Hand-packed because KayaWire's value encoder is the generated file's
 /// own; the bytes are pinned against the wire rules in
 /// tools/checks/swift-abort/main.swift.
-func kayaDocumentBlob(_ doc: KayaDocument, head: [String] = []) -> Data {
+func kayaDocumentBlob(_ doc: KayaDocument) -> Data {
     var out = Data()
     func put32(_ v: UInt32) {
         withUnsafeBytes(of: v.littleEndian) { out.append(contentsOf: $0) }
@@ -2639,12 +2640,10 @@ func kayaDocumentBlob(_ doc: KayaDocument, head: [String] = []) -> Data {
     func pad() {
         while out.count % 8 != 0 { out.append(0) }
     }
-    put32(UInt32(head.count + 1 + doc.runs.count * 4))
+    put32(UInt32(2 + doc.runs.count * 4))
     put32(0)
-    for value in head {
-        str(value)
-        pad()
-    }
+    str(doc.extra)
+    pad()
     str(doc.text)
     pad()
     for run in doc.runs {
@@ -2684,12 +2683,13 @@ public func kayaDocumentOfBlob(_ bytes: Data) -> KayaDocument {
             at += 8 + ((vlen + 7) & ~7)
         }
     }
-    guard case .str(let text)? = values.first else {
+    guard values.count >= 2, case .str(let extra) = values[0], case .str(let text) = values[1] else {
         preconditionFailure(
-            "kaya: a document blob starts with its text; this one holds \(values.count) value(s)")
+            "kaya: a document blob starts with its extra and its text (spec.rs DOCUMENT_FIELD); this one holds \(values.count) value(s)")
     }
     var doc = KayaDocument(text)
-    var i = 1
+    doc.extra = extra
+    var i = 2
     while i + 3 < values.count {
         guard case .i64(let start) = values[i], case .i64(let end) = values[i + 1],
               case .str(let name) = values[i + 2], case .str(let value) = values[i + 3]

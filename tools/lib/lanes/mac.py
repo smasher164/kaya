@@ -118,7 +118,7 @@ GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks", "windowmem": "spli
               "media_reader": "media", "capture_denied": "capture", "colorpanel": "colorpicker",
               "music_home": "music", "music_playlist": "music", "music_header": "music",
               "music_dock": "music", "music_artist": "music", "music_search": "music",
-              "music_context": "music"}
+              "music_context": "music", "richdocax": "richdoc"}
 
 # THE LOCALE A SCENE RUNS UNDER (docs/compliance-plan.md §4): the knob the
 # leg carries, so the same guest is read under German and Arabic; the
@@ -144,8 +144,7 @@ OFF_SCENES = {"tasksbig": "macOS has no text size (docs/compliance-plan.md R4)",
               "taskskeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)",
               "autofillkeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)",
               "chatkeyboardland": "macOS has no software keyboard (docs/safe-area-plan.md A13)",
-              "editorkeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)",
-              "richdocax": "what VoiceOver is told of a drawn list marker waits on a ruling (docs/rich-document-plan.md RD19)"}
+              "editorkeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)"}
 
 # The clock a scene runs under (docs/compliance-plan.md §4): the core writes
 # Apple's own `AppleICUForce24HourTime` into this process's volatile argument
@@ -183,6 +182,8 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "chatcall": "go", "portfolio": "pyt
                # §4): the same rust example under another script, so it
                # derives no --example of its own.
                "taskspersist": "rust",
+               # What VoiceOver is told of a drawn list marker (docs/rich-document-plan.md RD19).
+               "richdocax": "rust",
                # The split guest's dragged sidebar across a relaunch
                # (docs/tasks-s4-plan.md P8).
                "windowmem": "rust",
@@ -358,6 +359,7 @@ ORDER = [
     # The task manager in Arabic (docs/compliance-plan.md §6): the ar
     # catalog's bytes, the platform's dates, the layout mirrored.
     ("tasksrtl", ("rust",)),
+    ("richdocax", ("rust",)),
     # The sideways strip in Arabic (docs/hscroll-plan.md §4): starts at its
     # right edge, ends at its left.
     ("scrollrtl", ("rust",)),

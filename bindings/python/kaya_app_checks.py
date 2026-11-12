@@ -4465,9 +4465,11 @@ rich_check("a rich LABEL declares prop 32 on a LABEL, a plain one does not",
 # pad to 8} — so this compares the encoder with the protocol, not with
 # itself.
 _REFERENCE_DOCUMENT_BLOB = (
-    # 9 values: the text, then four per run — "ab", (0, 1, bold, true),
-    # (1, 2, link, u).
-    b"\x09\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x02\x00\x00\x00"
+    # 10 values laid out as crates/kaya/src/spec.rs' DOCUMENT_FIELD: the
+    # extra, the text, then four per run — '{"k":1}', "ab", (0, 1, bold,
+    # true), (1, 2, link, u).
+    b"\x0a\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x07\x00\x00\x00"
+    b"\x7b\x22\x6b\x22\x3a\x31\x7d\x00\x04\x00\x00\x00\x02\x00\x00\x00"
     b"\x61\x62\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x08\x00\x00\x00"
     b"\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x00\x00\x08\x00\x00\x00"
     b"\x01\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x04\x00\x00\x00"
@@ -4505,8 +4507,8 @@ with _rows_app.window(2605):
                     on_format=lambda key, act: _row_acts.append((key, act)))
     _notes.insert("a", _Note(
         title="a",
-        body=kaya.Document("ab").mark((0, 1), "bold", "true")
-                                .mark((1, 2), "link", "u")))
+        body=kaya.Document("ab", extra='{"k":1}').mark((0, 1), "bold", "true")
+                                                  .mark((1, 2), "link", "u")))
 kaya.runtime.register_blob = _real_register
 kaya.runtime.submit = _real_ship
 
@@ -4521,7 +4523,7 @@ rich_check("the template textarea declares `rich` BEFORE the bound "
 # THE COPY'S ACT FOLDS INTO ITS ROW, by the same fold the live mirror
 # takes: the two are driven from one edit and compared.
 _live_fold = kaya.Document("ab", [kaya.Run(0, 1, "bold", "true"),
-                                  kaya.Run(1, 2, "link", "u")])
+                                  kaya.Run(1, 2, "link", "u")], '{"k":1}')
 kaya._fold_edit(_live_fold, 1, 1, "X", [kaya.Run(0, 1, "code", "true")])
 
 
@@ -4583,10 +4585,10 @@ try:
 finally:
     kaya.wire.occurrence_blob = _real_occ_blob
 rich_check("a restored row's Document field decodes to its BYTES, which "
-           "the delta carries by occurrence handle",
+           "the delta carries by occurrence handle, its extra with it (RD20)",
            _notes.get("a").body == kaya.Document(
                "ab", [kaya.Run(0, 1, "bold", "true"),
-                      kaya.Run(1, 2, "link", "u")]))
+                      kaya.Run(1, 2, "link", "u")], '{"k":1}'))
 rich_check("the decoder redeems the handle the record named, once",
            _undone_asked == [77])
 

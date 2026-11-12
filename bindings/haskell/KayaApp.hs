@@ -2695,7 +2695,7 @@ fromKdoc bytes = case kdocValues (R.kdocReadRaw bytes) of
 -- (RD13); an error naming the run when it breaks a wall 'setDocument'
 -- holds.
 toKdoc :: Document -> BS.ByteString
-toKdoc doc = case kdocValues (R.kdocWriteRaw (documentBlobAfter [W.VStr (T.unpack doc.extra)] doc)) of
+toKdoc doc = case kdocValues (R.kdocWriteRaw (documentBlob doc)) of
   [W.VStr "", W.VStr file] -> TE.encodeUtf8 (T.pack file)
   (W.VStr refusal : _) -> errorWithoutStackTrace ("kaya: toKdoc: " ++ refusal)
   vs -> errorWithoutStackTrace ("kaya: kaya_kdoc_write answered " ++ show (length vs) ++ " values out of shape")

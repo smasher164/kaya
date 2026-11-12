@@ -207,8 +207,8 @@ RUST_SCENES = [
     # reason; the copy's act is the harness's format verb, no keyboard.
     "richrows",
     # THE RICH DOCUMENT (docs/rich-document-plan.md §11): rust-only, the
-    # mac lane's depth row.
-    "richdoc",
+    # mac lane's depth row; richdocax what VoiceOver is told of its markers (RD19).
+    "richdoc", "richdocax",
     # The number field (docs/number-field-plan.md §4.2), and under de-DE.
     "numberfield", "numberfieldde", "timecode", "numberfieldar",
     # The colour picker (docs/color-picker-plan.md §4.2), and its panel
@@ -269,9 +269,7 @@ PAD_EXTRAS = {
 # drive chrome no phone has; split/panes drive resize_window, which this
 # host rejects by design (DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem"]
-# What VoiceOver is told of a drawn list marker waits on a ruling
-# (docs/rich-document-plan.md RD19).
-UNWIRED_SCENES = ["richdocax"]
+UNWIRED_SCENES = []
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.
@@ -526,7 +524,7 @@ def swift_scene(entry):
 
 # Scene -> the cargo example it builds, where the two differ: a scene
 # selects a SCRIPT, never an app.
-RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
+RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks", "richdocax": "richdoc",
                 "links": "tasks", "formatde": "format", "formatar": "format",
                 "tasksrtl": "tasks", "tasksbig": "tasks", "formatbig": "format",
                 "codesurfacebig": "codesurface",

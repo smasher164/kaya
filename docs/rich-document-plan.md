@@ -5,7 +5,8 @@ through a picked file (§4.1) RULED; every other ruling (RD1-RD8, RD10, RD11,
 RD13-RD16) RULED as recommended; RD17 RULED A and RD18 RULED B on
 2026-11-12 ("I like all the recommendations except rd12") and BUILT the same
 day, RD18 on GTK and Compose; RD19 (the Mac, iOS and WinUI half of RD18) and
-RD20 (a Document kept in a model field) ASKED 2026-11-12; RD12 RULED as amended: no Markdown and no DOCX, the clipboard's RTF
+RD20 (a Document kept in a model field) RULED A and B respectively on 2026-11-12 and BUILT
+the same day, RD21 (WinUI's field text read) ASKED 2026-11-12; RD12 RULED as amended: no Markdown and no DOCX, the clipboard's RTF
 and HTML in the first build (the maintainer: "why do we even have markdown
 import and export?" and "i feel like that's out of scope for our rich text
 editor"). The review page is
@@ -975,8 +976,25 @@ U+200B the display draws at a paragraph style's boundary never reaches
 TalkBack. The guard is `tools/scenes/richdocax.steps` (the richdoc guest) with
 two verbs read off each platform's own tree: `expect_ax_item` (the caret's
 item, `<none>` outside one) and `expect_ax_text` (the field's accessible
-text), on GTK (x11 and wayland) and Compose. The Mac, iOS and WinUI decline
-the scene by name until RD19 is ruled.
+text), on GTK (x11 and wayland) and Compose.
+
+**The Mac, iOS and WinUI (RD19 A, built 2026-11-12).** The core also answers
+each item's place as numbers (`richdoc::item_places`: position, size and
+level from 1). The Mac's text view puts AppKit's list item text attributes on
+each item's first character in `accessibilityAttributedString(for:)`:
+`AXListItemPrefix` the core's string, `AXListItemIndex` and
+`AXListItemLevel` from 0, as NSAccessibilityConstants.h defines them
+(measured: AppKit's own NSTextView publishes none of the three, even for an
+NSTextList paragraph, in TextKit 1 or 2). An EMPTY item has no character to
+carry them, so the view posts an announcement as the caret enters one, and
+the read reports what it announced. iOS has no list item attribute: the
+caret's item is the text view's accessibility hint (an app's own hint after
+it), announced as it changes. WinUI names each drawn marker element with the
+core's string and sets its PositionInSet, SizeOfSet and Level, so Narrator
+meets "bullet, 2 of 3" where it met "•"; the read checks all four against the
+core. `richdocax.steps` runs on the Mac, iOS, GTK and Compose; WinUI's field
+text cannot be read in process (RD21), so the scene is parked there while
+all nine of its item reads were measured green.
 
 **Colour (RD5) as built.** `brand::ink_for_dark` maps a stored colour (as it
 reads on the light reference page `#FFFFFF`) to the dark reference page
@@ -1430,7 +1448,8 @@ slice of its own, after this build.
 ### RD19. What VoiceOver and Narrator are told of a drawn list marker (RULED 2026-11-12: A)
 
 RULED A as recommended (the maintainer, 2026-11-12: "i agree with your
-recommendations").
+recommendations"). BUILT 2026-11-12 (§11, The Mac, iOS and WinUI); WinUI's
+text read is RD21.
 
 The mechanism, short: RD18 put what a list item tells beyond its text
 (`bullet, 2 of 3`, `checked, 1 of 2`) on GTK, as the text view's accessible
@@ -1472,7 +1491,18 @@ elements already exist and only lack their names.
 ### RD20. Whether a Document kept in a model field keeps its extra (RULED 2026-11-12: B)
 
 RULED B as recommended (the maintainer, 2026-11-12: "i agree with your
-recommendations").
+recommendations"). BUILT 2026-11-12: `spec::DOCUMENT_FIELD` fingerprints the
+field's layout (extra, text, then four values per run; the spec hash moved),
+and it is also the `.kdoc` pair's document, so `kaya_kdoc_write` takes a
+document field's bytes as they are. The core and nine bindings pack and read
+it; the interpreters read no document field (the core turns it into
+`set_rich_text`), so "both interpreters' row decoders" below had nothing to
+change. The C floor packs the bytes itself and kaya.h names the layout.
+Measured on the way: OCaml keeps rows encoded and its row fold decoded and
+re-encoded the field, so a copy's edit dropped `extra` there too. Guards: the
+frozen reference bytes in nine bindings' checks, and richrows.steps' "save b"
+(a row patched from a file with an unknown member, restored by a redo, saved
+and read back) in nine languages.
 
 The mechanism, short: RD17 put a file's unknown top-level members on every
 binding's Document as `extra`, and the binding's own fold keeps it while the
@@ -1495,3 +1525,26 @@ an older one, and a notes app that keeps its documents in rows is the first
 consumer the rich document was built for. C is the cheap honest floor if B
 waits.
 
+### RD21. What WinUI's screen-reader scene reads of the field's text (ASKED 2026-11-12)
+
+The mechanism, short: `richdocax.steps` reads the field's accessible text
+(`expect_ax_text`) because Compose once drew a U+200B where a newline was, and
+TalkBack read what was drawn (RD18). On WinUI the text Narrator reads comes
+from the RichEdit control's own UI Automation provider, which lives in the
+native control, not in the XAML tree. Measured 2026-11-12: the field's
+in-process peer answers `GetPattern(Text)` with null, and the one other way to
+read it, a UI Automation client, is barred in kaya's Cargo.toml (a client
+crashed a guest reading the Shell's file dialog, docs/traps.md). kaya does
+not change the field's text on WinUI (no repair like Compose's), and every
+item read of the scene passed there.
+
+- A. The WinUI lane cuts `expect_ax_text` from the scene and says why in one
+  sentence, the carve-out stated as invariant 1 asks; the item reads run.
+- B. WinUI's read answers the TOM story through `Editable::text`, stated as
+  the text the RichEdit provider serves (an inference, not a reading of the
+  provider).
+- C. Lift the Cargo wall for an in-process UI Automation read of the app's
+  own window only.
+
+RECOMMEND A. It reports what can be measured and nothing else; B would print
+a sentence nobody measured, and C reopens a wall built after a crash.

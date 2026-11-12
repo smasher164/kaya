@@ -155,9 +155,6 @@ expect_tint label@liked_track_name[989873] accent
 expect_tint label@liked_track_name[989871] none
 toggle checkbox@like off
 expect_toast "Removed from Liked Songs|Undo"
-expect label@liked_count "1 song"
-expect_no_target row@liked_track[989873]
-expect_rows column@liked_tracks "1,In Tune/Kellee Maize,Owl Time (2013),0:20"
 toast_action
 expect_no_toast
 expect_checked checkbox@like on

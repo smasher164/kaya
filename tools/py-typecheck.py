@@ -56,7 +56,7 @@ EXEMPT = {
         "collection, seeded after the window block)",
     ),
     ("guests/python/richrows.py", "reportOptionalMemberAccess"): (
-        4,
+        5,
         "`get()` answers `T | None` — the keyed-read convention every "
         "binding follows — and this scene reads back the two keys its own "
         "window block inserted, so it writes no None arm",

@@ -457,6 +457,7 @@ pub struct KayaHostApi {
     pub text_paste: unsafe extern "C" fn(u64, *const u8, usize, *const u8, usize, *mut u8, usize) -> usize,
     pub ink_for_dark: extern "C" fn(u32) -> u32,
     pub ink_from_dark: extern "C" fn(u32) -> u32,
+    pub text_item_speech: unsafe extern "C" fn(u64, u64, *mut u8, usize) -> usize,
 }
 
 /// # Safety
@@ -784,6 +785,7 @@ pub(crate) fn run() -> i32 {
         text_paste: crate::capi::kaya_text_paste,
         ink_for_dark: crate::capi::kaya_ink_for_dark,
         ink_from_dark: crate::capi::kaya_ink_from_dark,
+        text_item_speech: crate::capi::kaya_text_item_speech,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

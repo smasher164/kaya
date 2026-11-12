@@ -19,6 +19,14 @@ let spell (runs : Run.t list) =
          else Printf.sprintf "%d:%d %s=%s" start stop r.name r.value)
        runs)
 
+(* Row b's patch, read from a file that carries a member this kaya does not
+   know, so the row holds a Document with an extra
+   (docs/rich-document-plan.md RD20). *)
+let patched =
+  {|{"kaya": "document", "version": 1, "com.example.theme": "dusk", "paragraphs": [{"spans": [["Patched", {"italic": true}]]}]}|}
+
+let quoted extra = String.map (fun c -> if c = '"' then '\'' else c) extra
+
 let () =
   let app = Kaya_app.create () in
 
@@ -71,9 +79,8 @@ let () =
                  button ~text:"patch b"
                    ~on_click:(fun () ->
                      undoable "patch b";
-                     note_patch
-                       ~body:(Document.create "Patched" |> Document.italic (0, 7))
-                       notes (Key.str "b"));
+                     note_patch ~body:(Document.of_kdoc patched).document notes
+                       (Key.str "b"));
                  (* button#1 — the row the copy's own act folded into *)
                  button ~text:"read a"
                    ~on_click:(fun () ->
@@ -81,6 +88,14 @@ let () =
                      write view
                        (Printf.sprintf "%s | %s" note.body.text
                           (spell note.body.runs)));
+                 (* button#2 — the row's Document saved, extra and all *)
+                 button ~text:"save b"
+                   ~on_click:(fun () ->
+                     let note = row_of (Key.str "b") in
+                     let back = (Document.of_kdoc (Document.to_kdoc note.body)).document in
+                     write view
+                       (Printf.sprintf "saved %s, extra %s" back.text
+                          (quoted back.extra)));
                ];
              each (record_handle notes) (fun () ->
                  Tpl.(

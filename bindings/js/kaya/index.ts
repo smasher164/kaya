@@ -212,9 +212,9 @@ function wireTag(token: Token, name: string): number {
 
 /** A Document's wire bytes: ONE flat value list — {u32 count, u32
  * reserved}, then per value {u32 tag, u32 len, payload, padded to 8} —
- * `head`, the text, then four values per run (crates/kaya/src/wire.rs,
- * `document_blob`, `read_kdoc_input`). */
-function documentBytes(doc: Document, ...head: string[]): Uint8Array {
+ * laid out as crates/kaya/src/spec.rs' DOCUMENT_FIELD: the extra, the text,
+ * then four values per run. */
+function documentBytes(doc: Document): Uint8Array {
   const out: number[] = [];
   const u32 = (v: number): void => {
     out.push(v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff);
@@ -235,9 +235,9 @@ function documentBytes(doc: Document, ...head: string[]): Uint8Array {
     const big = BigInt(v);
     for (let at = 0n; at < 8n; at++) out.push(Number((big >> (at * 8n)) & 0xffn));
   };
-  u32(head.length + 1 + doc.runs.length * 4);
+  u32(2 + doc.runs.length * 4);
   u32(0);
-  head.forEach(str);
+  str(doc.extra);
   str(doc.text);
   for (const mark of doc.runs) {
     i64(mark.range[0]);
@@ -263,12 +263,12 @@ function documentOfBytes(bytes: Uint8Array): Document {
     [value, at] = wire.parse_value(bytes, at);
     values.push(value);
   }
-  const text = values[0];
-  if (typeof text !== "string") {
-    throw new Error(`kaya: a document blob starts with its text; this one holds ${values.length} value(s)`);
+  const [extra, text] = values;
+  if (typeof extra !== "string" || typeof text !== "string") {
+    throw new Error(`kaya: a document blob starts with its extra and its text (spec.rs DOCUMENT_FIELD); this one holds ${values.length} value(s)`);
   }
-  const doc = new Document(text);
-  for (let i = 1; i + 3 < values.length; i += 4) {
+  const doc = new Document(text, [], extra);
+  for (let i = 2; i + 3 < values.length; i += 4) {
     doc.runs.push(makeRun([values[i] as number, values[i + 1] as number], values[i + 2] as string, values[i + 3] as string));
   }
   return doc;
@@ -3446,7 +3446,7 @@ export class Document {
    * (RD13); throws naming the run when it breaks a wall setDocument
    * holds. */
   toKdoc(): Uint8Array {
-    const values = runtime.kdocWrite(documentBytes(this, this.extra));
+    const values = runtime.kdocWrite(documentBytes(this));
     if (values[0] !== "") throw new Error(`kaya: toKdoc: ${String(values[0])}`);
     return new Uint8Array(Buffer.from(String(values[1]), "utf8"));
   }

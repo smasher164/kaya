@@ -17,6 +17,12 @@ class Note:
 
 app = kaya.App()
 
+# Row b's patch, read from a file that carries a member this kaya does not
+# know, so the row holds a Document with an extra
+# (docs/rich-document-plan.md RD20).
+PATCHED = ('{"kaya": "document", "version": 1, "com.example.theme": "dusk", '
+           '"paragraphs": [{"spans": [["Patched", {"italic": true}]]}]}')
+
 
 def spell(runs):
     """The core's spelling of runs (`expect_runs`), so the row's field and
@@ -36,12 +42,19 @@ def on_acted(note, _act):
 
 def on_patch():
     kaya.undoable("patch b")
-    notes.patch("b", body=kaya.Document("Patched").mark((0, 7), "italic", True))
+    notes.patch("b", body=kaya.Document.from_kdoc(PATCHED.encode()).document)
 
 
 def on_read():
     note = notes.get("a")
     view.set(f"{note.body.text} | {spell(note.body.runs)}")
+
+
+def on_save():
+    note = notes.get("b")
+    back = kaya.Document.from_kdoc(note.body.to_kdoc()).document
+    extra = back.extra.replace('"', "'")
+    view.set(f"saved {back.text}, extra {extra}")
 
 
 def on_restored(_label, _delta):
@@ -65,6 +78,7 @@ with app.window(title="richrows", on_undone=on_restored, on_redone=on_restored):
         with kaya.row():
             kaya.button("patch b", on_click=on_patch)  # button#0
             kaya.button("read a", on_click=on_read)    # button#1
+            kaya.button("save b", on_click=on_save)    # button#2
         for note in notes:
             with kaya.column():
                 kaya.label(bind=note.title)

@@ -1012,8 +1012,8 @@ let () =
   let reference =
     String.concat ""
       [
-        le 9 4; le 0 4;
-        hand_str "abc";
+        le 10 4; le 0 4;
+        hand_str ""; hand_str "abc";
         hand_i64 0; hand_i64 1; hand_str "bold"; hand_str "true";
         hand_i64 1; hand_i64 3; hand_str "link"; hand_str "u";
       ]
@@ -1029,7 +1029,8 @@ let () =
       if at >= n then
         fail
           "a Document field packed %d byte(s) where the wire's own list is %d \
-           — the text as a Str, then four values per run"
+           — the extra and the text as Strs, then four values per run \
+           (spec.rs DOCUMENT_FIELD)"
           (String.length got) (String.length reference)
       else
         fail

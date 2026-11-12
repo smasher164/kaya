@@ -3166,6 +3166,7 @@ typedef struct KayaHostApi {
                           uintptr_t);
   uint32_t (*ink_for_dark)(uint32_t);
   uint32_t (*ink_from_dark)(uint32_t);
+  uintptr_t (*text_item_speech)(uint64_t, uint64_t, uint8_t*, uintptr_t);
 } KayaHostApi;
 
 
@@ -4901,11 +4902,10 @@ uint32_t kaya_ink_from_dark(uint32_t rgb);
 /**
  * Guest side: a `.kdoc` file's bytes read (docs/rich-document-plan.md §4,
  * RD13). Answers a values list: Str refusal ("" when it read), Str
- * read-only reason ("" when the document can be edited), Str extra (the
- * unknown top-level members as one JSON object's text, "" when none; RD17),
- * then the document as a document field carries it (Str text, then I64
- * start, I64 end, Str name, Str value per run, UTF-8 bytes). kaya_text_runs'
- * contract.
+ * read-only reason ("" when the document can be edited), then the document
+ * as a document field carries it (spec::DOCUMENT_FIELD: its extra, the
+ * unknown top-level members as one JSON object's text, RD17; its text; its
+ * runs in UTF-8 bytes). kaya_text_runs' contract.
  *
  * # Safety
  * `bytes` must describe a valid byte range or be NULL/0; `out` must point at
@@ -4914,16 +4914,18 @@ uint32_t kaya_ink_from_dark(uint32_t rgb);
 uintptr_t kaya_kdoc_read(const uint8_t *bytes, uintptr_t len, uint8_t *out, uintptr_t cap);
 
 /**
- * Guest side: a document written as a `.kdoc`. `doc` is a values list: Str
- * extra, then the document as kaya_kdoc_read answers it after its three
- * strings. Answers a values list: Str refusal ("" when it wrote), Str the
+ * Guest side: a document written as a `.kdoc`. `doc` is a document field's
+ * values list (spec::DOCUMENT_FIELD). Answers a values list: Str refusal ("" when it wrote), Str the
  * file's UTF-8 text. kaya_text_runs' contract.
  *
  * # Safety
  * `doc` must describe a valid byte range; `out` must point at `cap`
  * writable bytes, or be NULL with `cap` 0.
  */
-uintptr_t kaya_kdoc_write(const uint8_t *doc, uintptr_t len, uint8_t *out, uintptr_t cap);
+uintptr_t kaya_kdoc_write(const uint8_t *doc,
+                          uintptr_t len,
+                          uint8_t *out,
+                          uintptr_t cap);
 
 /**
  * Presentation side: a menu action fired — a bar/overflow click, a
