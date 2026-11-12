@@ -2,8 +2,9 @@
 // docs/rich-document-plan.md §9 step 2): a heading, a body paragraph with a
 // preset colour, a bullet list with a nested item, a numbered list and a
 // checklist, then the paragraph acts from buttons, the platform's colour
-// picker and a `.kdoc` round trip. label#1 is the binding's own Document,
-// folded from the same deltas, so it must spell what the core holds.
+// picker and a `.kdoc` round trip, then a file carrying keys this kaya does
+// not know (RD17). label#1 is the binding's own Document, folded from the
+// same deltas, so it must spell what the core holds.
 package richdoc
 
 import (
@@ -15,6 +16,9 @@ import (
 
 // BYTE-IDENTICAL to guests/rust/richdoc.rs's DOC.
 const document = "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs"
+
+// BYTE-IDENTICAL to guests/rust/richdoc.rs's UNKNOWN.
+const unknown = `{"kaya": "document", "version": 1, "com.example.theme": {"page": "sepia"}, "paragraphs": [{"embed": "e1", "spans": [["Loose"]]}, {"com.example.pinned": true, "spans": [["Pinned"]]}]}`
 
 func spell(runs []kaya.TextRun) string {
 	parts := make([]string, 0, len(runs))
@@ -108,9 +112,26 @@ func App() *kaya.App {
 						readOnly = "none"
 					}
 					same := back.Document.Equal(now)
+					extra := strings.ReplaceAll(back.Document.Extra, `"`, "'")
+					if extra == "" {
+						extra = "none"
+					}
 					tx.SetDocument(editor, back.Document)
-					tx.Write(kdoc, fmt.Sprintf("kdoc %d bytes, read_only %s, same %t", len(bytes), readOnly, same))
+					tx.Write(kdoc, fmt.Sprintf("kdoc %d bytes, read_only %s, same %t, extra %s", len(bytes), readOnly, same, extra))
 					tx.Write(runs, spell(back.Document.Runs))
+				})
+				tx.Button("unknown", func(tx *kaya.Tx) { // button#5
+					file, err := kaya.FromKdoc([]byte(unknown))
+					if err != nil {
+						panic("the scene's file reads: " + err.Error())
+					}
+					readOnly := file.ReadOnly
+					if readOnly == "" {
+						readOnly = "none"
+					}
+					tx.SetDocument(editor, file.Document)
+					tx.Write(kdoc, fmt.Sprintf("opened read_only %s, extra %s", readOnly, strings.ReplaceAll(file.Document.Extra, `"`, "'")))
+					tx.Write(runs, spell(file.Document.Runs))
 				})
 			})
 		}))

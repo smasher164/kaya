@@ -377,6 +377,7 @@ import androidx.compose.ui.semantics.editableText
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.collapse
 import androidx.compose.ui.draw.rotate
@@ -570,6 +571,10 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /** The core's list markers (kaya_text_markers), re-read when the core's
      *  document moved; the draw reads them (docs/rich-document-plan.md §11). */
     var richMarkers by mutableStateOf("")
+
+    /** What the list item holding the caret tells a screen reader
+     *  (kaya_text_item_speech, docs/rich-document-plan.md RD18), "" outside one. */
+    var richSpeech by mutableStateOf("")
 
     /** The plain text a rich paste is inserting, the core holding its runs
      *  (kaya_text_paste); the edit that inserts exactly it takes them. */
@@ -11526,6 +11531,40 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
      * the lowering puts it and what TalkBack speaks after "double tap
      * to".
      */
+    /** RD18's two reads off the platform's node provider for a rich field:
+     * its state description (what the caret's list item tells, `<none>`
+     * when nothing) or its text, what TalkBack reads. MAIN THREAD ONLY. */
+    private fun kayaRichAxRead(activity: ComponentActivity, field: KayaNode, item: Boolean): String {
+        if (field.a11yId.isEmpty()) return "<the field has no a11y_id to find it by>"
+        val view = kayaComposeRoot(activity.window.decorView) ?: return "<no compose root>"
+        val owner = (view as RootForTest).semanticsOwner
+        val node = kayaAxFind(owner.rootSemanticsNode, field.a11yId)
+            ?: return "<nothing carries test tag \"${field.a11yId}\">"
+        if (item) {
+            val live = kayaAxFind(owner.rootSemanticsNode, kayaRichItemTag(field)) ?: return "<none>"
+            val said = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(live.id)
+                ?: return "<the provider has no node info for the item's live region>"
+            return said.contentDescription?.toString()?.takeIf { it.isNotEmpty() } ?: "<none>"
+        }
+        val info = view.accessibilityNodeProvider?.createAccessibilityNodeInfo(node.id)
+            ?: return "<the provider has no node info>"
+        return info.text?.toString() ?: "<no text>"
+    }
+
+    /** Why [kayaRichAxRead]'s item read disagreed: the two layers under the
+     * provider, the arm's model and the merged semantics, as they read now. */
+    private fun kayaRichAxWhy(activity: ComponentActivity, field: KayaNode): String {
+        val view = kayaComposeRoot(activity.window.decorView) ?: return "no compose root"
+        val owner = (view as RootForTest).semanticsOwner
+        val text = field.textState.text.toString()
+        val caret = kayaByteOffset(text, field.textState.selection.min)
+        val live = kayaAxFind(owner.rootSemanticsNode, kayaRichItemTag(field))
+        return "the arm's model holds \"${field.richSpeech}\", the core says \"" +
+            KayaPresent.textItemSpeech(field.id, caret.toLong()) + "\" at byte $caret, the live region " +
+            (live?.let { "#${it.id} describes \"${it.config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString() ?: "-"}\"" }
+                ?: "is not in the semantics tree")
+    }
+
     private fun kayaAxHint(activity: ComponentActivity, tag: String): String? {
         val view = kayaComposeRoot(activity.window.decorView) ?: return null
         val owner = (view as RootForTest).semanticsOwner
@@ -16098,6 +16137,29 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             else -> failures.add("markers \"${read.first}\", wanted \"$want\"")
                         }
                     }
+                    "expect_ax_item", "expect_ax_text" -> {
+                        // RD18: what TalkBack is told, off the node provider.
+                        val want = quoted(parts.drop(2))
+                        val item = parts[0] == "expect_ax_item"
+                        val deadline = System.currentTimeMillis() + 5000
+                        var got: String?
+                        do {
+                            got = onUi(activity) { kayaTextTarget(parts[1])?.let { kayaRichAxRead(activity, it, item) } }
+                            if (got == null || got == want) break
+                            Thread.sleep(50)
+                        } while (System.currentTimeMillis() < deadline)
+                        val what = if (item) "ax item" else "ax text"
+                        val why = if (item && got != null && got != want) {
+                            onUi(activity) { kayaTextTarget(parts[1])?.let { " (${kayaRichAxWhy(activity, it)})" } } ?: ""
+                        } else {
+                            ""
+                        }
+                        when (got) {
+                            null -> failures.add("no such target ${parts[1]}")
+                            want -> observed.add("$what \"$want\"")
+                            else -> failures.add("$what \"$got\", wanted \"$want\"$why")
+                        }
+                    }
                     "click_marker" -> {
                         // A tap at a drawn marker's centre, through the
                         // window's own touch path to the field's pointer pass.
@@ -18438,9 +18500,17 @@ internal val KAYA_RICH_NAMES = listOf(
 /** The attributes that cover whole paragraphs (richdoc::PARAGRAPH_ATTRS). */
 internal val KAYA_RICH_PARAGRAPH = setOf("block", "list", "indent", "checked", "start", "align")
 
-/** kaya's names, or an app's dotted extension (RD8), carried and drawn as nothing. */
+/** richdoc::is_paragraph_attr: kaya's, or a kept paragraph key under `para:` (RD17). */
+internal fun kayaIsParagraphName(name: String): Boolean {
+    if (KAYA_RICH_PARAGRAPH.contains(name)) return true
+    if (!name.startsWith("para:")) return false
+    val key = name.removePrefix("para:")
+    return key.isNotEmpty() && key != "spans" && !KAYA_RICH_PARAGRAPH.contains(key)
+}
+
+/** kaya's names, an app's dotted extension (RD8) or a kept paragraph key (RD17), carried and drawn as nothing. */
 internal fun kayaRichNameKept(name: String): Boolean =
-    KAYA_RICH_NAMES.contains(name) || name.contains('.')
+    KAYA_RICH_NAMES.contains(name) || name.contains('.') || kayaIsParagraphName(name)
 
 /** RD7's table: the marks that grow over text typed at their end. */
 internal fun kayaRichExpandsAtEnd(name: String): Boolean =
@@ -18546,12 +18616,12 @@ internal fun kayaRichFinalState(node: KayaNode, text: String): LinkedHashMap<Str
     val out = LinkedHashMap<String, String>()
     if (text.endsWith('\n')) {
         for ((name, value) in kayaRichAttrsAt(node.richRuns, text.length - 1)) {
-            if (KAYA_RICH_PARAGRAPH.contains(name)) out[name] = value
+            if (kayaIsParagraphName(name)) out[name] = value
         }
     }
     if (node.richPendingAt == text.length) {
         for ((name, value) in node.richPendingOn) {
-            if (KAYA_RICH_PARAGRAPH.contains(name)) out[name] = value
+            if (kayaIsParagraphName(name)) out[name] = value
         }
         for (name in node.richPendingOff) out.remove(name)
     }
@@ -18570,7 +18640,7 @@ internal fun kayaRichParaAttrs(
     if (from == to && to >= text.length) return kayaRichFinalState(node, text)
     val out = LinkedHashMap<String, String>()
     for ((name, value) in kayaRichAttrsAt(runs, from)) {
-        if (KAYA_RICH_PARAGRAPH.contains(name)) out[name] = value
+        if (kayaIsParagraphName(name)) out[name] = value
     }
     return out
 }
@@ -18597,14 +18667,14 @@ internal fun kayaRichTypedRuns(node: KayaNode, text: String, start: Int, inserte
     val inline = LinkedHashMap<String, String>()
     if (start > 0) {
         for ((name, value) in kayaRichAttrsAt(node.richRuns, start - 1)) {
-            if (!KAYA_RICH_PARAGRAPH.contains(name) && kayaRichExpandsAtEnd(name)) inline[name] = value
+            if (!kayaIsParagraphName(name) && kayaRichExpandsAtEnd(name)) inline[name] = value
         }
     }
     val (from, to) = kayaRichParagraphAt(text, start)
     val para = kayaRichParaAttrs(node, node.richRuns, text, from, to)
     if (start == node.richPendingAt) {
         for ((name, value) in node.richPendingOn) {
-            if (KAYA_RICH_PARAGRAPH.contains(name)) para[name] = value else inline[name] = value
+            if (kayaIsParagraphName(name)) para[name] = value else inline[name] = value
         }
         for (name in node.richPendingOff) {
             para.remove(name)
@@ -19046,6 +19116,17 @@ internal fun kayaRichDeriveMarkers(node: KayaNode) {
     if (!node.rich || !kayaIsTextField(node)) return
     val spelled = KayaPresent.textMarkers(node.id)
     if (spelled != node.richMarkers) node.richMarkers = spelled
+    kayaRichDeriveSpeech(node)
+}
+
+/** RD18: the field's state description is what the list item holding the
+ * caret tells (`bullet, 2 of 3`), re-read when the caret or the core moved. */
+internal fun kayaRichDeriveSpeech(node: KayaNode) {
+    if (!node.rich || !kayaIsTextField(node)) return
+    val text = node.textState.text.toString()
+    val caret = kayaByteOffset(text, node.textState.selection.min)
+    val said = if (caret < 0) "" else KayaPresent.textItemSpeech(node.id, caret.toLong())
+    if (said != node.richSpeech) node.richSpeech = said
 }
 
 /** One marker as the core spells it: start in bytes, level, the marker. */
@@ -22802,6 +22883,7 @@ fun KayaTextField(
                 val to = kayaByteOffset(read.text, read.selection.max)
                 if (from >= 0 && to >= 0) {
                     KayaPresent.textSelection(node.id, from.toLong(), to.toLong())
+                    kayaRichDeriveSpeech(node)
                 }
             }
             if (read.composing) return@collect
@@ -22926,7 +23008,19 @@ fun KayaTextField(
             // Material's TextField caret (docs/editor-plan.md E7): foundation's
             // default is black in both appearances.
             cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
-            modifier = a11y
+            // RD18 (docs/rich-document-plan.md §11): the display's U+200B
+            // boundary newlines never reach TalkBack, which reads the text
+            // itself (KayaRichItemLive carries the caret's list item).
+            modifier = (
+                if (node.rich) {
+                    Modifier.semantics {
+                        editableText = AnnotatedString(node.textState.text.toString())
+                    }
+                } else {
+                    Modifier
+                }
+                )
+                .then(a11y)
                 .then(if (singleLine && !search) kayaContentHint(node.id, node.contentType) else Modifier)
                 .then(if (cap != null) Modifier.sizeIn(maxHeight = with(LocalDensity.current) { cap.toDp() }) else Modifier)
                 .then(fill)
@@ -23018,7 +23112,10 @@ fun KayaTextField(
                     // around the decoration: the inner field IS the scrolling
                     // viewport, so a decoration-level draw would sit still
                     // while the text moved under it.
-                    innerTextField = { KayaMeasure(node) { KayaGutter(node, fieldStyle) { KayaHighlightLayer(node, palette, fieldStyle, inner) } } },
+                    innerTextField = {
+                        KayaMeasure(node) { KayaGutter(node, fieldStyle) { KayaHighlightLayer(node, palette, fieldStyle, inner) } }
+                        if (node.rich) KayaRichItemLive(node)
+                    },
                     enabled = true,
                     singleLine = singleLine,
                     visualTransformation = VisualTransformation.None,
@@ -23734,6 +23831,26 @@ internal val kayaPlatformSizes = HashMap<Long, Float>()
  *  vertical centre in the gutter's own box, and that box's height. */
 internal class KayaGutterDrawn(val labels: List<Pair<Int, Float>>, val height: Float)
 internal val kayaGutterDrawn = HashMap<Long, KayaGutterDrawn>()
+
+@Composable
+internal fun KayaRichItemLive(node: KayaNode) {
+    // RD18 (docs/rich-document-plan.md §11): what the caret's list item tells,
+    // as a polite live region TalkBack speaks when it changes. A node of its
+    // own, since the toolkit replaces a text field's state description
+    // (docs/traps.md, Compose's text field state description).
+    val speech = node.richSpeech
+    if (speech.isEmpty()) return
+    Box(
+        Modifier
+            .size(1.dp)
+            .testTag(kayaRichItemTag(node))
+            .semantics(mergeDescendants = true) {
+                liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
+                contentDescription = speech
+            })
+}
+
+internal fun kayaRichItemTag(node: KayaNode): String = node.a11yId + ".item"
 
 /**
  * The textarea's line-number gutter (G6): a column at the inner field's

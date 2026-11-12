@@ -1994,10 +1994,10 @@ fn vocabulary(table: &[(i64, &'static str)]) -> String {
 
 fn check_attr_name(widget: WidgetId, op: &str, name: &str) {
     assert!(
-        crate::wire::RICH_ATTRS.iter().any(|(_, n)| *n == name) || crate::richdoc::is_extension(name),
+        crate::wire::RICH_ATTRS.iter().any(|(_, n)| *n == name) || crate::richdoc::is_kept_name(name),
         "kaya: {op} on {widget:?}: {name:?} is not a kaya attribute — the vocabulary is {}, \
-         and an app's own name carries its reverse-DNS prefix (com.example.note; \
-         docs/rich-document-plan.md RD8)",
+         an app's own name carries its reverse-DNS prefix (com.example.note; \
+         docs/rich-document-plan.md RD8), and a kept paragraph key is para:<key> (RD17)",
         vocabulary(crate::wire::RICH_ATTRS)
     );
 }
@@ -2611,14 +2611,14 @@ impl RichDoc {
                 None => continue,
             };
             let on_n = self.attrs_at(n);
-            for name in crate::richdoc::PARAGRAPH_ATTRS {
-                let want = match (before.get(*name), after.get(*name)) {
+            for name in crate::richdoc::paragraph_names(&self.runs) {
+                let want = match (before.get(&name), after.get(&name)) {
                     (Some(a), Some(b)) if a == b => Some(a.clone()),
                     _ => None,
                 };
-                if on_n.get(*name) != want.as_ref() {
-                    self.format(n, n + 1, name, want.as_deref());
-                    changes.push(ParaChange { range: TextRange::new(n as u64, n as u64 + 1), name: (*name).to_owned(), value: want });
+                if on_n.get(&name) != want.as_ref() {
+                    self.format(n, n + 1, &name, want.as_deref());
+                    changes.push(ParaChange { range: TextRange::new(n as u64, n as u64 + 1), name, value: want });
                 }
             }
         }
@@ -2634,22 +2634,48 @@ impl RichDoc {
         let mut changes = Vec::new();
         for para in &paras[first..=last] {
             if para.is_empty() {
+                self.carry_into_new_empty(para, start, end, &mut changes);
                 continue;
             }
             let want = self.attrs_at(para.start);
-            for name in crate::richdoc::PARAGRAPH_ATTRS {
-                let value = want.get(*name).map(String::as_str);
-                if !self.uniform(name, para.start, para.end) {
-                    self.format(para.start, para.end, name, value);
+            for name in crate::richdoc::paragraph_names(&self.runs) {
+                let value = want.get(&name).map(String::as_str);
+                if !self.uniform(&name, para.start, para.end) {
+                    self.format(para.start, para.end, &name, value);
                     changes.push(ParaChange {
                         range: TextRange::new(para.start as u64, para.end as u64),
-                        name: (*name).to_owned(),
+                        name,
                         value: value.map(str::to_owned),
                     });
                 }
             }
         }
-        self.canon_first(start, end, changes)
+        let mut out = Vec::new();
+        self.canon_newlines(start, end, &mut out);
+        out.extend(changes);
+        out
+    }
+
+    /// An empty paragraph this edit made in front of an old terminator (Return
+    /// at the end of a paragraph that is not the last) is carried by that old
+    /// terminator, outside the inserted text, so it takes what the inserted
+    /// newline before it carries: what continues (§11).
+    fn carry_into_new_empty(&mut self, para: &crate::richdoc::Para, start: usize, end: usize, changes: &mut Vec<ParaChange>) {
+        let newline_before = para.start.checked_sub(1);
+        let made_here = newline_before.is_some_and(|n| n >= start && n < end);
+        if !para.terminated || para.start < end || !made_here {
+            return;
+        }
+        let want = self.attrs_at(para.start - 1);
+        let now = self.attrs_at(para.start);
+        for name in crate::richdoc::paragraph_names(&self.runs) {
+            let value = want.get(&name);
+            if now.get(&name) != value {
+                let value = value.cloned();
+                self.format(para.start, para.start + 1, &name, value.as_deref());
+                changes.push(ParaChange { range: TextRange::new(para.start as u64, para.start as u64 + 1), name, value });
+            }
+        }
     }
 
     /// `changes` with the canonical newlines' own changes published FIRST, so
@@ -7670,7 +7696,6 @@ impl Scene {
         self.rich.get(&widget).map(|doc| doc.last_edit.clone().unwrap_or_default())
     }
 
-    #[cfg(any(test, all(feature = "harness", target_os = "windows")))]
     pub(crate) fn rich_selection(&self, widget: WidgetId) -> Option<TextRange> {
         self.rich.get(&widget).map(|doc| doc.selection)
     }
@@ -7968,6 +7993,16 @@ impl Scene {
     pub(crate) fn rich_markers(&self, widget: WidgetId) -> Option<Vec<crate::richdoc::Marker>> {
         let doc = self.rich.get(&widget)?;
         Some(crate::richdoc::markers(&doc.text, &doc.runs, &doc.final_state()))
+    }
+
+    /// What assistive technology is told of the list item holding `byte`
+    /// beyond its text (`richdoc::item_speech`); "" outside a list item.
+    pub(crate) fn rich_item_speech(&self, widget: WidgetId, byte: u64) -> Option<String> {
+        let doc = self.rich.get(&widget)?;
+        let paras = crate::richdoc::paragraphs(&doc.text);
+        let at = paras[crate::richdoc::para_index(&paras, (byte as usize).min(doc.text.len()))].start as u64;
+        let spoken = crate::richdoc::item_speech(&doc.text, &doc.runs, &doc.final_state());
+        Some(spoken.into_iter().find(|(start, _)| *start == at).map(|(_, s)| s).unwrap_or_default())
     }
 
     /// `expect_markers`' observation of the core's own markers.
@@ -21043,9 +21078,68 @@ body", vec![run(0, 5, "block", "heading1")])]);
         scene.apply(vec![TxOp::FormatText { widget: w, name: "indent".into(), value: Some("+1".into()), range: None }]);
         assert!(scene.rich_key(w, crate::capi::KAYA_TEXT_KEY_BACKSPACE, 4, 4));
         let doc = scene.rich.get(&w).unwrap();
-        let file = crate::richdoc::kdoc::write(&doc.text, &doc.runs).unwrap();
+        let file = crate::richdoc::kdoc::write(&doc.text, &doc.runs, "").unwrap();
         let back = crate::richdoc::kdoc::read(file.as_bytes()).unwrap();
         assert_eq!(spell_runs(&back.runs), scene.rich_runs_string(w).unwrap(), "{file}");
+    }
+
+    /// docs/rich-document-plan.md RD17 A: a paragraph key the file carries
+    /// rides a para: run through a user's Return and typing, a join and a
+    /// removal, and a document key rides extra; the file written after the
+    /// edit reads back the same keys.
+    #[test]
+    fn unknown_paragraph_and_document_keys_survive_an_edit() {
+        let file = br#"{"kaya": "document", "version": 1, "com.example.theme": {"page": "sepia"}, "paragraphs": [{"com.example.pinned": true, "spans": [["Pinned"]]}, {"embed": "e1", "spans": [["Loose"]]}]}"#;
+        let read = crate::richdoc::kdoc::read(file).unwrap();
+        assert_eq!(read.read_only, None);
+        assert_eq!(read.extra, r#"{"com.example.theme":{"page":"sepia"}}"#);
+        assert_eq!(spell_runs(&read.runs), "0:6 para:com.example.pinned|7:12 para:embed=e1");
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        let w = WidgetId(1);
+        scene.apply(vec![set_document(&read.text, read.runs.clone())]);
+        scene.set_text_selection(w, 6, 6);
+        let edit = scene.note_rich_text(w, "Pinned\n\nLoose").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "0:1 para:com.example.pinned", "Return at the end continues the key");
+        scene.set_text_selection(w, 7, 7);
+        let edit = scene.note_rich_text(w, "Pinned\nAlso\nLoose").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "0:4 para:com.example.pinned");
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some("0:11 para:com.example.pinned|12:17 para:embed=e1"));
+        let doc = scene.rich.get(&w).unwrap();
+        let out = crate::richdoc::kdoc::write(&doc.text, &doc.runs, &read.extra).unwrap();
+        assert_eq!(
+            out,
+            "{\n  \"kaya\": \"document\",\n  \"version\": 1,\n  \"requires\": [],\n  \"com.example.theme\": {\"page\":\"sepia\"},\n  \"paragraphs\": [\n    {\"com.example.pinned\": true, \"spans\": [[\"Pinned\"]]},\n    {\"com.example.pinned\": true, \"spans\": [[\"Also\"]]},\n    {\"embed\": \"e1\", \"spans\": [[\"Loose\"]]}\n  ]\n}\n"
+        );
+        let back = crate::richdoc::kdoc::read(out.as_bytes()).unwrap();
+        assert_eq!((back.extra.as_str(), back.read_only.as_deref()), (read.extra.as_str(), None));
+        assert_eq!(spell_runs(&back.runs), scene.rich_runs_string(w).unwrap());
+        scene.set_text_selection(w, 11, 11);
+        scene.note_rich_text(w, "Pinned\nAlsoLoose").unwrap();
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some("0:16 para:com.example.pinned"), "a join takes the first paragraph's keys");
+        scene.set_text_selection(w, 0, 16);
+        scene.apply(vec![TxOp::FormatText { widget: w, name: "para:com.example.pinned".into(), value: None, range: None }]);
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some(""));
+    }
+
+    /// docs/rich-document-plan.md §11: Return at the end of an item that is
+    /// not the last paragraph starts a new item, whose carrier is the old
+    /// terminator outside the inserted text, and typing into it leaves the
+    /// newlines canonical.
+    #[test]
+    fn return_inside_a_document_continues_the_list() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        let w = WidgetId(1);
+        scene.apply(vec![set_document("Pinned\nLoose", vec![run(0, 6, "list", "bullet")])]);
+        scene.set_text_selection(w, 6, 6);
+        let edit = scene.note_rich_text(w, "Pinned\n\nLoose").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "0:1 list=bullet");
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some("0:8 list=bullet"));
+        assert_eq!(scene.rich_markers_string(w).as_deref(), Some("0:0 \u{2022}|7:0 \u{2022}"));
+        scene.set_text_selection(w, 7, 7);
+        scene.note_rich_text(w, "Pinned\nAlso\nLoose").unwrap();
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some("0:11 list=bullet"));
     }
 
     #[test]

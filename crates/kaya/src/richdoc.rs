@@ -13,13 +13,35 @@ pub(crate) mod kdoc;
 /// The attributes that cover whole paragraphs (RD1).
 pub(crate) const PARAGRAPH_ATTRS: &[&str] = &["block", "list", "indent", "checked", "start", "align"];
 
+/// A paragraph key this kaya does not know, kept as a run (RD17 A).
+pub(crate) const PARA_PREFIX: &str = "para:";
+
+pub(crate) fn is_para_key(name: &str) -> bool {
+    name.strip_prefix(PARA_PREFIX).is_some_and(|key| !key.is_empty() && key != "spans" && !PARAGRAPH_ATTRS.contains(&key))
+}
+
 pub(crate) fn is_paragraph_attr(name: &str) -> bool {
-    PARAGRAPH_ATTRS.contains(&name)
+    PARAGRAPH_ATTRS.contains(&name) || is_para_key(name)
 }
 
 /// An app's own name (RD8): a reverse-DNS prefix, kept and drawn as nothing.
 pub(crate) fn is_extension(name: &str) -> bool {
-    name.contains('.')
+    name.contains('.') && !name.starts_with(PARA_PREFIX)
+}
+
+/// A name outside kaya's vocabulary that every reader keeps: an app's dotted
+/// mark or a paragraph key under the reserved prefix.
+pub(crate) fn is_kept_name(name: &str) -> bool {
+    is_extension(name) || is_para_key(name)
+}
+
+/// The paragraph attributes `runs` can hold: kaya's own, then every kept
+/// paragraph key among them, by name.
+pub(crate) fn paragraph_names(runs: &[TextRun]) -> Vec<String> {
+    let mut out: Vec<String> = PARAGRAPH_ATTRS.iter().map(|n| (*n).to_owned()).collect();
+    let keys: std::collections::BTreeSet<&str> = runs.iter().map(|r| r.name.as_str()).filter(|n| is_para_key(n)).collect();
+    out.extend(keys.into_iter().map(str::to_owned));
+    out
 }
 
 /// RD7's table: the marks that grow over text typed at their end.
@@ -277,9 +299,10 @@ pub(crate) fn structure_refusal(
     final_state: &BTreeMap<String, String>,
 ) -> Option<String> {
     let paras = paragraphs(text);
+    let names = paragraph_names(runs);
     for (i, para) in paras.iter().enumerate() {
         if let Some((start, end)) = para.carrier() {
-            for name in PARAGRAPH_ATTRS {
+            for name in &names {
                 let first = runs
                     .iter()
                     .find(|r| r.name == *name && r.range.start as usize <= start && start < r.range.end as usize)
@@ -385,6 +408,66 @@ pub(crate) fn markers(text: &str, runs: &[TextRun], final_state: &BTreeMap<Strin
     out
 }
 
+/// What assistive technology is told of each list item beyond its text
+/// (docs/rich-document-plan.md RD18): the marker (`bullet`, the number as
+/// drawn, `checked` or `not checked`), its place among its siblings, and its
+/// level past the first. Siblings are the items of one kind at one level in
+/// one unbroken run of list paragraphs; a deeper item does not part them, a
+/// shallower one or another kind at their level does.
+pub(crate) fn item_speech(text: &str, runs: &[TextRun], final_state: &BTreeMap<String, String>) -> Vec<(u64, String)> {
+    let mut items: Vec<(Marker, usize)> = Vec::new();
+    let mut run = 0usize;
+    let all = markers(text, runs, final_state);
+    let mut next = all.iter().peekable();
+    for para in paragraphs(text) {
+        match next.peek() {
+            Some(m) if m.start == para.start as u64 => items.push(((*next.next().expect("peeked")).clone(), run)),
+            _ => run += 1,
+        }
+    }
+    let kind = |m: &Marker| match m.text.as_str() {
+        "[ ]" | "[x]" => 0,
+        t if BULLETS.contains(&t) => 1,
+        _ => 2,
+    };
+    let siblings = |i: usize, step: isize| -> usize {
+        let (me, my_run) = (&items[i].0, items[i].1);
+        let mut count = 0;
+        let mut j = i as isize + step;
+        while j >= 0 && (j as usize) < items.len() {
+            let (other, other_run) = (&items[j as usize].0, items[j as usize].1);
+            if other_run != my_run || other.level < me.level {
+                break;
+            }
+            if other.level == me.level {
+                if kind(other) != kind(me) {
+                    break;
+                }
+                count += 1;
+            }
+            j += step;
+        }
+        count
+    };
+    (0..items.len())
+        .map(|i| {
+            let m = &items[i].0;
+            let (before, after) = (siblings(i, -1), siblings(i, 1));
+            let word = match m.text.as_str() {
+                "[x]" => "checked",
+                "[ ]" => "not checked",
+                t if BULLETS.contains(&t) => "bullet",
+                t => t,
+            };
+            let mut out = format!("{word}, {} of {}", before + 1, before + after + 1);
+            if m.level > 0 {
+                out.push_str(&format!(", level {}", m.level + 1));
+            }
+            (m.start, out)
+        })
+        .collect()
+}
+
 /// `expect_markers`' spelling: `start:level marker`, `|`-joined.
 pub(crate) fn spell_markers(markers: &[Marker]) -> String {
     markers
@@ -414,6 +497,33 @@ mod tests {
         ];
         let got = spell_markers(&markers(text, &runs, &BTreeMap::new()));
         assert_eq!(got, "0:0 1.|2:0 2.|4:1 a.|6:1 b.|8:0 3.|12:0 1.|14:2 \u{25AA}");
+    }
+
+    #[test]
+    fn each_item_is_told_its_marker_place_and_level() {
+        let text = "a\nb\nc\nd\ne\nf\ng\nplain\nh";
+        let runs = vec![
+            run(0, 5, "list", "bullet"),
+            run(2, 3, "indent", "1"),
+            run(6, 9, "list", "numbered"),
+            run(10, 13, "list", "check"),
+            run(10, 11, "checked", "true"),
+            run(20, 21, "list", "bullet"),
+        ];
+        let got: Vec<String> = item_speech(text, &runs, &BTreeMap::new()).into_iter().map(|(s, t)| format!("{s}:{t}")).collect();
+        assert_eq!(
+            got,
+            [
+                "0:bullet, 1 of 2",
+                "2:bullet, 1 of 1, level 2",
+                "4:bullet, 2 of 2",
+                "6:1., 1 of 2",
+                "8:2., 2 of 2",
+                "10:checked, 1 of 2",
+                "12:not checked, 2 of 2",
+                "20:bullet, 1 of 1",
+            ]
+        );
     }
 
     #[test]

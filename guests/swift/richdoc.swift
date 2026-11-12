@@ -2,15 +2,18 @@
 // tools/scenes/richdoc.steps (docs/rich-document-plan.md §9 step 2): a
 // heading, a body paragraph with a preset colour, a bullet list with a
 // nested item, a numbered list and a checklist, then the paragraph acts from
-// buttons, the platform's colour picker and a `.kdoc` round trip. label#1 is
-// the binding's own Document, folded from the same deltas, so it must spell
-// what the core holds.
+// buttons, the platform's colour picker and a `.kdoc` round trip, then a file
+// carrying keys this kaya does not know (RD17). label#1 is the binding's own
+// Document, folded from the same deltas, so it must spell what the core holds.
 
 import Foundation
 import Kaya
 
 // BYTE-IDENTICAL to guests/rust/richdoc.rs's DOC.
 let document = "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs"
+
+// BYTE-IDENTICAL to guests/rust/richdoc.rs's UNKNOWN.
+let unknown = #"{"kaya": "document", "version": 1, "com.example.theme": {"page": "sepia"}, "paragraphs": [{"embed": "e1", "spans": [["Loose"]]}, {"com.example.pinned": true, "spans": [["Pinned"]]}]}"#
 
 func spell(_ runs: [KayaRun]) -> String {
     runs.map { run in
@@ -82,12 +85,22 @@ KayaApp.run { app in
                     let now = app.document(editor)
                     let bytes = now.toKdoc()
                     let back = try KayaDocument.fromKdoc(bytes)
+                    let extra = back.document.extra.replacingOccurrences(of: "\"", with: "'")
                     t.setDocument(editor, back.document)
                     t.write(
                         kdoc,
                         .str("kdoc \(bytes.count) bytes, read_only \(back.readOnly ?? "none"), "
-                            + "same \(back.document == now)"))
+                            + "same \(back.document == now), extra \(extra.isEmpty ? "none" : extra)"))
                     t.write(runs, .str(spell(back.document.runs)))
+                }
+                tx.button("unknown") { t in  // button#5
+                    let file = try KayaDocument.fromKdoc(Data(unknown.utf8))
+                    t.setDocument(editor, file.document)
+                    t.write(
+                        kdoc,
+                        .str("opened read_only \(file.readOnly ?? "none"), "
+                            + "extra \(file.document.extra.replacingOccurrences(of: "\"", with: "'"))"))
+                    t.write(runs, .str(spell(file.document.runs)))
                 }
             }
             return root

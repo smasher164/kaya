@@ -703,6 +703,10 @@ object KayaPresent {
      *  kaya_text_markers' JNI spelling. */
     @JvmStatic external fun textMarkers(widget: Long): String
 
+    /** What a screen reader is told of the list item holding byte `byte`
+     *  beyond its text, "" outside one. kaya_text_item_speech's JNI spelling. */
+    @JvmStatic external fun textItemSpeech(widget: Long, byte: Long): String
+
     /** A copy's rich flavour of `start..end` in bytes (HTML, or RTF).
      *  kaya_text_copy's JNI spelling. */
     @JvmStatic external fun textCopy(widget: Long, start: Long, end: Long, html: Boolean): String

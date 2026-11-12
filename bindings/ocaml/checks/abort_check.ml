@@ -884,6 +884,22 @@ let () =
       if said <> "the document is version 2, newer than the version 1 this kaya reads" then
         fail "a version-2 .kdoc was refused with %S" said
   | _ -> fail "a version-2 .kdoc was read");
+  let unknown =
+    Document.of_kdoc
+      "{\"kaya\": \"document\", \"version\": 1, \"com.example.theme\": {\"page\": \"sepia\"}, \
+       \"paragraphs\": [{\"com.example.pinned\": true, \"spans\": [[\"Pinned\"]]}]}"
+  in
+  if unknown.read_only <> None
+     || unknown.document.extra <> "{\"com.example.theme\":{\"page\":\"sepia\"}}"
+     || show_runs unknown.document.runs <> "0..6 para:com.example.pinned=true"
+  then
+    fail "RD17 A: the unknown top level rides extra and the paragraph key a para: run, \
+          editable; read %S [%s] %S"
+      unknown.document.extra (show_runs unknown.document.runs)
+      (Option.value unknown.read_only ~default:"");
+  if (Document.of_kdoc (Document.to_kdoc unknown.document)).document <> unknown.document
+     || { unknown.document with extra = "" } = unknown.document
+  then fail "RD17 A: extra writes back and is part of equality";
 
   let (Widget editor_id) = editor in
   let queued call =
@@ -917,6 +933,23 @@ let () =
   then
     fail "a ranged list act with none did not fold as the removal: [%s]"
       (show_runs (fold ()));
+  build app (fun () ->
+      set_document editor { (Document.create "Walks\nmap\nwater") with extra = "{\"a.b\":1}" });
+  let got =
+    queued (fun () ->
+        format_range editor (7, 8) "para:com.example.pinned" "x";
+        format_range editor (7, 8) "para:list" "x")
+  in
+  if got
+     <> [
+          tx_format_text editor_id 0 1 6L 9L [ Str "para:com.example.pinned"; Str "x" ];
+          tx_format_text editor_id 0 1 7L 8L [ Str "para:list"; Str "x" ];
+        ]
+     || (build app (fun () -> document editor)).extra <> "{\"a.b\":1}"
+  then
+    fail "RD17 A: a ranged para: key snaps to its paragraph, para:list does not, \
+          and the fold keeps extra";
+  build app (fun () -> set_document editor (Document.create "Walks\nmap\nwater"));
   let got =
     queued (fun () ->
         set_list editor List_kind.Check;
@@ -1009,7 +1042,7 @@ let () =
             as a binary Str"
         (show_wire_value other));
   (match document_of_blob reference with
-  | { text = "abc"; runs = [ a; b ] }
+  | { text = "abc"; runs = [ a; b ]; extra = "" }
     when (a.Run.range, a.name, a.value) = ((0, 1), "bold", "true")
          && (b.Run.range, b.name, b.value) = ((1, 3), "link", "u") ->
       ()

@@ -2,10 +2,13 @@
 //! docs/rich-document-plan.md §9 step 2): a heading, a body paragraph with a
 //! preset colour, a bullet list with a nested item, a numbered list and a
 //! checklist, then the paragraph acts from buttons, the platform's colour
-//! picker and a `.kdoc` round trip. label#1 is the binding's own Document,
-//! folded from the same deltas, so it must spell what the core holds.
+//! picker and a `.kdoc` round trip, then a file carrying keys this kaya
+//! does not know (RD17). label#1 is the binding's own Document, folded from
+//! the same deltas, so it must spell what the core holds.
 
 const DOC: &str = "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs";
+
+const UNKNOWN: &str = r#"{"kaya": "document", "version": 1, "com.example.theme": {"page": "sepia"}, "paragraphs": [{"embed": "e1", "spans": [["Loose"]]}, {"com.example.pinned": true, "spans": [["Pinned"]]}]}"#;
 
 #[derive(Clone)]
 enum Msg {
@@ -16,6 +19,7 @@ enum Msg {
     Red,
     PickColour,
     Kdoc,
+    Unknown,
 }
 
 fn spell(runs: &[kaya::Run]) -> String {
@@ -73,6 +77,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         ("red", Msg::Red),
                         ("colour", Msg::PickColour),
                         ("kdoc", Msg::Kdoc),
+                        ("unknown", Msg::Unknown),
                     ] {
                         let button = tx.button(title).id();
                         msgs.on_click(button, msg);
@@ -124,15 +129,26 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let bytes = now.to_kdoc();
                 let back = kaya::Document::from_kdoc(&bytes).expect("kaya wrote a .kdoc it cannot read");
                 let status = format!(
-                    "kdoc {} bytes, read_only {}, same {}",
+                    "kdoc {} bytes, read_only {}, same {}, extra {}",
                     bytes.len(),
                     back.read_only.as_deref().unwrap_or("none"),
-                    back.document == now
+                    back.document == now,
+                    if back.document.extra.is_empty() { "none".to_owned() } else { back.document.extra.replace('"', "'") }
                 );
                 ctx.apply(|tx| {
                     tx.set_document(editor, &back.document);
                     tx.write(kdoc, status.clone());
                     tx.write(runs, spell(&back.document.runs));
+                });
+            }
+            Msg::Unknown => {
+                let file = kaya::Document::from_kdoc(UNKNOWN.as_bytes()).expect("the scene's file reads");
+                let status =
+                    format!("opened read_only {}, extra {}", file.read_only.as_deref().unwrap_or("none"), file.document.extra.replace('"', "'"));
+                ctx.apply(|tx| {
+                    tx.set_document(editor, &file.document);
+                    tx.write(kdoc, status.clone());
+                    tx.write(runs, spell(&file.document.runs));
                 });
             }
         }

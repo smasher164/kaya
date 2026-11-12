@@ -511,9 +511,17 @@ module Paragraph_align = struct
     | Justify -> "justify"
 end
 
-(* The attributes that cover whole paragraphs (RD1). *)
+(* The attributes that cover whole paragraphs (RD1, RD17;
+   crates/kaya/src/richdoc.rs is_paragraph_attr). *)
 let paragraph_attr name =
-  List.mem name [ "block"; "list"; "indent"; "checked"; "start"; "align" ]
+  let known = [ "block"; "list"; "indent"; "checked"; "start"; "align" ] in
+  let prefix = "para:" in
+  let n = String.length prefix in
+  List.mem name known
+  || String.starts_with ~prefix name
+     &&
+     let key = String.sub name n (String.length name - n) in
+     key <> "" && key <> "spans" && not (List.mem key known)
 
 (* A value's one spelling (crates/kaya/src/richdoc.rs, canonical_value): a
    colour in upper case. *)
@@ -538,9 +546,9 @@ let kdoc_values bytes =
 (* A [rich] textarea's text and runs, kept current by the binding from
    the edits it delivers. *)
 module Document = struct
-  type t = { text : string; runs : Run.t list }
+  type t = { text : string; runs : Run.t list; extra : string }
 
-  let create text = { text; runs = [] }
+  let create text = { text; runs = []; extra = "" }
 
   (* THE DOCUMENT COMES LAST, so a declaration reads as a pipeline:
      [Document.create doc |> Document.bold (0, 6) |> ...]. *)
@@ -589,9 +597,9 @@ module Document = struct
   let of_kdoc bytes =
     match kdoc_values (Kaya_runtime.kdoc_read bytes) with
     | Kaya_wire.Str refusal :: _ when refusal <> "" -> failwith refusal
-    | Kaya_wire.Str _ :: Kaya_wire.Str why :: Kaya_wire.Str text :: runs ->
+    | Kaya_wire.Str _ :: Kaya_wire.Str why :: Kaya_wire.Str extra :: Kaya_wire.Str text :: runs ->
         {
-          document = { text; runs = runs_of_values runs };
+          document = { text; runs = runs_of_values runs; extra };
           read_only = (if why = "" then None else Some why);
         }
     | values ->
@@ -604,7 +612,8 @@ module Document = struct
      [set_document] holds. *)
   let to_kdoc doc =
     let b = Buffer.create 64 in
-    Kaya_wire.encode_values b (Kaya_wire.Str doc.text :: run_values doc.runs);
+    Kaya_wire.encode_values b
+      (Kaya_wire.Str doc.extra :: Kaya_wire.Str doc.text :: run_values doc.runs);
     match kdoc_values (Kaya_runtime.kdoc_write (Buffer.contents b)) with
     | [ Kaya_wire.Str ""; Kaya_wire.Str file ] -> file
     | Kaya_wire.Str refusal :: _ -> invalid_arg ("kaya: to_kdoc: " ^ refusal)
@@ -2711,7 +2720,7 @@ let document_of_blob bytes : Document.t =
     at := next
   done;
   match List.rev !values with
-  | Kaya_wire.Str text :: rest -> { Document.text; runs = runs_of_values rest }
+  | Kaya_wire.Str text :: rest -> { Document.text; runs = runs_of_values rest; extra = "" }
   | _ ->
       invalid_arg
         (Printf.sprintf
@@ -2767,7 +2776,7 @@ let normalize_runs (runs : Run.t list) : Run.t list =
 let the_document app id : Document.t =
   match Hashtbl.find_opt app.documents id with
   | Some doc -> doc
-  | None -> { text = ""; runs = [] }
+  | None -> Document.create ""
 
 (* The core's own fold rule, over ANY document — a live mirror or a
    stamped copy's row field (crates/kaya/src/app.rs, [fold_edit];
@@ -2781,7 +2790,7 @@ let fold_edit (doc : Document.t) (start, stop) inserted (runs : Run.t list) : Do
      || not (boundary stop)
   then
     (* A mirror out of step with the core would splice garbage. *)
-    { Document.text = inserted; runs }
+    { doc with Document.text = inserted; runs }
   else begin
     let shift = String.length inserted - (stop - start) in
     let kept =
@@ -2808,7 +2817,7 @@ let fold_edit (doc : Document.t) (start, stop) inserted (runs : Run.t list) : Do
       String.sub doc.text 0 start ^ inserted
       ^ String.sub doc.text stop (len - stop)
     in
-    { Document.text; runs = normalize_runs (kept @ landed) }
+    { doc with Document.text; runs = normalize_runs (kept @ landed) }
   end
 
 (* The core's [fold_format], over any document. *)
@@ -2866,7 +2875,7 @@ let fold_row_document app node keys fold =
           let doc : Document.t =
             match List.nth_opt values field with
             | Some (Kaya_wire.Str bytes) -> document_of_blob bytes
-            | _ -> { text = ""; runs = [] }
+            | _ -> Document.create ""
           in
           let packed = Kaya_wire.Str (document_blob (fold doc)) in
           ( k,

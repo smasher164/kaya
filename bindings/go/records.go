@@ -209,11 +209,12 @@ func wireTag(t reflect.Type) (uint32, bool) {
 	return 0, false
 }
 
-// documentBlob is a Document's wire bytes: ONE flat value list — the
-// text, then four values per run (crates/kaya/src/wire.rs,
-// document_blob).
-func documentBlob(doc Document) []byte {
-	vals := make([]any, 0, 1+4*len(doc.Runs))
+// documentBlob is a Document's wire bytes: ONE flat value list — head, the
+// text, then four values per run (crates/kaya/src/wire.rs, document_blob,
+// read_kdoc_input).
+func documentBlob(doc Document, head ...any) []byte {
+	vals := make([]any, 0, len(head)+1+4*len(doc.Runs))
+	vals = append(vals, head...)
 	vals = append(vals, doc.Text)
 	for _, run := range doc.Runs {
 		vals = append(vals, int64(run.Range.Start), int64(run.Range.End), run.Name, run.Value)

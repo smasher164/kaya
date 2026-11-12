@@ -4842,6 +4842,17 @@ uint8_t kaya_text_key(uint64_t widget, uint32_t key, uint64_t start, uint64_t en
 uintptr_t kaya_text_markers(uint64_t widget, uint8_t *out, uintptr_t cap);
 
 /**
+ * Presentation side: what assistive technology is told of the list item
+ * holding UTF-8 byte `byte` beyond its text (docs/rich-document-plan.md
+ * RD18): `bullet, 2 of 3`, `checked, 1 of 2, level 2`; empty outside a list
+ * item. kaya_text_runs' contract.
+ *
+ * # Safety
+ * `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+ */
+uintptr_t kaya_text_item_speech(uint64_t widget, uint64_t byte, uint8_t *out, uintptr_t cap);
+
+/**
  * Presentation side: the rich flavour a copy of `start..end` (UTF-8 bytes)
  * puts on the clipboard beside the plain text: RTF, or HTML when `html` is
  * 1. kaya_text_runs' contract; 0 for an empty range.
@@ -4890,9 +4901,11 @@ uint32_t kaya_ink_from_dark(uint32_t rgb);
 /**
  * Guest side: a `.kdoc` file's bytes read (docs/rich-document-plan.md §4,
  * RD13). Answers a values list: Str refusal ("" when it read), Str
- * read-only reason ("" when the document can be edited), then the document
- * as a document field carries it (Str text, then I64 start, I64 end, Str
- * name, Str value per run, UTF-8 bytes). kaya_text_runs' contract.
+ * read-only reason ("" when the document can be edited), Str extra (the
+ * unknown top-level members as one JSON object's text, "" when none; RD17),
+ * then the document as a document field carries it (Str text, then I64
+ * start, I64 end, Str name, Str value per run, UTF-8 bytes). kaya_text_runs'
+ * contract.
  *
  * # Safety
  * `bytes` must describe a valid byte range or be NULL/0; `out` must point at
@@ -4901,10 +4914,10 @@ uint32_t kaya_ink_from_dark(uint32_t rgb);
 uintptr_t kaya_kdoc_read(const uint8_t *bytes, uintptr_t len, uint8_t *out, uintptr_t cap);
 
 /**
- * Guest side: a document (a document field's encoding, as kaya_kdoc_read
- * answers it after its two strings) written as a `.kdoc`. Answers a values
- * list: Str refusal ("" when it wrote), Str the file's UTF-8 text.
- * kaya_text_runs' contract.
+ * Guest side: a document written as a `.kdoc`. `doc` is a values list: Str
+ * extra, then the document as kaya_kdoc_read answers it after its three
+ * strings. Answers a values list: Str refusal ("" when it wrote), Str the
+ * file's UTF-8 text. kaya_text_runs' contract.
  *
  * # Safety
  * `doc` must describe a valid byte range; `out` must point at `cap`

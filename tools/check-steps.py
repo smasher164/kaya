@@ -2430,6 +2430,9 @@ AX_VERB = {
     # A checkbox's checked or pressed state (docs/media-player-plan.md M8).
     "checked_read": "expect_checked",
     "expanded": "expect_expanded",
+    # What Orca is told of the caret's list item, and the field's text (RD18).
+    "ax_item": "expect_ax_item",
+    "ax_text": "expect_ax_text",
 }
 
 

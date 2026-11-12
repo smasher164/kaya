@@ -269,7 +269,9 @@ PAD_EXTRAS = {
 # drive chrome no phone has; split/panes drive resize_window, which this
 # host rejects by design (DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem"]
-UNWIRED_SCENES = []
+# What VoiceOver is told of a drawn list marker waits on a ruling
+# (docs/rich-document-plan.md RD19).
+UNWIRED_SCENES = ["richdocax"]
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

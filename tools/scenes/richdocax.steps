@@ -1,0 +1,30 @@
+# WHAT A SCREEN READER IS TOLD OF A DRAWN LIST MARKER
+# (docs/rich-document-plan.md RD18, §11): the richdoc guest, read through the
+# platform's own accessibility tree. The marker is no text, so the field
+# tells the list item holding the caret beside its text, from the core's one
+# numbering; and the field's accessible text keeps its real newlines. GTK and
+# Compose only: what VoiceOver and Narrator are told is RD19's question.
+expect_title "richdoc"
+expect_ax_text textarea#0 "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs"
+select_text textarea#0 3:3
+expect_ax_item textarea#0 "<none>"
+select_text textarea#0 35:35
+expect_ax_item textarea#0 "bullet, 1 of 2"
+select_text textarea#0 44:44
+expect_ax_item textarea#0 "bullet, 1 of 1, level 2"
+select_text textarea#0 51:51
+expect_ax_item textarea#0 "bullet, 2 of 2"
+select_text textarea#0 64:64
+expect_ax_item textarea#0 "2., 2 of 2"
+select_text textarea#0 70:70
+expect_ax_item textarea#0 "checked, 1 of 2"
+select_text textarea#0 75:75
+expect_ax_item textarea#0 "not checked, 2 of 2"
+# The box's own click moves what the item tells.
+click_marker textarea#0 73
+expect_ax_item textarea#0 "checked, 2 of 2"
+# A Return at the end of the last item makes a new one, and the caret's
+# item tells its place.
+select_text textarea#0 77:77
+press return
+expect_ax_item textarea#0 "not checked, 3 of 3"

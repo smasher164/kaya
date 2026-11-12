@@ -1319,6 +1319,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_text_markers as *mut _,
             },
             NativeMethod {
+                name: "textItemSpeech".into(),
+                sig: "(JJ)Ljava/lang/String;".into(),
+                fn_ptr: present_text_item_speech as *mut _,
+            },
+            NativeMethod {
                 name: "textCopy".into(),
                 sig: "(JJJZ)Ljava/lang/String;".into(),
                 fn_ptr: present_text_copy as *mut _,
@@ -1781,6 +1786,17 @@ extern "system" fn present_text_markers<'a>(
 ) -> jni::sys::jstring {
     present_text_sized(env, |buf| unsafe {
         crate::capi::kaya_text_markers(widget as u64, buf.as_mut_ptr(), buf.len())
+    })
+}
+
+extern "system" fn present_text_item_speech<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass,
+    widget: jlong,
+    byte: jlong,
+) -> jni::sys::jstring {
+    present_text_sized(env, |buf| unsafe {
+        crate::capi::kaya_text_item_speech(widget as u64, byte as u64, buf.as_mut_ptr(), buf.len())
     })
 }
 

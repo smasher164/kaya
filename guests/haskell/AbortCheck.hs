@@ -351,7 +351,7 @@ main = do
       failWith
         ( "a Document field's model value is " ++ show other
             ++ ", wanted the blob's bytes as a binary Str" )
-  check (documentOfBlob reference == Document "abc" [Run (0, 1) "bold" (Flag True), Run (1, 3) "link" (Spelled "u")])
+  check (documentOfBlob reference == Document "abc" [Run (0, 1) "bold" (Flag True), Run (1, 3) "link" (Spelled "u")] "")
     ("the reference list read back as " ++ show (documentOfBlob reference))
 
   -- AND THE FOLD REACHES THE ROW: a stamped copy's edit folds into its

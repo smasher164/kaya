@@ -2515,7 +2515,7 @@ def secure_refusals(serial, name, extras, dump, log, failed):
     script = ""
     for flag, value in zip(extras, extras[1:]):
         if flag == "KAYA_SELFTEST_SCRIPT":
-            script = value.removeprefix("'").removesuffix("'")
+            script = value.removeprefix("'").removesuffix("'").replace("'\\''", "'")
     if not secure_scan.secrets_in(script):
         return []
     log.flush()
@@ -4691,6 +4691,12 @@ def check_real_prefs(suite, package, targets):
 _isolated = []
 
 
+def device_shell_quoted(text):
+    """One argument for the device's shell (docs/traps.md, a single quote in
+    an android leg's script)."""
+    return "'" + text.replace("'", "'\\''") + "'"
+
+
 def run_suite_legs(suite):
     """Every pooled leg from the lane module's roster, in its order, with no
     drain: the next suite's build and staging overlap this one's last legs.
@@ -4713,7 +4719,7 @@ def run_suite_legs(suite):
         if "remount" in flags:
             step, remount_expect = flags["remount"]
             extras += ["--es", "KAYA_RECREATE_AFTER", str(step)]
-        extras += ["--es", "KAYA_SELFTEST_SCRIPT", f"'{script_text}'"]
+        extras += ["--es", "KAYA_SELFTEST_SCRIPT", device_shell_quoted(script_text)]
         if flags.get("asset_dir"):
             extras += ["--es", "KAYA_ASSET_DIR", ASSET_ON_DEVICE]
         if flags.get("appearance"):

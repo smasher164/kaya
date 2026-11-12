@@ -170,6 +170,7 @@ module Kaya.Core
     runValues,
     runsOfValues,
     documentBlob,
+    documentBlobAfter,
     documentOfBlob,
     utf8Bytes,
     utf8Chars,
@@ -1142,7 +1143,10 @@ data Run = Run
 -- the edits it delivers.
 data Document = Document
   { text :: !Text,
-    runs :: ![Run]
+    runs :: ![Run],
+    -- | A @.kdoc@'s top-level members this kaya does not know, as one JSON
+    -- object's text; empty when none (docs\/rich-document-plan.md RD17).
+    extra :: !Text
   }
   deriving (Eq, Show)
 
@@ -1205,10 +1209,14 @@ runsOfValues _ = []
 -- 'setDocument' already ships (crates\/kaya\/src\/wire.rs,
 -- @document_blob@).
 documentBlob :: Document -> BS.ByteString
-documentBlob doc =
+documentBlob = documentBlobAfter []
+
+-- | 'documentBlob' with @head@ before the text (@read_kdoc_input@).
+documentBlobAfter :: [W.Value] -> Document -> BS.ByteString
+documentBlobAfter front doc =
   BL.toStrict
     ( toLazyByteString
-        (W.encodeValues (W.VStr (T.unpack doc.text) : runValues doc.runs))
+        (W.encodeValues (front ++ W.VStr (T.unpack doc.text) : runValues doc.runs))
     )
 
 -- | @documentBlob@'s inverse, over the same 8-byte-aligned layout
@@ -1223,7 +1231,7 @@ documentOfBlob bytes
             ++ " byte(s)"
         )
   | otherwise = case walk 8 (le32 0) of
-      (W.VStr txt : rest) -> Document (T.pack txt) (runsOfValues rest)
+      (W.VStr txt : rest) -> Document (T.pack txt) (runsOfValues rest) T.empty
       vs ->
         error
           ( "kaya: a document blob starts with its text; this one holds "

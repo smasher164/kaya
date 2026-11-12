@@ -630,12 +630,21 @@ let kayaRichNames = [
     "list", "indent", "checked", "start", "align", "color",
 ]
 
-/// docs/rich-document-plan.md §11: the attributes that cover whole paragraphs.
+/// docs/rich-document-plan.md §11: the attributes that cover whole paragraphs,
+/// a kept paragraph key among them (richdoc::is_paragraph_attr, RD17).
 let kayaParagraphNames: Set<String> = ["block", "list", "indent", "checked", "start", "align"]
 
-/// A name this arm keeps on the storage: kaya's, or an app's dotted one (RD8).
+func kayaIsParagraphName(_ name: String) -> Bool {
+    if kayaParagraphNames.contains(name) { return true }
+    guard name.hasPrefix("para:") else { return false }
+    let key = String(name.dropFirst(5))
+    return !key.isEmpty && key != "spans" && !kayaParagraphNames.contains(key)
+}
+
+/// A name this arm keeps on the storage: kaya's, an app's dotted one (RD8),
+/// or a kept paragraph key (RD17).
 func kayaRichNameKept(_ name: String) -> Bool {
-    kayaRichNames.contains(name) || name.contains(".")
+    kayaRichNames.contains(name) || name.contains(".") || kayaIsParagraphName(name)
 }
 
 /// RD7's table (richdoc::expands_at_end).
@@ -1144,19 +1153,19 @@ struct KayaTypedEdit {
         }
         return out
     }
-    var inline = kayaAttrs(start - 1).filter { !kayaParagraphNames.contains($0.key) && kayaRichExpandsAtEnd($0.key) }
+    var inline = kayaAttrs(start - 1).filter { !kayaIsParagraphName($0.key) && kayaRichExpandsAtEnd($0.key) }
     let before = ns.range(of: "\n", options: .backwards, range: NSRange(location: 0, length: min(start, ns.length)))
     let paraStart = before.location == NSNotFound ? 0 : NSMaxRange(before)
     var para: [String: String]
     if paraStart < ns.length {
-        para = kayaAttrs(paraStart).filter { kayaParagraphNames.contains($0.key) }
+        para = kayaAttrs(paraStart).filter { kayaIsParagraphName($0.key) }
     } else {
         para = ns.length > 0 && ns.character(at: ns.length - 1) == 0x0A
-            ? kayaAttrs(ns.length - 1).filter { kayaParagraphNames.contains($0.key) } : [:]
+            ? kayaAttrs(ns.length - 1).filter { kayaIsParagraphName($0.key) } : [:]
         if view.pendingAt == ns.length {
             for (key, value) in view.pendingOn {
                 let name = String(key.rawValue.dropFirst(kayaRichPrefix.count))
-                if kayaParagraphNames.contains(name) { para[name] = value }
+                if kayaIsParagraphName(name) { para[name] = value }
             }
             for key in view.pendingOff { para.removeValue(forKey: String(key.rawValue.dropFirst(kayaRichPrefix.count))) }
         }
@@ -1164,7 +1173,7 @@ struct KayaTypedEdit {
     if view.pendingAt == start {
         for (key, value) in view.pendingOn {
             let name = String(key.rawValue.dropFirst(kayaRichPrefix.count))
-            if kayaParagraphNames.contains(name) { para[name] = value } else { inline[name] = value }
+            if kayaIsParagraphName(name) { para[name] = value } else { inline[name] = value }
         }
         for key in view.pendingOff {
             let name = String(key.rawValue.dropFirst(kayaRichPrefix.count))
@@ -2445,19 +2454,98 @@ enum KayaVTrace {
     /// (an flock, released when `fd` closes).
     let kayaScreencaptureLock = "/tmp/kaya-screencapture.lock"
 
+    /// The turn's holder line, which every taker writes into the lock file so
+    /// a waiter that gives up can say who held it and how often it changed
+    /// hands (docs/traps.md, the screencapture turn held for 10 s).
+    func kayaScreencaptureHolder(_ fd: Int32) -> String {
+        var buf = [UInt8](repeating: 0, count: 256)
+        let n = pread(fd, &buf, buf.count, 0)
+        guard n > 0 else { return "" }
+        return String(decoding: buf[..<n], as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// THE QUEUE IN FRONT OF THE TURN: one file per waiter named by its
+    /// arrival, and only the oldest live waiter may try the lock, so the turn
+    /// goes first come first served (docs/traps.md, the screencapture turn
+    /// held for 10 s: polling the lock alone let a waiter watch it change
+    /// hands 13 times in 10 s).
+    let kayaScreencaptureQueue = "/tmp/kaya-screencapture.queue"
+
+    nonisolated(unsafe) private var kayaScreencaptureSeq: UInt64 = 0
+    private let kayaScreencaptureSeqLock = NSLock()
+
+    /// The queue's live waiters' names, oldest first; a waiter whose process
+    /// is gone is removed.
+    func kayaScreencaptureWaiters() -> [String] {
+        let names = ((try? FileManager.default.contentsOfDirectory(atPath: kayaScreencaptureQueue)) ?? []).sorted()
+        return names.filter { name in
+            let parts = name.split(separator: "-")
+            guard parts.count >= 2, let pid = Int32(parts[1]) else { return false }
+            if kill(pid, 0) == 0 || errno == EPERM { return true }
+            unlink("\(kayaScreencaptureQueue)/\(name)")
+            return false
+        }
+    }
+
+    /// HOW MANY CAPTURES MAY RUN AT ONCE: two concurrent lookups failed none
+    /// where eight failed 44% (docs/deferred.md's screencapture entry), and
+    /// one turn at a time could not serve a queue of six under load (docs/traps.md,
+    /// the screencapture turn held for 10 s).
+    let kayaScreencaptureSlots = 2
+
+    func kayaScreencaptureSlot(_ n: Int) -> String { n == 0 ? kayaScreencaptureLock : "\(kayaScreencaptureLock).\(n)" }
+
     func kayaScreencaptureTurn(_ bound: TimeInterval) -> (fd: Int32, said: String) {
-        let fd = open(kayaScreencaptureLock, O_CREAT | O_RDWR, 0o666)
-        guard fd >= 0 else { return (-1, "could not open \(kayaScreencaptureLock): errno \(errno)") }
+        var fds: [Int32] = []
+        for n in 0..<kayaScreencaptureSlots {
+            let fd = open(kayaScreencaptureSlot(n), O_CREAT | O_RDWR, 0o666)
+            guard fd >= 0 else {
+                fds.forEach { close($0) }
+                return (-1, "could not open \(kayaScreencaptureSlot(n)): errno \(errno)")
+            }
+            fds.append(fd)
+        }
+        if mkdir(kayaScreencaptureQueue, 0o777) == 0 { chmod(kayaScreencaptureQueue, 0o777) }
+        kayaScreencaptureSeqLock.lock()
+        kayaScreencaptureSeq += 1
+        let seq = kayaScreencaptureSeq
+        kayaScreencaptureSeqLock.unlock()
+        let arrival = DispatchTime.now().uptimeNanoseconds
+        let mine = String(format: "%020llu-%d-%llu", arrival, getpid(), seq)
+        let ticket = "\(kayaScreencaptureQueue)/\(mine)"
+        let made = open(ticket, O_CREAT | O_WRONLY, 0o666)
+        if made >= 0 { close(made) }
+        defer { unlink(ticket) }
         let from = Date()
-        while flock(fd, LOCK_EX | LOCK_NB) != 0 {
+        let aheadAtArrival = kayaScreencaptureWaiters().firstIndex(of: mine) ?? 0
+        var seen: [String] = []
+        var taken: Int32 = -1
+        while taken < 0 {
+            let waiters = made < 0 ? [mine] : kayaScreencaptureWaiters()
+            if (waiters.firstIndex(of: mine) ?? 0) < kayaScreencaptureSlots {
+                for fd in fds where taken < 0 && flock(fd, LOCK_EX | LOCK_NB) == 0 { taken = fd }
+                if taken >= 0 { break }
+            }
+            for fd in fds {
+                let holder = kayaScreencaptureHolder(fd)
+                if !holder.isEmpty, !seen.contains(holder) { seen.append(holder) }
+            }
             if Date().timeIntervalSince(from) > bound {
-                close(fd)
-                return (-1, "the host's screencapture turn (\(kayaScreencaptureLock)) was held for \(Int(bound)) s")
+                fds.forEach { close($0) }
+                let who = seen.isEmpty
+                    ? "by takers that wrote no holder line"
+                    : "while \(seen.count) turn(s) went to \(Set(seen.map { $0.split(separator: " ").prefix(2).joined(separator: " ") }).count) process(es), last \(seen[seen.count - 1])"
+                return (-1, "the host's \(kayaScreencaptureSlots) screencapture turns (\(kayaScreencaptureLock)) were held for \(Int(bound)) s \(who), \(aheadAtArrival) waiter(s) ahead of this one when it queued")
             }
             Thread.sleep(forTimeInterval: 0.01)
         }
+        for fd in fds where fd != taken { close(fd) }
+        let scene = ProcessInfo.processInfo.environment["KAYA_SELFTEST"] ?? ProcessInfo.processInfo.processName
+        let line = Array("pid \(getpid()) \(scene) took it at \(Int(Date().timeIntervalSince1970 * 1000)) ms\n".utf8)
+        _ = ftruncate(taken, 0)
+        _ = line.withUnsafeBufferPointer { pwrite(taken, $0.baseAddress, $0.count, 0) }
         let waited = Date().timeIntervalSince(from)
-        return (fd, waited < 0.05 ? "" : String(format: ", after %.2f s waiting for the host's screencapture turn", waited))
+        return (taken, waited < 0.05 ? "" : String(format: ", after %.2f s waiting for a screencapture turn", waited))
     }
 
     /// A red leg's picture of its own windows, taken in process at the first
@@ -17542,6 +17630,47 @@ private func kayaRunScript(_ script: String) {
                     #endif
                 }
                 if let trouble = selected { failures.append("select_text: \(trouble)") } else { kayaAwaitAnswer(selAnswered) }
+            case "expect_ax_item", "expect_ax_text":
+                // RD18 (docs/rich-document-plan.md §11): what the text view's
+                // own accessibility gives VoiceOver. The item read is the list
+                // item attributes on the caret's paragraph (AXListItemPrefix,
+                // index, level on the Mac), `<none>` when there are none.
+                let wantAx = kayaQuoted(Array(parts[2...]))
+                let itemRead = parts[0] == "expect_ax_item"
+                var gotAx: String? = nil
+                let axDeadline = Date().addingTimeInterval(5)
+                repeat {
+                    gotAx = DispatchQueue.main.sync { () -> String? in
+                        guard let node = kayaTextTarget(parts[1]) else { return nil }
+                        #if os(macOS)
+                            guard let view = kayaMacTextViews[node.id]?.view else { return "<no text view for \(parts[1])>" }
+                            if !itemRead { return view.accessibilityValue() ?? "<no value>" }
+                            let ns = view.string as NSString
+                            let paragraph = ns.paragraphRange(for: NSRange(location: view.selectedRange().location, length: 0))
+                            guard let said = view.accessibilityAttributedString(for: paragraph) else { return "<none>" }
+                            var parts: [String] = []
+                            if let prefix = said.attribute(.accessibilityListItemPrefix, at: 0, effectiveRange: nil) {
+                                parts.append("prefix \((prefix as? NSAttributedString)?.string ?? "\(prefix)")")
+                            }
+                            if let index = said.attribute(.accessibilityListItemIndex, at: 0, effectiveRange: nil) { parts.append("index \(index)") }
+                            if let level = said.attribute(.accessibilityListItemLevel, at: 0, effectiveRange: nil) { parts.append("level \(level)") }
+                            return parts.isEmpty ? "<none>" : parts.joined(separator: ", ")
+                        #else
+                            guard let view = kayaLiveUITextView(node.id) else { return "<no text view for \(parts[1]) on screen>" }
+                            if !itemRead { return view.accessibilityValue ?? "<no value>" }
+                            let hint = view.accessibilityHint ?? ""
+                            return hint.isEmpty ? "<none>" : hint
+                        #endif
+                    }
+                    if gotAx == nil || gotAx == wantAx { break }
+                    usleep(50_000)
+                } while Date() < axDeadline
+                let axWhat = itemRead ? "ax item" : "ax text"
+                if let gotAx {
+                    if gotAx == wantAx { observed.append("\(axWhat) \"\(wantAx)\"") } else { failures.append("\(axWhat) \"\(gotAx)\", wanted \"\(wantAx)\"") }
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
             case "expect_markers":
                 // THE MARKERS THE ARM DREW (docs/rich-document-plan.md §11),
                 // read off the fragments' record, never the core's numbering;
@@ -39864,7 +39993,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
             var attrs = newTypingAttributes
             for key in attrs.keys where key.rawValue.hasPrefix(kayaRichPrefix) {
                 let name = String(key.rawValue.dropFirst(kayaRichPrefix.count))
-                if !kayaParagraphNames.contains(name), !kayaRichExpandsAtEnd(name) {
+                if !kayaIsParagraphName(name), !kayaRichExpandsAtEnd(name) {
                     attrs.removeValue(forKey: key)
                 }
             }
@@ -40664,7 +40793,7 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
     // A paragraph act never reaches an arm over the selection (the core
     // resolves it, docs/rich-document-plan.md §11) but for the empty final
     // paragraph's, which the core armed itself: armed here at the text's end.
-    if name != "block", kayaParagraphNames.contains(name) {
+    if name != "block", kayaIsParagraphName(name) {
         let end = storage.length
         if view.pendingAt != end {
             view.pendingOn.removeAll()
@@ -41985,7 +42114,7 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
             ? storage.attributes(at: caret - 1, effectiveRange: nil) : [:]
         for name in kayaRichNames {
             let key = kayaRichKey(name)
-            if kayaParagraphNames.contains(name) || kayaRichExpandsAtEnd(name), let value = before[key] as? String {
+            if kayaIsParagraphName(name) || kayaRichExpandsAtEnd(name), let value = before[key] as? String {
                 attrs[key] = value
             } else {
                 attrs.removeValue(forKey: key)
@@ -42317,7 +42446,7 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
         // A paragraph act never reaches an arm over the selection (the core
         // resolves it, docs/rich-document-plan.md §11) but for the empty final
         // paragraph's, which the core armed itself: armed here at the text's end.
-        if name != "block", kayaParagraphNames.contains(name) {
+        if name != "block", kayaIsParagraphName(name) {
             let end = storage.length
             if view.pendingAt != end {
                 view.pendingOn.removeAll()

@@ -6396,6 +6396,24 @@ def richdoc_file_rows(snake, pascal, camel):
     ]
 
 
+def richdoc_field_rows(snake, pascal, camel):
+    """A Document field every binding carries (RD17's extra): Haskell's
+    record sits in Kaya/Core.hs, Java's is read through an accessor."""
+    F = RICH_FILES
+    return [
+        ("rust", F["rust"], rf"^    pub {snake}: String,"),
+        ("python", F["python"], rf"^        self\.{snake}: str = "),
+        ("go", F["go"], rf"^\t{pascal} string$"),
+        ("csharp", F["csharp"], rf"public string {pascal} {{ get;"),
+        ("java", F["java"], rf"public String {camel}\(\) {{"),
+        ("swift", F["swift"], rf"^    public var {camel}: String = "),
+        ("haskell", "bindings/haskell/Kaya/Core.hs", rf"^    {camel} :: !Text$"),
+        ("ocaml", F["ocaml"],
+         rf"type t = {{ text : string; runs : Run\.t list; {snake} : string }}"),
+        ("js", F["js"], rf"^  {camel}: string;$"),
+    ]
+
+
 RICHDOC_PARTS = [
     ("ListKind", richdoc_type_rows, ("list_kind", "ListKind", "listKind")),
     ("ParagraphAlign", richdoc_type_rows,
@@ -6422,6 +6440,7 @@ RICHDOC_PARTS = [
     ("Selection.color", richdoc_read_rows, ("color", "Color", "color")),
     ("from_kdoc", richdoc_file_rows, ("from_kdoc", "FromKdoc", "fromKdoc")),
     ("to_kdoc", richdoc_file_rows, ("to_kdoc", "ToKdoc", "toKdoc")),
+    ("Document.extra", richdoc_field_rows, ("extra", "Extra", "extra")),
 ]
 
 richdoc_seen = {lang: 0 for lang in RICH_FILES}
@@ -6444,6 +6463,7 @@ for _fake_what, _fake_rows_of, _fake_names in (
         ("builder", richdoc_builder_rows, ("kaya_fake_build", "KayaFakeBuild", "kayaFakeBuild")),
         ("act", richdoc_act_rows, ("kaya_fake_act", "KayaFakeAct", "kayaFakeAct")),
         ("read", richdoc_read_rows, ("kaya_fake_read", "KayaFakeRead", "kayaFakeRead")),
+        ("field", richdoc_field_rows, ("kaya_fake_field", "KayaFakeField", "kayaFakeField")),
 ):
     fake = rich_findings(_fake_what, _fake_rows_of(*_fake_names))
     fired = sum(1 for m in fake if "has no sugar for the rich" in m)

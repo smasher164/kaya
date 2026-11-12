@@ -13909,7 +13909,7 @@ fn rich_format_range(
     if !rich_is_on(widget) {
         return Some(format!("widget {widget} holds no rich document"));
     }
-    if !crate::wire::RICH_ATTRS.iter().any(|(_, word)| *word == name) && !crate::richdoc::is_extension(name) {
+    if !crate::wire::RICH_ATTRS.iter().any(|(_, word)| *word == name) && !crate::richdoc::is_kept_name(name) {
         return Some(format!("{name:?} is not a kaya attribute"));
     }
     // `body` IS the removal, and the core's paragraph expansion for a `block`
@@ -25809,6 +25809,49 @@ impl crate::harness::Stage for WinUiStage {
             Ok(Ok((richdoc::drawn_spelling(widget), numbered)))
         })
         .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
+    }
+
+    /// RD18's measurement of what Narrator is told of the caret's list item:
+    /// the field peer's help text, full description and item status, then the
+    /// drawn marker's own peer (a separate element beside the text) as
+    /// `marker <role>/<name>`; `<none>` when the field tells nothing and no
+    /// marker is drawn there.
+    fn ax_item(&self, t: crate::harness::Target) -> Result<String, String> {
+        Self::on_ui_read(move |core| {
+            use bindings::Microsoft::UI::Xaml::Automation::Peers::{AutomationHeadingLevel, FrameworkElementAutomationPeer};
+            let Some(widget) = rich_target_id(core, t) else { return Ok(Err("no such target".to_owned())) };
+            let Some(field) = textarea_by_id(core, widget) else { return Ok(Err(format!("widget {widget} is no live textarea"))) };
+            let fe: bindings::Microsoft::UI::Xaml::FrameworkElement = field.cast()?;
+            let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&fe)?;
+            let mut said: Vec<String> = Vec::new();
+            for (what, value) in [
+                ("help", peer.GetHelpText()?.to_string()),
+                ("description", peer.GetFullDescription()?.to_string()),
+                ("status", peer.GetItemStatus()?.to_string()),
+            ] {
+                if !value.is_empty() {
+                    said.push(format!("{what} {value}"));
+                }
+            }
+            let caret = core.scene.rich_selection(WidgetId(widget)).map_or(0, |s| s.start);
+            let start = core.scene.rich_markers(WidgetId(widget)).unwrap_or_default().into_iter().rev().find(|m| m.start <= caret).map(|m| m.start);
+            if let Some(element) = start.and_then(|at| richdoc::drawn_elements(widget).into_iter().find(|(s, _, _)| *s == at).map(|(_, _, e)| e)) {
+                let fe: bindings::Microsoft::UI::Xaml::FrameworkElement = element.cast()?;
+                let marker = FrameworkElementAutomationPeer::CreatePeerForElement(&fe)?;
+                let toggles = marker.cast::<bindings::Microsoft::UI::Xaml::Automation::Provider::IToggleProvider>().is_ok();
+                let role = ax_role(marker.GetHeadingLevel()? != AutomationHeadingLevel::None, toggles, &marker.GetClassName()?.to_string(), marker.GetAutomationControlType()?);
+                said.push(format!("marker {role}/{}", marker.GetName()?));
+            }
+            Ok(Ok(if said.is_empty() { "<none>".to_owned() } else { said.join(", ") }))
+        })
+        .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
+    }
+
+    /// WinUI's in-process peer for a text control publishes no Text pattern
+    /// (ax's note above), and an out-of-process UIA client is barred at the
+    /// Cargo.toml, so the field's accessible text cannot be read here.
+    fn ax_text(&self, _t: crate::harness::Target) -> Result<String, String> {
+        Err("WinUI's in-process peer for a RichEditBox publishes no Text pattern, and an out-of-process UIA client is barred (Cargo.toml)".to_owned())
     }
 
     /// The drawn box's own toggle, through its automation peer — the door a

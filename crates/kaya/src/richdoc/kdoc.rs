@@ -5,7 +5,10 @@ use std::collections::BTreeMap;
 
 use serde_json::Value as Json;
 
-use super::{canonical_value, final_state, is_extension, is_paragraph_attr, normalize_runs, para_attrs, paragraphs, structure_refusal};
+use super::{
+    PARA_PREFIX, canonical_value, final_state, is_extension, is_kept_name, is_para_key, is_paragraph_attr, normalize_runs, para_attrs,
+    paragraph_names, paragraphs, structure_refusal,
+};
 use crate::protocol::TextRun;
 
 pub(crate) const VERSION: u64 = 1;
@@ -21,8 +24,14 @@ const FLAGS: &[&str] = &["bold", "italic", "underline", "strike", "code"];
 pub struct Read {
     pub text: String,
     pub runs: Vec<TextRun>,
+    /// The top-level members this kaya does not know, as one JSON object's
+    /// text, "" when there are none (RD17 A).
+    pub extra: String,
     pub read_only: Option<String>,
 }
+
+/// The members a `.kdoc`'s top level spells for kaya itself.
+const DOCUMENT_KEYS: &[&str] = &["kaya", "version", "requires", "paragraphs", "history"];
 
 fn json_string(out: &mut String, s: &str) {
     out.push('"');
@@ -40,12 +49,22 @@ fn json_string(out: &mut String, s: &str) {
     out.push('"');
 }
 
-/// An extension's value: JSON other than a string is written as itself, so a
-/// value read from a file goes back out unchanged; anything else is a string.
+/// A kept name's value: text that is JSON is written as itself, anything
+/// else as a string; `kept_value` is the reading half, so a file's value goes
+/// back out unchanged.
 fn extension_value(out: &mut String, value: &str) {
     match serde_json::from_str::<Json>(value) {
-        Ok(Json::String(_)) | Err(_) => json_string(out, value),
         Ok(_) => out.push_str(value),
+        Err(_) => json_string(out, value),
+    }
+}
+
+/// A kept name's value from the file: a string is its text unless that text
+/// would read back as JSON (`"7"`, `"true"`), which keeps its quotes.
+fn kept_value(v: &Json) -> String {
+    match v {
+        Json::String(s) if serde_json::from_str::<Json>(s).is_err() => s.clone(),
+        other => other.to_string(),
     }
 }
 
@@ -59,14 +78,33 @@ fn mark_value(out: &mut String, name: &str, value: &str) {
     }
 }
 
+/// `extra`'s members, or why it is not the unknown top level of a document.
+fn extra_members(extra: &str) -> Result<serde_json::Map<String, Json>, String> {
+    if extra.is_empty() {
+        return Ok(serde_json::Map::new());
+    }
+    let Ok(Json::Object(members)) = serde_json::from_str::<Json>(extra) else {
+        return Err(format!("the document's extra is {extra:?}, and it is a JSON object's text or empty"));
+    };
+    if let Some(key) = members.keys().find(|k| DOCUMENT_KEYS.contains(&k.as_str())) {
+        return Err(format!("the document's extra carries {key:?}, which the file spells for kaya itself"));
+    }
+    Ok(members)
+}
+
 /// The document as a `.kdoc`, or why it cannot be one: the same walls
-/// set_rich_text holds (a vocabulary name or an app's dotted name, a
-/// canonical value, paragraph attributes over whole paragraphs, RD2's scope).
-pub fn write(text: &str, runs: &[TextRun]) -> Result<String, String> {
+/// set_rich_text holds (a vocabulary name or a kept name, a canonical value,
+/// paragraph attributes over whole paragraphs, RD2's scope), and `extra`
+/// written back as the top-level members it holds.
+pub fn write(text: &str, runs: &[TextRun], extra: &str) -> Result<String, String> {
+    let members = extra_members(extra)?;
     for run in runs {
         let known = crate::wire::RICH_ATTRS.iter().any(|(_, n)| *n == run.name);
-        if !known && !is_extension(&run.name) {
-            return Err(format!("{:?} is not a kaya attribute nor an app's dotted name", run.name));
+        if !known && !is_kept_name(&run.name) {
+            return Err(format!(
+                "{:?} is not a kaya attribute, an app's dotted name nor a {PARA_PREFIX} paragraph key",
+                run.name
+            ));
         }
         if run.range.start > run.range.end || run.range.end as usize > text.len() {
             return Err(format!("the {} run {}..{} is outside the {}-byte text", run.name, run.range.start, run.range.end, text.len()));
@@ -91,19 +129,37 @@ pub fn write(text: &str, runs: &[TextRun]) -> Result<String, String> {
         return Err(why);
     }
     let mut out = String::new();
-    out.push_str("{\n  \"kaya\": \"document\",\n  \"version\": 1,\n  \"requires\": [],\n  \"paragraphs\": [\n");
+    out.push_str("{\n  \"kaya\": \"document\",\n  \"version\": 1,\n  \"requires\": [],\n");
+    for (key, value) in &members {
+        out.push_str("  ");
+        json_string(&mut out, key);
+        out.push_str(": ");
+        out.push_str(&value.to_string());
+        out.push_str(",\n");
+    }
+    out.push_str("  \"paragraphs\": [\n");
     let paras = paragraphs(text);
+    let names = paragraph_names(&runs);
     for (i, para) in paras.iter().enumerate() {
         out.push_str("    {");
         let attrs = para_attrs(&runs, para, &state);
-        for name in super::PARAGRAPH_ATTRS {
-            if let Some(value) = attrs.get(*name) {
-                json_string(&mut out, name);
-                out.push_str(": ");
-                match *name {
-                    "indent" | "start" => out.push_str(value),
-                    "checked" => out.push_str("true"),
-                    _ => json_string(&mut out, value),
+        for name in &names {
+            if let Some(value) = attrs.get(name) {
+                match name.strip_prefix(PARA_PREFIX) {
+                    Some(key) => {
+                        json_string(&mut out, key);
+                        out.push_str(": ");
+                        extension_value(&mut out, value);
+                    }
+                    None => {
+                        json_string(&mut out, name);
+                        out.push_str(": ");
+                        match name.as_str() {
+                            "indent" | "start" => out.push_str(value),
+                            "checked" => out.push_str("true"),
+                            _ => json_string(&mut out, value),
+                        }
+                    }
                 }
                 out.push_str(", ");
             }
@@ -201,10 +257,7 @@ fn paragraph_value(name: &str, v: &Json, index: usize) -> Result<Option<String>,
 
 fn mark_from(name: &str, v: &Json, index: usize) -> Result<Option<String>, String> {
     if is_extension(name) {
-        return Ok(Some(match v {
-            Json::String(s) => s.clone(),
-            other => other.to_string(),
-        }));
+        return Ok(Some(kept_value(v)));
     }
     let raw = match (name, v) {
         (n, Json::Bool(true)) if FLAGS.contains(&n) => crate::protocol::FLAG_VALUE.to_owned(),
@@ -251,11 +304,9 @@ pub fn read(bytes: &[u8]) -> Result<Read, String> {
         }
         Some(other) => return Err(format!("requires is {}, and it is a list of names", kind_name(other))),
     }
-    for key in root.keys() {
-        if !matches!(key.as_str(), "kaya" | "version" | "requires" | "paragraphs" | "history") {
-            lacks.push(format!("it carries the document key {key:?}"));
-        }
-    }
+    let extra: serde_json::Map<String, Json> =
+        root.iter().filter(|(k, _)| !DOCUMENT_KEYS.contains(&k.as_str())).map(|(k, v)| (k.clone(), v.clone())).collect();
+    let extra = if extra.is_empty() { String::new() } else { Json::Object(extra).to_string() };
     let Some(Json::Array(list)) = root.get("paragraphs") else {
         return Err("the document has no paragraphs list".to_owned());
     };
@@ -306,7 +357,12 @@ pub fn read(bytes: &[u8]) -> Result<Read, String> {
                     attrs.insert(key.clone(), value);
                 }
             } else {
-                lacks.push(format!("it carries the paragraph key {key:?}"));
+                let name = format!("{PARA_PREFIX}{key}");
+                if is_para_key(&name) {
+                    attrs.insert(name, kept_value(v));
+                } else {
+                    lacks.push(format!("it carries the paragraph key {key:?}"));
+                }
             }
         }
         if let Some(why) = super::scope_refusal(index, &attrs) {
@@ -322,7 +378,7 @@ pub fn read(bytes: &[u8]) -> Result<Read, String> {
     let read_only = (!lacks.is_empty()).then(|| {
         format!("this kaya cannot keep everything in the document through an edit: {}", lacks.join("; "))
     });
-    Ok(Read { text, runs, read_only })
+    Ok(Read { text, runs, extra, read_only })
 }
 
 /// The text and runs, newlines carried the canonical way (§11): an empty
@@ -411,12 +467,12 @@ mod tests {
             run(47, 50, "link", "https://kaya.dev/a?b=\"c\""),
             run(48, 50, "com.example.comment", "{\"id\":7}"),
         ]);
-        let file = write(text, &runs).expect("writes");
+        let file = write(text, &runs, "").expect("writes");
         let back = read(file.as_bytes()).expect("reads");
         assert_eq!(back.read_only, None);
         assert_eq!(back.text, text);
         assert_eq!(spelled(&back.runs), spelled(&runs), "file:\n{file}");
-        assert_eq!(write(&back.text, &back.runs).unwrap(), file);
+        assert_eq!(write(&back.text, &back.runs, "").unwrap(), file);
     }
 
     #[test]
@@ -424,7 +480,7 @@ mod tests {
         let file = "{\n  \"kaya\": \"document\",\n  \"version\": 1,\n  \"requires\": [],\n  \"paragraphs\": [\n    {\"block\": \"heading1\", \"spans\": [[\"Notes on walking\"]]},\n    {\"spans\": [[\"A good walk has \"], [\"no plan\", {\"italic\": true}], [\" beyond the first turning.\"]]},\n    {\"list\": \"bullet\", \"spans\": [[\"a map you can fold with one hand\"]]},\n    {\"list\": \"bullet\", \"indent\": 1, \"spans\": [[\"water, and \"], [\"more\", {\"color\": \"#C4554D\"}], [\" than you think\"]]},\n    {\"list\": \"check\", \"checked\": true, \"spans\": [[\"something to read\"]]}\n  ]\n}\n";
         let back = read(file.as_bytes()).expect("reads");
         assert_eq!(back.read_only, None);
-        assert_eq!(write(&back.text, &back.runs).unwrap(), file);
+        assert_eq!(write(&back.text, &back.runs, "").unwrap(), file);
         assert!(spelled(&back.runs).contains("list=bullet"));
     }
 
@@ -432,7 +488,7 @@ mod tests {
     fn empty_paragraphs_keep_their_attributes() {
         let text = "a\n\nb\n";
         let runs = normalize_runs(vec![run(0, 5, "list", "bullet"), run(2, 3, "indent", "1")]);
-        let file = write(text, &runs).unwrap();
+        let file = write(text, &runs, "").unwrap();
         assert!(file.contains("{\"list\": \"bullet\", \"indent\": 1, \"spans\": []}"), "{file}");
         let back = read(file.as_bytes()).unwrap();
         assert_eq!(back.text, text);
@@ -461,10 +517,29 @@ mod tests {
         assert_eq!(spelled(&got.runs), "0:2 bold=true|0:2 com.example.note=x");
         let newer = read(br#"{"kaya": "document", "version": 1, "paragraphs": [{"spans": [["hi", {"highlight": "mint"}]]}]}"#).unwrap();
         assert!(newer.read_only.unwrap().contains("the mark \"highlight\""));
-        let para_key = read(br#"{"kaya": "document", "version": 1, "paragraphs": [{"com.example.pinned": true, "spans": []}]}"#).unwrap();
-        assert!(para_key.read_only.unwrap().contains("the paragraph key \"com.example.pinned\""));
         let history = read(br#"{"kaya": "document", "version": 1, "history": "AAAA", "paragraphs": [{"spans": []}]}"#).unwrap();
-        assert_eq!(history.read_only, None);
+        assert_eq!((history.read_only, history.extra.as_str()), (None, ""));
+        let stray = read(br#"{"kaya": "document", "version": 1, "paragraphs": [{"spans": [["hi", {"para:x.y": true}]]}]}"#).unwrap();
+        assert!(stray.read_only.unwrap().contains("the mark \"para:x.y\""), "a para: name is never a mark");
+    }
+
+    /// RD17 A: paragraph keys ride para: runs and the top level's unknown
+    /// members ride extra, so the file is editable and writes them back.
+    #[test]
+    fn unknown_paragraph_and_document_keys_are_kept() {
+        let file = "{\n  \"kaya\": \"document\",\n  \"version\": 1,\n  \"requires\": [],\n  \"com.example.theme\": {\"page\":\"sepia\"},\n  \"embeds\": [],\n  \"paragraphs\": [\n    {\"list\": \"bullet\", \"com.example.pinned\": true, \"embed\": \"e1\", \"spans\": [[\"a\"]]},\n    {\"com.example.n\": \"7\", \"com.example.s\": \"x\", \"spans\": []},\n    {\"spans\": [[\"b\"]]}\n  ]\n}\n";
+        let got = read(file.as_bytes()).unwrap();
+        assert_eq!(got.read_only, None);
+        assert_eq!(got.extra, r#"{"com.example.theme":{"page":"sepia"},"embeds":[]}"#);
+        assert_eq!(
+            spelled(&got.runs),
+            "0:1 list=bullet|0:1 para:com.example.pinned=true|0:1 para:embed=e1|2:3 para:com.example.n=\"7\"|2:3 para:com.example.s=x"
+        );
+        assert_eq!(write(&got.text, &got.runs, &got.extra).unwrap(), file);
+        assert!(write("a", &[], r#"{"version": 2}"#).unwrap_err().contains("spells for kaya itself"));
+        assert!(write("a", &[], "[1]").unwrap_err().contains("JSON object's text"));
+        assert!(write("ab\nc", &[run(1, 4, "para:com.example.pinned", "true")], "").unwrap_err().contains("does not cover paragraph 0"));
+        assert!(write("a", &[run(0, 1, "para:list", "bullet")], "").unwrap_err().contains("para: paragraph key"));
     }
 
     #[test]
@@ -474,7 +549,7 @@ mod tests {
             .contains("a heading1 and a list item"));
         assert!(read(br#"{"kaya": "document", "version": 1, "paragraphs": [{"spans": [["a\nb"]]}]}"#).unwrap_err().contains("line break"));
         assert!(read(br#"{"kaya": "document", "version": 1, "paragraphs": [{"indent": 9, "spans": []}]}"#).unwrap_err().contains("not an indent"));
-        assert!(write("ab", &[run(0, 1, "list", "bullet")]).unwrap_err().contains("does not cover paragraph 0"));
-        assert!(write("ab", &[run(0, 2, "color", "#abcdef")]).unwrap_err().contains("#ABCDEF"));
+        assert!(write("ab", &[run(0, 1, "list", "bullet")], "").unwrap_err().contains("does not cover paragraph 0"));
+        assert!(write("ab", &[run(0, 2, "color", "#abcdef")], "").unwrap_err().contains("#ABCDEF"));
     }
 }

@@ -3395,7 +3395,24 @@ pub(crate) fn values_bytes(values: &[Value]) -> Vec<u8> {
 pub(crate) fn read_document_blob(bytes: &[u8]) -> (String, Vec<TextRun>) {
     let refuse = |_: u64| -> Option<Arc<[u8]>> { None };
     let mut r = Reader { buf: bytes, at: 0, blobs: &refuse };
+    document_values(&r.path())
+}
+
+/// kaya_kdoc_write's input: the document's `extra` (docs/rich-document-plan.md
+/// RD17), then the document as a document field carries it.
+pub(crate) fn read_kdoc_input(bytes: &[u8]) -> (String, String, Vec<TextRun>) {
+    let refuse = |_: u64| -> Option<Arc<[u8]>> { None };
+    let mut r = Reader { buf: bytes, at: 0, blobs: &refuse };
     let values = r.path();
+    let extra = match values.first() {
+        Some(Value::Str(s)) => s.clone(),
+        other => panic!("kaya: a .kdoc write starts with the document's extra, this one with {other:?}"),
+    };
+    let (text, runs) = document_values(&values[1..]);
+    (extra, text, runs)
+}
+
+fn document_values(values: &[Value]) -> (String, Vec<TextRun>) {
     let text = match values.first() {
         Some(Value::Str(s)) => s.clone(),
         other => panic!(

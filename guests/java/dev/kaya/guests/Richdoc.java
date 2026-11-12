@@ -10,9 +10,10 @@ import java.util.List;
  * tools/scenes/richdoc.steps (docs/rich-document-plan.md §9 step 2): a
  * heading, a body paragraph with a preset colour, a bullet list with a
  * nested item, a numbered list and a checklist, then the paragraph acts from
- * buttons, the platform's colour picker and a {@code .kdoc} round trip.
- * label#1 is the binding's own Document, folded from the same deltas, so it
- * must spell what the core holds.
+ * buttons, the platform's colour picker and a {@code .kdoc} round trip, then
+ * a file carrying keys this kaya does not know (RD17). label#1 is the
+ * binding's own Document, folded from the same deltas, so it must spell what
+ * the core holds.
  */
 public final class Richdoc {
     /** A SELF-REFERENCE, not a smuggle: the textarea's own onEdit reads
@@ -24,6 +25,12 @@ public final class Richdoc {
     /** BYTE-IDENTICAL to guests/rust/richdoc.rs's DOC. */
     private static final String DOC =
             "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs";
+
+    /** BYTE-IDENTICAL to guests/rust/richdoc.rs's UNKNOWN. */
+    private static final String UNKNOWN =
+            "{\"kaya\": \"document\", \"version\": 1, \"com.example.theme\": {\"page\": \"sepia\"}, "
+            + "\"paragraphs\": [{\"embed\": \"e1\", \"spans\": [[\"Loose\"]]}, "
+            + "{\"com.example.pinned\": true, \"spans\": [[\"Pinned\"]]}]}";
 
     private static String spell(List<KayaApp.TextRun> runs) {
         List<String> parts = new ArrayList<>();
@@ -91,11 +98,21 @@ public final class Richdoc {
                         KayaApp.Document now = app.document(refs.editor);
                         byte[] bytes = now.toKdoc();
                         KayaApp.Kdoc back = KayaApp.Document.fromKdoc(bytes);
+                        String extra = back.document().extra().replace('"', '\'');
                         t.setDocument(refs.editor, back.document());
                         t.write(kdoc, "kdoc " + bytes.length + " bytes, read_only "
                                 + back.readOnly().orElse("none") + ", same "
-                                + back.document().equals(now));
+                                + back.document().equals(now) + ", extra "
+                                + (extra.isEmpty() ? "none" : extra));
                         t.write(runs, spell(back.document().runs()));
+                    });
+                    tx.button("unknown", t -> { // button#5
+                        KayaApp.Kdoc file = KayaApp.Document.fromKdoc(
+                                UNKNOWN.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                        t.setDocument(refs.editor, file.document());
+                        t.write(kdoc, "opened read_only " + file.readOnly().orElse("none") + ", extra "
+                                + file.document().extra().replace('"', '\''));
+                        t.write(runs, spell(file.document().runs()));
                     });
                 });
             }));

@@ -2,8 +2,9 @@
 // docs/rich-document-plan.md §9 step 2): a heading, a body paragraph with a
 // preset colour, a bullet list with a nested item, a numbered list and a
 // checklist, then the paragraph acts from buttons, the platform's colour
-// picker and a `.kdoc` round trip. label#1 is the binding's own Document,
-// folded from the same deltas, so it must spell what the core holds.
+// picker and a `.kdoc` round trip, then a file carrying keys this kaya does
+// not know (RD17). label#1 is the binding's own Document, folded from the
+// same deltas, so it must spell what the core holds.
 
 import * as kaya from "kaya-gui";
 
@@ -11,6 +12,10 @@ const app = new kaya.App();
 
 // BYTE-IDENTICAL to guests/rust/richdoc.rs's DOC.
 const DOC = "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs";
+
+// BYTE-IDENTICAL to guests/rust/richdoc.rs's UNKNOWN.
+const UNKNOWN =
+  '{"kaya": "document", "version": 1, "com.example.theme": {"page": "sepia"}, "paragraphs": [{"embed": "e1", "spans": [["Loose"]]}, {"com.example.pinned": true, "spans": [["Pinned"]]}]}';
 
 function spell(runs: readonly kaya.Run[]): string {
   return runs
@@ -42,9 +47,17 @@ function onKdoc(): void {
   const now = editor.document();
   const bytes = now.toKdoc();
   const back = kaya.Document.fromKdoc(bytes);
+  const extra = back.document.extra.replaceAll('"', "'") || "none";
   editor.setDocument(back.document);
-  kdoc.set(`kdoc ${bytes.length} bytes, read_only ${back.readOnly ?? "none"}, same ${back.document.equals(now)}`);
+  kdoc.set(`kdoc ${bytes.length} bytes, read_only ${back.readOnly ?? "none"}, same ${back.document.equals(now)}, extra ${extra}`);
   runs.set(spell(back.document.runs));
+}
+
+function onUnknown(): void {
+  const file = kaya.Document.fromKdoc(new TextEncoder().encode(UNKNOWN));
+  editor.setDocument(file.document);
+  kdoc.set(`opened read_only ${file.readOnly ?? "none"}, extra ${file.document.extra.replaceAll('"', "'")}`);
+  runs.set(spell(file.document.runs));
 }
 
 const { last, runs, kdoc, editor } = app.window({ title: "richdoc", width: 560, height: 620 }, () => {
@@ -69,6 +82,7 @@ const { last, runs, kdoc, editor } = app.window({ title: "richdoc", width: 560, 
       kaya.button("red", { onClick: () => editor.color("#DD1F24") }); // button#2
       kaya.button("colour", { onClick: () => editor.pickTextColor() }); // button#3
       kaya.button("kdoc", { onClick: onKdoc }); // button#4
+      kaya.button("unknown", { onClick: onUnknown }); // button#5
     });
     return editor;
   });

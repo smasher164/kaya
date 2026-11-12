@@ -2021,6 +2021,20 @@ if (isMainThread) {
     "a ranged block act with `body` is the REMOVAL: removed 1 on the wire and the run gone from the fold",
     shipped.flat().some((r) => sameBytes(r, wire.tx_format_text(quietEditor.id, 1, 1, 13, 24, ["block", ""]))) && spell(quietEditor.document().runs) === "2:5 italic",
   );
+  shipped.length = 0;
+  app.build(() => {
+    quietEditor.formatRange([14, 16], "para:com.example.pinned", "x");
+    quietEditor.formatRange([14, 16], "para:list", "x");
+  });
+  richCheck(
+    "a ranged para: key snaps to its whole paragraph as a paragraph attribute does, and para:list does not (RD17 A)",
+    shipped.flat().some((r) => sameBytes(r, wire.tx_format_text(quietEditor.id, 0, 1, 13, 24, ["para:com.example.pinned", "x"]))) &&
+      shipped.flat().some((r) => sameBytes(r, wire.tx_format_text(quietEditor.id, 0, 1, 14, 16, ["para:list", "x"]))),
+  );
+  app.build(() => {
+    quietEditor.unformatRange([13, 24], "para:com.example.pinned");
+    quietEditor.unformatRange([14, 16], "para:list");
+  });
   richCheck(
     "formatRange takes the binding's own range spelling, refusing a bad range by name",
     throws(() => {
@@ -2059,6 +2073,20 @@ if (isMainThread) {
     newerSaid = (e as Error).message;
   }
   richCheck("fromKdoc refuses a version-2 file in the core's own sentence", newerSaid === "the document is version 2, newer than the version 1 this kaya reads");
+  const unknown = kaya.Document.fromKdoc(
+    new Uint8Array(
+      Buffer.from('{"kaya": "document", "version": 1, "com.example.theme": {"page": "sepia"}, "paragraphs": [{"com.example.pinned": true, "spans": [["Pinned"]]}]}', "utf8"),
+    ),
+  );
+  const unknownBack = kaya.Document.fromKdoc(unknown.document.toKdoc());
+  richCheck(
+    "RD17 A: a file's unknown top level rides extra and its paragraph key a para: run, editable, and both write back",
+    unknown.readOnly === null &&
+      unknown.document.extra === '{"com.example.theme":{"page":"sepia"}}' &&
+      spell(unknown.document.runs) === "0:6 para:com.example.pinned" &&
+      unknownBack.document.equals(unknown.document) &&
+      !unknown.document.equals(new kaya.Document("Pinned", unknown.document.runs)),
+  );
 
   shipped.length = 0;
   app.build(() => {

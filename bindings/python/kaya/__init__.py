@@ -3455,6 +3455,14 @@ def _one_of(noun: str, names: tuple[str, ...], kind: object) -> str:
 
 
 _PARAGRAPH_ATTRS = ("block", "list", "indent", "checked", "start", "align")
+_PARA_PREFIX = "para:"
+
+
+def _is_paragraph_attr(name: str) -> bool:
+    """crates/kaya/src/richdoc.rs is_paragraph_attr (RD17 A)."""
+    key = name[len(_PARA_PREFIX):] if name.startswith(_PARA_PREFIX) else None
+    return name in _PARAGRAPH_ATTRS or (
+        bool(key) and key != "spans" and key not in _PARAGRAPH_ATTRS)
 _ABSENT_VALUES = {"block": "body", "list": "none", "indent": "0",
                   "align": "start"}
 
@@ -3526,12 +3534,15 @@ class Document:
     as everywhere else in this binding.
     """
 
-    __slots__ = ("text", "runs")
+    __slots__ = ("text", "runs", "extra")
 
     def __init__(self, text: str = "",
-                 runs: Sequence[Run] | None = None) -> None:
+                 runs: Sequence[Run] | None = None, extra: str = "") -> None:
         self.text: str = _text_value("Document text", text)
         self.runs: list[Run] = list(runs) if runs else []
+        #: A `.kdoc`'s top-level members this kaya does not know, as one
+        #: JSON object's text; "" when none (docs/rich-document-plan.md RD17).
+        self.extra: str = str(extra)
 
     def mark(self, span: Span, name: str, value: bool | str) -> Document:
         """One attribute over one range. `value` takes a bool for a flag
@@ -3595,14 +3606,14 @@ class Document:
         if values[0]:
             raise KayaValueError(values[0])
         runs = [Run(*values[i:i + 4])
-                for i in builtins.range(3, len(values) - 3, 4)]
-        return Kdoc(Document(values[2], runs), values[1] or None)
+                for i in builtins.range(4, len(values) - 3, 4)]
+        return Kdoc(Document(values[3], runs, values[2]), values[1] or None)
 
     def to_kdoc(self) -> bytes:
         """The document as a `.kdoc` file, the same bytes in nine bindings
         (RD13); KayaValueError naming the run when it breaks a wall
         set_document holds."""
-        values = runtime.kdoc_write(_document_bytes(self))
+        values = runtime.kdoc_write(_document_bytes(self, self.extra))
         if values[0]:
             raise KayaValueError(f"kaya: to_kdoc: {values[0]}")
         return str(values[1]).encode("utf-8")
@@ -3616,10 +3627,12 @@ class Document:
 
     def __eq__(self, other: object) -> bool:
         return (isinstance(other, Document)
-                and self.text == other.text and self.runs == other.runs)
+                and (self.text, self.runs, self.extra)
+                == (other.text, other.runs, other.extra))
 
     def __repr__(self) -> str:
-        return f"Document(text={self.text!r}, runs={self.runs!r})"
+        return (f"Document(text={self.text!r}, runs={self.runs!r}, "
+                f"extra={self.extra!r})")
 
     def list(self, span: Span, kind: str) -> Document:
         """A list item over whole paragraphs (docs/rich-document-plan.md
@@ -3647,10 +3660,11 @@ class Kdoc:
         return f"Kdoc(document={self.document!r}, read_only={self.read_only!r})"
 
 
-def _document_bytes(document: Document) -> bytes:
-    """A Document's wire bytes: ONE flat value list — the text, then four
-    values per run (crates/kaya/src/wire.rs, `document_blob`)."""
-    values = [document.text]
+def _document_bytes(document: Document, *head: str) -> bytes:
+    """A Document's wire bytes: ONE flat value list — `head`, the text, then
+    four values per run (crates/kaya/src/wire.rs, `document_blob`,
+    `read_kdoc_input`)."""
+    values: list[Any] = [*head, document.text]
     for run in document.runs:
         values += [run.range.start, run.range.stop, run.name, run.value]
     return wire._enc.values(values)
@@ -9266,12 +9280,13 @@ class App:
         if doc is None:
             return Document()
         return Document(doc.text, [Run(r.range.start, r.range.stop, r.name, r.value)
-                                   for r in doc.runs])
+                                   for r in doc.runs], doc.extra)
 
     def _seed_document(self, widget: int, document: Document) -> None:
         self._documents[widget] = Document(
             document.text,
-            [Run(r.range.start, r.range.stop, r.name, r.value) for r in document.runs])
+            [Run(r.range.start, r.range.stop, r.name, r.value) for r in document.runs],
+            document.extra)
 
     def _mirror_rich(self, widget: int, on: bool) -> None:
         """The mirror lives while `rich` is on, as the core's does."""
@@ -9298,7 +9313,7 @@ class App:
         """A ranged act's range in the fold's text: a paragraph attribute
         covers the whole paragraphs it touches, as the core snaps it
         (docs/rich-text-plan.md §17, docs/rich-document-plan.md §11)."""
-        if name not in _PARAGRAPH_ATTRS:
+        if not _is_paragraph_attr(name):
             return start, stop
         doc = self._documents.get(widget)
         data = b"" if doc is None else doc.text.encode("utf-8")

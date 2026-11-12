@@ -284,7 +284,9 @@ type run = Run.t
    the edits it delivers. THE DOCUMENT COMES LAST, so a declaration
    reads as a pipeline: [Document.create doc |> Document.bold (0, 6) |> ...]. *)
 module Document : sig
-  type t = { text : string; runs : Run.t list }
+  (* [extra]: a [.kdoc]'s top-level members this kaya does not know, as one
+     JSON object's text; "" when none (docs/rich-document-plan.md RD17). *)
+  type t = { text : string; runs : Run.t list; extra : string }
 
   val create : string -> t
   val mark : int * int -> string -> string -> t -> t

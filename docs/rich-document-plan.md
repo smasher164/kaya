@@ -3,8 +3,9 @@
 Status: RULED 2026-11-11; the build began 2026-11-11 and §11 records it. RD9 RULED A and the safe save
 through a picked file (§4.1) RULED; every other ruling (RD1-RD8, RD10, RD11,
 RD13-RD16) RULED as recommended; RD17 RULED A and RD18 RULED B on
-2026-11-12, both later slices ("I like all the recommendations except
-rd12"); RD12 RULED as amended: no Markdown and no DOCX, the clipboard's RTF
+2026-11-12 ("I like all the recommendations except rd12") and BUILT the same
+day, RD18 on GTK and Compose; RD19 (the Mac, iOS and WinUI half of RD18) and
+RD20 (a Document kept in a model field) ASKED 2026-11-12; RD12 RULED as amended: no Markdown and no DOCX, the clipboard's RTF
 and HTML in the first build (the maintainer: "why do we even have markdown
 import and export?" and "i feel like that's out of scope for our rich text
 editor"). The review page is
@@ -955,6 +956,28 @@ item is `[ ]` or `[x]`, drawn as the platform's own box. `expect_markers`
 reads the ARM's record of what it drew and fails, naming both, when it
 disagrees with the core's.
 
+**What a screen reader is told (RD18 B, built 2026-11-12).** One function in
+the core (`richdoc::item_speech`) says what each list item tells beyond its
+text: the marker (`bullet`, the number as drawn, `checked` or `not checked`),
+its place among its siblings (the items of one kind at one level in one
+unbroken run of list paragraphs: a deeper item does not part them, a
+shallower one or another kind at their level does), and its level past the
+first: `bullet, 1 of 2`, `2., 2 of 2`, `not checked, 2 of 2, level 2`. The
+arms read the caret's item through `kaya_text_item_speech`. GTK publishes it
+as the text view's accessible DESCRIPTION, set as the caret moves and the
+markers change, unset outside a list item. Compose cannot put it on the field:
+compose-ui 1.11.4's accessibility delegate REPLACES the state description of
+any node with editable text by its own (`Empty`, or nothing), measured in its
+bytecode, so the caret's item is a node of its own beside the text, a 1 dp
+polite live region TalkBack speaks when it changes (`KayaRichItemLive`). And
+the field's accessibility text is the real text (`editableText`), so the
+U+200B the display draws at a paragraph style's boundary never reaches
+TalkBack. The guard is `tools/scenes/richdocax.steps` (the richdoc guest) with
+two verbs read off each platform's own tree: `expect_ax_item` (the caret's
+item, `<none>` outside one) and `expect_ax_text` (the field's accessible
+text), on GTK (x11 and wayland) and Compose. The Mac, iOS and WinUI decline
+the scene by name until RD19 is ruled.
+
 **Colour (RD5) as built.** `brand::ink_for_dark` maps a stored colour (as it
 reads on the light reference page `#FFFFFF`) to the dark reference page
 `#1E1E1E` at the same WCAG contrast it had, never below 4.5:1: Oklab
@@ -986,10 +1009,37 @@ the C pair `kaya_kdoc_read` and `kaya_kdoc_write` (values lists; the
 document in a document field's encoding), and Rust's `Document::from_kdoc`
 answers a `Kdoc { document, read_only }`.
 
-**RD8's interim (RD17 RULED A 2026-11-12, not built yet).** A file whose paragraphs or top level
-carry a key this kaya does not know, or whose spans carry an unknown mark
-without a dot, or which `requires` anything, opens READ-ONLY with a sentence
-naming each; `history` is dropped, as §4 says.
+**Unknown keys (RD17 A, built 2026-11-12).** A paragraph key this kaya does
+not know, dotted or not (`com.example.pinned`, a newer kaya's `embed`), reads
+as a run named `para:` plus the key (`richdoc::is_para_key`: the key is not
+empty, not `spans` and not one of kaya's six paragraph attributes). The core
+treats it as a paragraph attribute everywhere one is decided: it covers whole
+paragraphs, a Return carries it (it is neither a heading nor `checked` nor
+`start`), a join takes the first paragraph's, and every arm's own copy of the
+typing rule (the Mac and iOS interpreter, Compose) names it with the same
+predicate. The top level's unknown members ride one more field on every
+binding's Document, `extra`: one JSON object's text, compact with sorted keys,
+`""` when there are none; `history` is still dropped. The writer puts the
+members back after `requires`, one per line, and refuses an `extra` that is
+not an object or that names one of the file's own keys. The C pair carries it
+first: `kaya_kdoc_read` answers refusal, read-only reason, extra, then the
+document; `kaya_kdoc_write` takes extra, then the document (the same
+signature, so the JNI and N-API doors did not move; the old input is refused
+loudly). A kept value is its JSON, and a string whose text would itself read
+as JSON (`"7"`, `"true"`) keeps its quotes in the run's value, so it goes back
+out a string. A Document carries `extra` through the binding's own fold
+(set_document seeds it; edits move text and runs only), so a document read
+from a file, edited and read back with `document()` still holds it. The file
+opens READ-ONLY only when it `requires` anything or a span carries an unknown
+mark without a dot (RD8); both name what they lack. Guards: the core's
+`unknown_paragraph_and_document_keys_survive_an_edit` and the kdoc tests,
+richdoc.steps' tail in nine languages (open, Return, type, save, read back),
+the sugar census row for `Document.extra`. Two faults the build found on the
+way: Return at the end of an item that is NOT the last paragraph made a plain
+paragraph (the new empty paragraph's carrier is the old terminator, outside
+the inserted text; `Scene::carry_into_new_empty` now gives it what the
+inserted newline carries), and typing into an empty paragraph left a newline
+that broke §11's canonical form (the repair now always canonicalises).
 
 **The clipboard (RD12 as amended).** Copy puts RTF and HTML beside the plain
 text, written from the core's mirror (`kaya_text_copy`); paste reads RTF
@@ -1312,8 +1362,7 @@ bytes. The hash is kaya's own and never leaves the device.
 ### RD17. How a reader keeps unknown paragraph and document keys through an edit (RULED 2026-11-12: A)
 
 RULED A as recommended (the maintainer, 2026-11-12: "i agree with your
-recommendations"). Not built yet: the read-only interim stands until its
-slice.
+recommendations"). BUILT 2026-11-12 (§11, Unknown keys).
 
 The mechanism, short: RD8 says every kaya reader keeps names it does not
 know. An unknown MARK with an app's dotted name is easy: it is a run like any
@@ -1347,7 +1396,8 @@ ruled against.
 ### RD18. What a screen reader hears of a drawn list marker (RULED 2026-11-12: B)
 
 RULED B as recommended (the maintainer, 2026-11-12: "i agree with your
-recommendations"). A slice of its own, not built yet.
+recommendations"). BUILT 2026-11-12 on GTK and Compose (§11, What a screen
+reader is told); the Mac, iOS and WinUI are RD19.
 
 The mechanism, short: R3 rules that no marker is ever in the text, so the
 platforms that have no editable list (GTK and Compose) DRAW the "•", "2." or
@@ -1376,3 +1426,66 @@ RECOMMEND B. A list a sighted user sees as a numbered checklist should not
 reach a TalkBack or Orca user as run-on text with no numbers or states; both
 halves read kaya's own model, so no platform guesswork is involved. It is a
 slice of its own, after this build.
+
+### RD19. What VoiceOver and Narrator are told of a drawn list marker (asked 2026-11-12)
+
+The mechanism, short: RD18 put what a list item tells beyond its text
+(`bullet, 2 of 3`, `checked, 1 of 2`) on GTK, as the text view's accessible
+description, and on Compose, as a polite live region beside the field, both
+read off the core's one numbering for the item holding the caret. The Mac,
+iOS and WinUI draw their markers too (§11), and RD18 ruled only GTK and
+Compose. What their screen readers are told today, read with the same verbs
+(`expect_ax_item`, `expect_ax_text`) through each platform's own tree:
+
+- The Mac (VoiceOver): the text view's accessible value is the real text,
+  newlines and all, and the caret's paragraph carries no list item attribute
+  (no AXListItemPrefix, index or level): VoiceOver reads "Apples" where a
+  sighted user sees "• Apples", and a checklist item's state not at all.
+- iOS (VoiceOver): the same: the text view's accessibility value is the real
+  text, and nothing beside it names the caret's item (its hint is empty and
+  the drawn markers are no accessibility element).
+- WinUI (Narrator): the field's own peer tells nothing (no help text, full
+  description or item status), and each drawn marker is a SEPARATE element of
+  the tree beside the field: a bullet is a text element named "•" or "◦", a
+  number one named "2.", a checklist box a checkbox whose state is checked or
+  unchecked. Narrator meets them as loose elements in the window, with no
+  position and no tie to the item's text. The field's accessible text could
+  not be read in process (WinUI's in-process peer for a RichEditBox publishes
+  no Text pattern, and an out-of-process UIA client is barred).
+
+- A. The same account on all five. The Mac puts the core's string on the
+  item's first character as the list item attributes AppKit's accessibility
+  reads before a line (AXListItemPrefix, with index and level), iOS gives it
+  to VoiceOver as the text view's accessibility value's custom attribute or a
+  live announcement as the caret moves, and WinUI names each marker element
+  with it (AutomationProperties.Name, PositionInSet, SizeOfSet, Level), so
+  Narrator hears "bullet, 2 of 3" where it now hears "•". richdocax.steps
+  then runs on every lane.
+- B. Leave the three as built and record the gap.
+
+RECOMMEND A. Invariant 1 (one observable semantics), and on WinUI the
+elements already exist and only lack their names.
+
+### RD20. Whether a Document kept in a model field keeps its extra (asked 2026-11-12)
+
+The mechanism, short: RD17 put a file's unknown top-level members on every
+binding's Document as `extra`, and the binding's own fold keeps it while the
+document sits in a rich textarea. A Document can also live in an app's MODEL,
+as a document field of a row (docs/rich-text-plan.md §19, the rich rows). That
+field's wire encoding is the text and the runs only, so a Document that goes
+into a row and comes back has lost its `extra`, and an app that saves it with
+`to_kdoc` writes the file without the members it read. Nothing refuses it.
+
+- A. Leave it: a model field holds what a widget holds, text and runs; an app
+  that keeps a file's unknown top level keeps the Document `from_kdoc` gave it.
+- B. The document field's encoding grows `extra` (a spec change: the field's
+  codec in the core and nine bindings, and both interpreters' row decoders),
+  so a Document round-trips through a row whole.
+- C. As A, and the field codec refuses a Document whose `extra` is not empty,
+  naming the field, so the loss is never silent.
+
+RECOMMEND B. RD8's promise is that nothing a newer kaya writes is destroyed by
+an older one, and a notes app that keeps its documents in rows is the first
+consumer the rich document was built for. C is the cheap honest floor if B
+waits.
+

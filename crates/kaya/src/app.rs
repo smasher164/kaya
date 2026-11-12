@@ -391,7 +391,7 @@ impl From<Document> for crate::protocol::Blob {
 impl Document {
     pub(crate) fn from_blob(b: &crate::protocol::Blob) -> Document {
         let (text, runs) = crate::wire::read_document_blob(&b.0);
-        Document { text, runs }
+        Document { text, runs, extra: String::new() }
     }
 }
 
@@ -1073,6 +1073,10 @@ pub struct Kdoc {
 pub struct Document {
     pub text: String,
     pub runs: Vec<Run>,
+    /// A `.kdoc`'s top-level members this kaya does not know, as one JSON
+    /// object's text that `to_kdoc` writes back; empty when there are none
+    /// (docs/rich-document-plan.md RD17).
+    pub extra: String,
 }
 
 /// A mark or format attribute's VALUE: a `bool` for a flag attribute
@@ -1114,7 +1118,7 @@ impl From<AttrValue> for String {
 
 impl Document {
     pub fn new(text: impl Into<String>) -> Self {
-        Document { text: text.into(), runs: Vec::new() }
+        Document { text: text.into(), runs: Vec::new(), extra: String::new() }
     }
 
     pub fn mark(
@@ -1193,14 +1197,14 @@ impl Document {
     /// one, or name a newer major version (docs/rich-document-plan.md §4).
     pub fn from_kdoc(bytes: &[u8]) -> Result<Kdoc, String> {
         let read = crate::richdoc::kdoc::read(bytes)?;
-        Ok(Kdoc { document: Document { text: read.text, runs: read.runs }, read_only: read.read_only })
+        Ok(Kdoc { document: Document { text: read.text, runs: read.runs, extra: read.extra }, read_only: read.read_only })
     }
 
     /// The document as a `.kdoc` file, the same bytes in nine bindings
     /// (RD13). Panics naming the run when the document breaks a wall
     /// set_document holds.
     pub fn to_kdoc(&self) -> Vec<u8> {
-        match crate::richdoc::kdoc::write(&self.text, &self.runs) {
+        match crate::richdoc::kdoc::write(&self.text, &self.runs, &self.extra) {
             Ok(json) => json.into_bytes(),
             Err(why) => panic!("kaya: to_kdoc: {why}"),
         }

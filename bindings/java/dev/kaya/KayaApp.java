@@ -5992,8 +5992,20 @@ public final class KayaApp {
         }
     }
 
-    /** The attributes that cover whole paragraphs (RD1). */
+    /** The attributes that cover whole paragraphs (RD1, RD17;
+     * crates/kaya/src/richdoc.rs is_paragraph_attr). */
     static boolean paragraphAttr(String name) {
+        if (kayaParagraphAttr(name)) {
+            return true;
+        }
+        if (!name.startsWith("para:")) {
+            return false;
+        }
+        String key = name.substring("para:".length());
+        return !key.isEmpty() && !key.equals("spans") && !kayaParagraphAttr(key);
+    }
+
+    private static boolean kayaParagraphAttr(String name) {
         return switch (name) {
             case "block", "list", "indent", "checked", "start", "align" -> true;
             default -> false;
@@ -6165,14 +6177,20 @@ public final class KayaApp {
     public static final class Document {
         String content;
         final List<TextRun> marks = new ArrayList<>();
+        final String extra;
 
         public Document(String text) {
-            this.content = text;
+            this(text, List.of(), "");
         }
 
         Document(String text, List<TextRun> runs) {
+            this(text, runs, "");
+        }
+
+        Document(String text, List<TextRun> runs, String extra) {
             this.content = text;
             this.marks.addAll(runs);
+            this.extra = extra;
         }
 
         public String text() {
@@ -6183,15 +6201,24 @@ public final class KayaApp {
             return java.util.Collections.unmodifiableList(marks);
         }
 
-        /** Value equality: the same text and the same runs in order (Rust's ==). */
+        /** A {@code .kdoc}'s top-level members this kaya does not know, as
+         * one JSON object's text; "" when none (docs/rich-document-plan.md
+         * RD17). */
+        public String extra() {
+            return extra;
+        }
+
+        /** Value equality: the same text, the same runs in order and the
+         * same extra (Rust's ==). */
         @Override
         public boolean equals(Object o) {
-            return o instanceof Document d && content.equals(d.content) && marks.equals(d.marks);
+            return o instanceof Document d && content.equals(d.content) && marks.equals(d.marks)
+                    && extra.equals(d.extra);
         }
 
         @Override
         public int hashCode() {
-            return content.hashCode() * 31 + marks.hashCode();
+            return (content.hashCode() * 31 + marks.hashCode()) * 31 + extra.hashCode();
         }
 
         /** Paint one attribute over one range. Every chain method below
@@ -6277,13 +6304,13 @@ public final class KayaApp {
                 throw new IllegalArgumentException((String) values.get(0));
             }
             List<TextRun> runs = new ArrayList<>();
-            for (int i = 3; i + 3 < values.size(); i += 4) {
+            for (int i = 4; i + 3 < values.size(); i += 4) {
                 runs.add(new TextRun(
                         decodedSpan("kdoc run", (Long) values.get(i), (Long) values.get(i + 1)),
                         (String) values.get(i + 2), (String) values.get(i + 3)));
             }
             String why = (String) values.get(1);
-            return new Kdoc(new Document((String) values.get(2), runs),
+            return new Kdoc(new Document((String) values.get(3), runs, (String) values.get(2)),
                     why.isEmpty() ? Optional.empty() : Optional.of(why));
         }
 
@@ -6291,7 +6318,7 @@ public final class KayaApp {
          * bindings (RD13); throws IllegalStateException naming the run when
          * it breaks a wall {@link Tx#setDocument} holds. */
         public byte[] toKdoc() {
-            List<Object> values = kdocValues(KayaRing.kdocWrite(documentBlob(this)));
+            List<Object> values = kdocValues(KayaRing.kdocWrite(documentBlob(this, extra)));
             if (!"".equals(values.get(0))) {
                 throw new IllegalStateException("kaya: toKdoc: " + values.get(0));
             }
@@ -12434,7 +12461,7 @@ public final class KayaApp {
      */
     public Document document(Widget w) {
         Document doc = documents.get(w.id);
-        return doc == null ? new Document("") : new Document(doc.content, doc.marks);
+        return doc == null ? new Document("") : new Document(doc.content, doc.marks, doc.extra);
     }
 
     /** A plain write on a rich widget is a whole document with no runs, as
@@ -12448,7 +12475,7 @@ public final class KayaApp {
     }
 
     private void seedDocument(long widget, Document document) {
-        documents.put(widget, new Document(document.content, document.marks));
+        documents.put(widget, new Document(document.content, document.marks, document.extra));
     }
 
     /**
@@ -12492,8 +12519,8 @@ public final class KayaApp {
         return new Document(text, runs);
     }
 
-    static byte[] documentBlob(Document document) {
-        List<Object> values = new ArrayList<>();
+    static byte[] documentBlob(Document document, String... head) {
+        List<Object> values = new ArrayList<>(List.of(head));
         values.add(document.content);
         for (TextRun run : document.marks) {
             values.add(run.range().start);

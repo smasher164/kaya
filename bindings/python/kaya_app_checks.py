@@ -4318,6 +4318,20 @@ except kaya.KayaValueError as e:
 rich_check("from_kdoc refuses a version-2 file in the core's own sentence",
            _newer_said == "the document is version 2, newer than the "
            "version 1 this kaya reads")
+_unknown = kaya.Document.from_kdoc(
+    b'{"kaya": "document", "version": 1, "com.example.theme": {"page": '
+    b'"sepia"}, "paragraphs": [{"com.example.pinned": true, "spans": '
+    b'[["Pinned"]]}]}')
+_unknown_back = kaya.Document.from_kdoc(_unknown.document.to_kdoc())
+rich_check("RD17 A: a file's unknown top level rides extra and its paragraph "
+           "key a para: run, editable, and both write back",
+           _unknown.read_only is None
+           and _unknown.document.extra
+           == '{"com.example.theme":{"page":"sepia"}}'
+           and _spell(_unknown.document.runs) == "0:6 para:com.example.pinned"
+           and _unknown_back.document == _unknown.document
+           and _unknown.document != kaya.Document("Pinned",
+                                                  _unknown.document.runs))
 
 _range_records.clear()
 kaya.runtime.submit = lambda *recs: _range_records.extend(recs)
@@ -4344,6 +4358,21 @@ rich_check("a ranged list act with `none` is the REMOVAL: removed 1 on the "
            kaya.wire.tx_format_text(_ranged.id, 1, 1, 6, 9, ["list", ""])
            in _range_records
            and _spell(_ranged.document().runs) == "0:2 color=#ABCDEF")
+_range_records.clear()
+kaya.runtime.submit = lambda *recs: _range_records.extend(recs)
+with _range_app.build():
+    _ranged.set_document(kaya.Document("Walks\nmap\nwater", extra='{"a.b":1}'))
+    _ranged.format_range(range(7, 8), "para:com.example.pinned", "true")
+    _ranged.format_range(range(7, 8), "para:list", "x")
+kaya.runtime.submit = _real_ship
+rich_check("a ranged para: key snaps to its whole paragraph as a paragraph "
+           "attribute does, para:list does not, and the fold keeps extra",
+           kaya.wire.tx_format_text(_ranged.id, 0, 1, 6, 9,
+                                    ["para:com.example.pinned", "true"])
+           in _range_records
+           and kaya.wire.tx_format_text(_ranged.id, 0, 1, 7, 8,
+                                        ["para:list", "x"]) in _range_records
+           and _ranged.document().extra == '{"a.b":1}')
 
 _range_records.clear()
 kaya.runtime.submit = lambda *recs: _range_records.extend(recs)

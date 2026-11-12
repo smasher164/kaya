@@ -6983,6 +6983,24 @@ pub unsafe extern "C" fn kaya_text_markers(widget: u64, out: *mut u8, cap: usize
     }
 }
 
+/// Presentation side: what assistive technology is told of the list item
+/// holding UTF-8 byte `byte` beyond its text (docs/rich-document-plan.md
+/// RD18): `bullet, 2 of 3`, `checked, 1 of 2, level 2`; empty outside a list
+/// item. kaya_text_runs' contract.
+///
+/// # Safety
+/// `out` must point at `cap` writable bytes, or be NULL with `cap` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_text_item_speech(widget: u64, byte: u64, out: *mut u8, cap: usize) -> usize {
+    let answer = with_window_scene("reading what a list item tells a screen reader", |scene| {
+        (Vec::new(), scene.rich_item_speech(crate::protocol::WidgetId(widget), byte))
+    });
+    match answer {
+        Some(s) => unsafe { fill(s.as_bytes(), out, cap) },
+        None => 0,
+    }
+}
+
 /// Presentation side: the rich flavour a copy of `start..end` (UTF-8 bytes)
 /// puts on the clipboard beside the plain text: RTF, or HTML when `html` is
 /// 1. kaya_text_runs' contract; 0 for an empty range.
@@ -7047,9 +7065,11 @@ pub extern "C" fn kaya_ink_from_dark(rgb: u32) -> u32 {
 
 /// Guest side: a `.kdoc` file's bytes read (docs/rich-document-plan.md §4,
 /// RD13). Answers a values list: Str refusal ("" when it read), Str
-/// read-only reason ("" when the document can be edited), then the document
-/// as a document field carries it (Str text, then I64 start, I64 end, Str
-/// name, Str value per run, UTF-8 bytes). kaya_text_runs' contract.
+/// read-only reason ("" when the document can be edited), Str extra (the
+/// unknown top-level members as one JSON object's text, "" when none; RD17),
+/// then the document as a document field carries it (Str text, then I64
+/// start, I64 end, Str name, Str value per run, UTF-8 bytes). kaya_text_runs'
+/// contract.
 ///
 /// # Safety
 /// `bytes` must describe a valid byte range or be NULL/0; `out` must point at
@@ -7062,6 +7082,7 @@ pub unsafe extern "C" fn kaya_kdoc_read(bytes: *const u8, len: usize, out: *mut 
         Ok(read) => {
             values.push(crate::protocol::Value::Str(String::new()));
             values.push(crate::protocol::Value::Str(read.read_only.unwrap_or_default()));
+            values.push(crate::protocol::Value::Str(read.extra));
             values.push(crate::protocol::Value::Str(read.text));
             for run in read.runs {
                 values.push(crate::protocol::Value::I64(run.range.start as i64));
@@ -7074,15 +7095,16 @@ pub unsafe extern "C" fn kaya_kdoc_read(bytes: *const u8, len: usize, out: *mut 
             values.push(crate::protocol::Value::Str(why));
             values.push(crate::protocol::Value::Str(String::new()));
             values.push(crate::protocol::Value::Str(String::new()));
+            values.push(crate::protocol::Value::Str(String::new()));
         }
     }
     unsafe { fill(&wire::values_bytes(&values), out, cap) }
 }
 
-/// Guest side: a document (a document field's encoding, as kaya_kdoc_read
-/// answers it after its two strings) written as a `.kdoc`. Answers a values
-/// list: Str refusal ("" when it wrote), Str the file's UTF-8 text.
-/// kaya_text_runs' contract.
+/// Guest side: a document written as a `.kdoc`. `doc` is a values list: Str
+/// extra, then the document as kaya_kdoc_read answers it after its three
+/// strings. Answers a values list: Str refusal ("" when it wrote), Str the
+/// file's UTF-8 text. kaya_text_runs' contract.
 ///
 /// # Safety
 /// `doc` must describe a valid byte range; `out` must point at `cap`
@@ -7090,9 +7112,9 @@ pub unsafe extern "C" fn kaya_kdoc_read(bytes: *const u8, len: usize, out: *mut 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn kaya_kdoc_write(doc: *const u8, len: usize, out: *mut u8, cap: usize) -> usize {
     let input = if doc.is_null() || len == 0 { &[][..] } else { unsafe { std::slice::from_raw_parts(doc, len) } };
-    let written = crate::fault::guard("reading a document to write as a .kdoc", || wire::read_document_blob(input))
-        .ok_or_else(|| "the document is not a document field's encoding".to_owned())
-        .and_then(|(text, runs)| crate::richdoc::kdoc::write(&text, &runs));
+    let written = crate::fault::guard("reading a document to write as a .kdoc", || wire::read_kdoc_input(input))
+        .ok_or_else(|| "the input is not the document's extra followed by a document field's encoding".to_owned())
+        .and_then(|(extra, text, runs)| crate::richdoc::kdoc::write(&text, &runs, &extra));
     let values = match written {
         Ok(json) => vec![crate::protocol::Value::Str(String::new()), crate::protocol::Value::Str(json)],
         Err(why) => vec![crate::protocol::Value::Str(why), crate::protocol::Value::Str(String::new())],

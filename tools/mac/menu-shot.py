@@ -85,6 +85,9 @@ def shoot(pid, out):
         argv = [compose, str(out)]
         with open(SHOT_TURN, "a", encoding="utf-8") as turn:
             fcntl.flock(turn, fcntl.LOCK_EX)
+            turn.truncate(0)
+            turn.write(f"pid {os.getpid()} menu-shot took it at {int(time.time() * 1000)} ms\n")
+            turn.flush()
             for win, _layer, x, y, w, h in wins:
                 part = pathlib.Path(tmp) / f"{win}.png"
                 subprocess.run(["screencapture", "-x", "-o", f"-l{win}", str(part)], check=False)

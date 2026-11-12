@@ -2,9 +2,9 @@
 // tools/scenes/richdoc.steps (docs/rich-document-plan.md §9 step 2): a
 // heading, a body paragraph with a preset colour, a bullet list with a
 // nested item, a numbered list and a checklist, then the paragraph acts from
-// buttons, the platform's colour picker and a `.kdoc` round trip. label#1 is
-// the binding's own Document, folded from the same deltas, so it must spell
-// what the core holds.
+// buttons, the platform's colour picker and a `.kdoc` round trip, then a file
+// carrying keys this kaya does not know (RD17). label#1 is the binding's own
+// Document, folded from the same deltas, so it must spell what the core holds.
 
 using System;
 using System.Collections.Generic;
@@ -14,6 +14,9 @@ static class RichdocScene
 {
     // BYTE-IDENTICAL to guests/rust/richdoc.rs's DOC.
     const string Doc = "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs";
+
+    // BYTE-IDENTICAL to guests/rust/richdoc.rs's UNKNOWN.
+    const string Unknown = """{"kaya": "document", "version": 1, "com.example.theme": {"page": "sepia"}, "paragraphs": [{"embed": "e1", "spans": [["Loose"]]}, {"com.example.pinned": true, "spans": [["Pinned"]]}]}""";
 
     static string Spell(IReadOnlyList<TextRun> runs)
     {
@@ -92,11 +95,21 @@ static class RichdocScene
                         byte[] bytes = now.ToKdoc();
                         Kdoc back = Document.FromKdoc(bytes);
                         bool same = back.Document.Equals(now);
+                        string extra = back.Document.Extra.Replace('"', '\'');
                         t.SetDocument(editor, back.Document);
                         t.Write(kdoc,
                             $"kdoc {bytes.Length} bytes, read_only {back.ReadOnly ?? "none"}, "
-                                + $"same {(same ? "true" : "false")}");
+                                + $"same {(same ? "true" : "false")}, extra {(extra == "" ? "none" : extra)}");
                         t.Write(runs, Spell(back.Document.Runs));
+                    });
+                    tx.Button("unknown", onClick: t => // button#5
+                    {
+                        Kdoc file = Document.FromKdoc(System.Text.Encoding.UTF8.GetBytes(Unknown));
+                        t.SetDocument(editor, file.Document);
+                        t.Write(kdoc,
+                            $"opened read_only {file.ReadOnly ?? "none"}, "
+                                + $"extra {file.Document.Extra.Replace('"', '\'')}");
+                        t.Write(runs, Spell(file.Document.Runs));
                     });
                 });
                 return root;

@@ -13,7 +13,7 @@ expect_markers textarea#0 "33:0 •|40:1 ◦|51:0 •|57:0 1.|62:0 2.|68:0 [x]|7
 expect_text_ink textarea#0 25:31 "light 016FEF dark 2C84FF"
 # THE FILE: written and read back by the guest, then declared again.
 click button#4
-expect label#2 "kdoc 570 bytes, read_only none, same true"
+expect label#2 "kdoc 570 bytes, read_only none, same true, extra none"
 expect_runs textarea#0 "0:9 block=heading1|25:31 color=#016FEF|33:56 list=bullet|40:50 indent=1|57:67 list=numbered|68:72 checked|68:77 list=check"
 expect_markers textarea#0 "33:0 •|40:1 ◦|51:0 •|57:0 1.|62:0 2.|68:0 [x]|73:0 [ ]"
 
@@ -97,8 +97,32 @@ expect_edit textarea#0 "90:90 <!> user [0:1 color=#0D8501]"
 # The core keeps its document in the file's canonical form (§11), so the
 # runs read back exactly as they were.
 click button#4
-expect label#2 "kdoc 741 bytes, read_only none, same true"
+expect label#2 "kdoc 741 bytes, read_only none, same true, extra none"
 expect_runs textarea#0 "0:9 block=heading1|0:9 color=#DD1F24|10:15 color=#8D4DE0|25:31 color=#016FEF|33:39 indent=1|33:61 list=numbered|40:50 indent=2|51:56 indent=1|68:77 checked|68:77 list=check|82:85 bold|86:91 color=#0D8501"
 expect label#1 "0:9 block=heading1|0:9 color=#DD1F24|10:15 color=#8D4DE0|25:31 color=#016FEF|33:39 indent=1|33:61 list=numbered|40:50 indent=2|51:56 indent=1|68:77 checked|68:77 list=check|82:85 bold|86:91 color=#0D8501"
 expect_markers textarea#0 "33:1 a.|40:2 i.|51:1 b.|57:0 1.|68:0 [x]|73:0 [x]"
 expect textarea#0 "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs\nBuy oat milk!"
+
+# ---- keys this kaya does not know (RD17 A) -------------------------
+# A paragraph key rides a para: run, which the core keeps as a paragraph
+# attribute through Return and typing; a top-level key rides the Document's
+# extra (a label spells its quotes ' here). The file opens editable and
+# writes both back. Typing appends on every lane, so the kept key is on the
+# last paragraph; Return inside a document is the core's unit test
+# (scene.rs, unknown_paragraph_and_document_keys_survive_an_edit).
+click button#5
+expect label#2 "opened read_only none, extra {'com.example.theme':{'page':'sepia'}}"
+expect_runs textarea#0 "0:5 para:embed=e1|6:12 para:com.example.pinned"
+expect label#1 "0:5 para:embed=e1|6:12 para:com.example.pinned"
+select_text textarea#0 12:12
+press return
+expect_edit textarea#0 "12:12 <\\n> user [0:1 para:com.example.pinned]"
+expect_runs textarea#0 "0:5 para:embed=e1|6:13 para:com.example.pinned"
+type "Also"
+expect_runs textarea#0 "0:5 para:embed=e1|6:17 para:com.example.pinned"
+expect label#1 "0:5 para:embed=e1|6:17 para:com.example.pinned"
+click button#4
+expect label#2 "kdoc 277 bytes, read_only none, same true, extra {'com.example.theme':{'page':'sepia'}}"
+expect_runs textarea#0 "0:5 para:embed=e1|6:17 para:com.example.pinned"
+expect label#1 "0:5 para:embed=e1|6:17 para:com.example.pinned"
+expect textarea#0 "Loose\nPinned\nAlso"

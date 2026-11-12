@@ -20504,3 +20504,66 @@ Found while building the rich document's five arms (docs/rich-document-plan.md
   green run failed with the negative's sentence. The lanes' build_csharp
   judges by content (content_fresh); a hand build wants `--no-incremental` or
   a restore that writes fresh bytes.
+
+## The rich document's second slice (measured 2026-11-12)
+
+- A text field's state description cannot carry anything on Compose:
+  compose-ui 1.11.4's `getInfoStateDescriptionOrNull` (in
+  AndroidComposeViewAccessibilityDelegateCompat_androidKt, read in its
+  bytecode) ends by REPLACING the state description of any node holding
+  EditableText with `createStateDescriptionForTextField` (the word Empty, or
+  nothing). The semantics held "bullet, 1 of 2" while the provider served
+  null. RD18's item is a live region node of its own (KayaRichItemLive).
+- A `Modifier.semantics {}` block observes no state: a value it reads changes
+  nothing until something else invalidates the node, and a caret move
+  invalidates the field's semantics BEFORE the collector that follows the
+  caret has written the new value. Read the value in composition and capture
+  it, so the change recomposes the modifier.
+- The android runner handed a scene's script to the device's shell inside
+  single quotes, so a `'` in a step string ended the quoting and the shell
+  dropped it: richdoc's label read `{com.example.theme:...}` against a step
+  that wanted `{'com.example.theme':...}`. `device_shell_quoted` escapes it;
+  the richdoc legs on android are the guard.
+- `press return` on the Mac goes through kayaTypeAtFocus, which moves the caret
+  to the END first (typing appends, CONTRACT POINT 3), so a scene cannot press
+  Return in the middle of a document after `select_text`. A mid-document
+  Return is a core unit test (scene.rs, return_inside_a_document_continues_the_list).
+- `docker desktop restart` (and stop) waits on EVERY qemu-system process on the
+  host, the Android pool's five emulators among them, and gives up with
+  "processes still running"; it did not kill them. Afterwards the CLI said
+  "already running" with no Docker process alive, and `open -g -a Docker`
+  brought the engine back. The VM had been unreachable before that (the
+  backend's apiproxy: "no route to host" to 192.168.65.7:2376, API 500).
+
+## The screencapture turn held for 10 s (measured 2026-11-12)
+
+Matrix 2 at 1027107c failed tints-rust-swiftui with "the host's screencapture
+turn (/tmp/kaya-screencapture.lock) was held for 10 s", and the bundle could
+not say who held it. Every taker now writes a holder line into the lock file,
+and a waiter that gives up says how many turns went by and to how many
+processes. Looped (tints, grounds, music_header and shapes on the Mac, four
+runs, with sixteen spinners in the docker VM from a concurrent linux loop):
+3 of 4 runs red on 2 to 11 legs, the turn having "changed hands 13 times
+among 8 process(es)" while the waiter never got it. So it was no long holder:
+the waiters polled the lock with LOCK_NB, and a holder that came straight back
+for its next read beat the sleepers. A first-come queue in front of the lock
+(one file per waiter in /tmp/kaya-screencapture.queue, named by its arrival;
+only the oldest live waiters may try) ended the starvation but not the reds
+(2 of 4: "6 waiter(s) ahead of this one", a capture taking 2 to 3 s under that
+load). Two turns at once (the deferred entry's measurement: two concurrent
+lookups failed none, eight failed 44%) with the queue: 4 of 4 green under the
+same load. GUARD: the loop above (charges' mac-loop.py), the sentence the
+waiter prints, and every pixel-reading mac leg of a matrix.
+
+## The expect_checked that took 15 s and let a toast expire (seen 2026-11-11)
+
+music_headerdark-python-wayland failed in matrix 2 with no toast to press:
+the step before it, `expect_checked checkbox@like off`, passed only after
+15.1 s, and the toast had gone by then. The bundle could not say why: the
+verb's poll was untraced, and a step that passes prints no CPU account. Both
+are now on the record: expect_checked traces every attempt with "the bus read
+took N ms", and on Linux a step that passes after 5 s or more prints the CPU
+account a failed step prints (a nap overslept by seconds is the VM stopping;
+a long bus read is the walk). Twenty-five looped runs of the four
+music_header python legs (a hundred legs) under sixteen VM spinners, most
+beside a Mac loop, did not bring it back.

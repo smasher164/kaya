@@ -178,6 +178,8 @@ LEGS = {
         # The rich document (docs/rich-document-plan.md §11); the dark leg
         # reads the colour map.
         "richdoc-compose", "richdocdark-compose",
+        # What TalkBack is told of a drawn list marker (RD18).
+        "richdocax-compose",
         # The list of open documents (docs/doctabs-plan.md §1.6).
         "doctabs-compose",
         "sheet-compose",

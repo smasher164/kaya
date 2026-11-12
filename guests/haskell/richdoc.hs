@@ -4,19 +4,27 @@
 -- tools/scenes/richdoc.steps (docs/rich-document-plan.md §9 step 2): a
 -- heading, a body paragraph with a preset colour, a bullet list with a
 -- nested item, a numbered list and a checklist, then the paragraph acts from
--- buttons, the platform's colour picker and a `.kdoc` round trip. label#1 is
--- the binding's own Document, folded from the same deltas, so it must spell
--- what the core holds.
+-- buttons, the platform's colour picker and a `.kdoc` round trip, then a file
+-- carrying keys this kaya does not know (RD17). label#1 is the binding's own
+-- Document, folded from the same deltas, so it must spell what the core holds.
 
 import qualified Data.ByteString as BS
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import KayaApp
 
 -- BYTE-IDENTICAL to guests/rust/richdoc.rs's DOC.
 docSource :: Text
 docSource = "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs"
+
+-- BYTE-IDENTICAL to guests/rust/richdoc.rs's UNKNOWN.
+unknown :: Text
+unknown = "{\"kaya\": \"document\", \"version\": 1, \"com.example.theme\": {\"page\": \"sepia\"}, \"paragraphs\": [{\"embed\": \"e1\", \"spans\": [[\"Loose\"]]}, {\"com.example.pinned\": true, \"spans\": [[\"Pinned\"]]}]}"
+
+quoted :: Text -> Text
+quoted = T.replace "\"" "'"
 
 spell :: [Run] -> Text
 spell = T.intercalate "|" . map one
@@ -85,8 +93,21 @@ main = kayaMain $ \app -> do
                         <> fromMaybe "none" back.readOnly
                         <> ", same "
                         <> (if back.document == now then "true" else "false")
+                        <> ", extra "
+                        <> (if T.null back.document.extra then "none" else quoted back.document.extra)
                     )
-                  writeSignal runs (spell back.document.runs)
+                  writeSignal runs (spell back.document.runs),
+              buttonOn "unknown" $ do -- button#5
+                file <- either (fail . T.unpack) pure (fromKdoc (TE.encodeUtf8 unknown))
+                submitTx app $ do
+                  setDocument app editor file.document
+                  writeSignal
+                    kdoc
+                    ( "opened read_only " <> fromMaybe "none" file.readOnly
+                        <> ", extra "
+                        <> quoted file.document.extra
+                    )
+                  writeSignal runs (spell file.document.runs)
             ]
         ]
     mount root

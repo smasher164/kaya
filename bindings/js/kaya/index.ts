@@ -212,9 +212,9 @@ function wireTag(token: Token, name: string): number {
 
 /** A Document's wire bytes: ONE flat value list — {u32 count, u32
  * reserved}, then per value {u32 tag, u32 len, payload, padded to 8} —
- * the text, then four values per run (crates/kaya/src/wire.rs,
- * `document_blob`). */
-function documentBytes(doc: Document): Uint8Array {
+ * `head`, the text, then four values per run (crates/kaya/src/wire.rs,
+ * `document_blob`, `read_kdoc_input`). */
+function documentBytes(doc: Document, ...head: string[]): Uint8Array {
   const out: number[] = [];
   const u32 = (v: number): void => {
     out.push(v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff);
@@ -235,8 +235,9 @@ function documentBytes(doc: Document): Uint8Array {
     const big = BigInt(v);
     for (let at = 0n; at < 8n; at++) out.push(Number((big >> (at * 8n)) & 0xffn));
   };
-  u32(1 + doc.runs.length * 4);
+  u32(head.length + 1 + doc.runs.length * 4);
   u32(0);
+  head.forEach(str);
   str(doc.text);
   for (const mark of doc.runs) {
     i64(mark.range[0]);
@@ -3212,6 +3213,14 @@ function oneOf<T extends string>(noun: string, names: readonly string[], kind: u
 }
 
 const PARAGRAPH_ATTRS: readonly string[] = ["block", "list", "indent", "checked", "start", "align"];
+
+/** crates/kaya/src/richdoc.rs is_paragraph_attr (RD17 A). */
+function isParagraphAttr(name: string): boolean {
+  if (PARAGRAPH_ATTRS.includes(name)) return true;
+  if (!name.startsWith("para:")) return false;
+  const key = name.slice("para:".length);
+  return key !== "" && key !== "spans" && !PARAGRAPH_ATTRS.includes(key);
+}
 const ABSENT_VALUES: ReadonlyMap<string, string> = new Map([
   ["block", "body"],
   ["list", "none"],
@@ -3334,15 +3343,20 @@ function selectionOf(tail: readonly wire.Decoded[]): Selection {
 export class Document {
   text: string;
   runs: Run[];
+  /** A `.kdoc`'s top-level members this kaya does not know, as one JSON
+   * object's text; "" when none (docs/rich-document-plan.md RD17). */
+  extra: string;
 
-  constructor(text = "", runs: readonly Run[] = []) {
+  constructor(text = "", runs: readonly Run[] = [], extra = "") {
     this.text = textValue("Document text", text);
     this.runs = runs.map((r) => ({ ...r }));
+    this.extra = String(extra);
   }
 
-  /** Value equality: the same text and the same runs in order (Rust's ==). */
+  /** Value equality: the same text, the same runs in order and the same
+   * extra (Rust's ==). */
   equals(other: Document): boolean {
-    return this.text === other.text && this.runs.length === other.runs.length &&
+    return this.text === other.text && this.extra === other.extra && this.runs.length === other.runs.length &&
       this.runs.every((r, i) => {
         const o = other.runs[i];
         return o !== undefined && r.range[0] === o.range[0] && r.range[1] === o.range[1] && r.name === o.name && r.value === o.value;
@@ -3421,18 +3435,18 @@ export class Document {
     const values = runtime.kdocRead(bytes);
     if (values[0] !== "") throw new Error(String(values[0]));
     const runs: Run[] = [];
-    for (let at = 3; at + 3 < values.length; at += 4) {
+    for (let at = 4; at + 3 < values.length; at += 4) {
       const range = decodedSpan("kdoc run", Number(values[at]), Number(values[at + 1]));
       runs.push(makeRun(range, String(values[at + 2]), String(values[at + 3])));
     }
-    return { document: new Document(String(values[2]), runs), readOnly: values[1] === "" ? null : String(values[1]) };
+    return { document: new Document(String(values[3]), runs, String(values[2])), readOnly: values[1] === "" ? null : String(values[1]) };
   }
 
   /** The document as a `.kdoc` file, the same bytes in nine bindings
    * (RD13); throws naming the run when it breaks a wall setDocument
    * holds. */
   toKdoc(): Uint8Array {
-    const values = runtime.kdocWrite(documentBytes(this));
+    const values = runtime.kdocWrite(documentBytes(this, this.extra));
     if (values[0] !== "") throw new Error(`kaya: toKdoc: ${String(values[0])}`);
     return new Uint8Array(Buffer.from(String(values[1]), "utf8"));
   }
@@ -7920,12 +7934,12 @@ export class App {
   /** @internal */
   _document(widget: number): Document {
     const doc = this._documents.get(widget);
-    return doc === undefined ? new Document() : new Document(doc.text, doc.runs);
+    return doc === undefined ? new Document() : new Document(doc.text, doc.runs, doc.extra);
   }
 
   /** @internal */
   _seedDocument(widget: number, document: Document): void {
-    this._documents.set(widget, new Document(document.text, document.runs));
+    this._documents.set(widget, new Document(document.text, document.runs, document.extra));
   }
 
   /** @internal The mirror lives while `rich` is on, as the core's does. */
@@ -7983,7 +7997,7 @@ export class App {
    * attribute covers the whole paragraphs it touches, as the core snaps it
    * (docs/rich-text-plan.md §17, docs/rich-document-plan.md §11). */
   _rangedActBounds(widget: number, span: Span, name: string): Span {
-    if (!PARAGRAPH_ATTRS.includes(name)) return span;
+    if (!isParagraphAttr(name)) return span;
     const data = Buffer.from(this._documents.get(widget)?.text ?? "", "utf8");
     const from = Math.min(span[0], data.length);
     const to = Math.min(span[1], data.length);

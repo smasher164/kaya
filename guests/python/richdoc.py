@@ -2,8 +2,9 @@
 docs/rich-document-plan.md §9 step 2): a heading, a body paragraph with a
 preset colour, a bullet list with a nested item, a numbered list and a
 checklist, then the paragraph acts from buttons, the platform's colour
-picker and a `.kdoc` round trip. label#1 is the binding's own Document,
-folded from the same deltas, so it must spell what the core holds."""
+picker and a `.kdoc` round trip, then a file carrying keys this kaya does
+not know (RD17). label#1 is the binding's own Document, folded from the
+same deltas, so it must spell what the core holds."""
 
 import sys
 
@@ -14,6 +15,12 @@ app = kaya.App()
 # BYTE-IDENTICAL to guests/rust/richdoc.rs's DOC.
 DOC = ("Groceries\nFresh from the market.\nApples\nGreen ones\nBread\n"
        "Wash\nSlice\nMilk\nEggs")
+
+# BYTE-IDENTICAL to guests/rust/richdoc.rs's UNKNOWN.
+UNKNOWN = ('{"kaya": "document", "version": 1, "com.example.theme": '
+           '{"page": "sepia"}, "paragraphs": [{"embed": "e1", "spans": '
+           '[["Loose"]]}, {"com.example.pinned": true, "spans": '
+           '[["Pinned"]]}]}')
 
 
 def spell(runs):
@@ -69,9 +76,20 @@ def on_kdoc():
     back = kaya.Document.from_kdoc(data)
     read_only = "none" if back.read_only is None else back.read_only
     same = "true" if back.document == now else "false"
+    extra = back.document.extra.replace('"', "'") or "none"
     editor.set_document(back.document)
-    kdoc.set(f"kdoc {len(data)} bytes, read_only {read_only}, same {same}")
+    kdoc.set(f"kdoc {len(data)} bytes, read_only {read_only}, same {same}, "
+             f"extra {extra}")
     runs.set(spell(back.document.runs))
+
+
+def on_unknown():
+    file = kaya.Document.from_kdoc(UNKNOWN.encode("utf-8"))
+    read_only = "none" if file.read_only is None else file.read_only
+    extra = file.document.extra.replace('"', "'")
+    editor.set_document(file.document)
+    kdoc.set(f"opened read_only {read_only}, extra {extra}")
+    runs.set(spell(file.document.runs))
 
 
 with app.window(title="richdoc", width=560.0, height=620.0):
@@ -97,5 +115,6 @@ with app.window(title="richdoc", width=560.0, height=620.0):
             kaya.button("red", on_click=on_red)            # button#2
             kaya.button("colour", on_click=on_colour)      # button#3
             kaya.button("kdoc", on_click=on_kdoc)          # button#4
+            kaya.button("unknown", on_click=on_unknown)    # button#5
 
 sys.exit(app.run())

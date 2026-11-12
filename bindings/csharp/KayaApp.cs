@@ -347,8 +347,13 @@ static class ParagraphAligns
 /// the core sees an act (crates/kaya/src/richdoc.rs).
 static class RichAttrs
 {
-    /// The attributes that cover whole paragraphs (RD1).
+    /// The attributes that cover whole paragraphs (RD1, RD17;
+    /// crates/kaya/src/richdoc.rs is_paragraph_attr).
     internal static bool IsParagraph(string name) =>
+        IsKaya(name) || name.StartsWith("para:", StringComparison.Ordinal)
+            && name.Substring("para:".Length) is var key && key != "" && key != "spans" && !IsKaya(key);
+
+    static bool IsKaya(string name) =>
         name is "block" or "list" or "indent" or "checked" or "start" or "align";
 
     /// A value's one spelling: a colour in upper case.
@@ -488,19 +493,26 @@ sealed class Document
 
     public Document(string text) => Text = text;
 
-    internal Document(string text, List<TextRun> runs)
+    internal Document(string text, List<TextRun> runs, string extra = "")
     {
         Text = text;
         Marks = runs;
+        Extra = extra;
     }
 
     public string Text { get; internal set; }
 
     public IReadOnlyList<TextRun> Runs => Marks;
 
-    /// Value equality: the same text and the same runs in order (Rust's ==).
+    /// A `.kdoc`'s top-level members this kaya does not know, as one JSON
+    /// object's text; "" when none (docs/rich-document-plan.md RD17).
+    public string Extra { get; internal set; } = "";
+
+    /// Value equality: the same text, the same runs in order and the same
+    /// extra (Rust's ==).
     public override bool Equals(object? obj) =>
-        obj is Document other && Text == other.Text && Marks.SequenceEqual(other.Marks);
+        obj is Document other && Text == other.Text && Marks.SequenceEqual(other.Marks)
+            && Extra == other.Extra;
 
     public override int GetHashCode() => HashCode.Combine(Text, Marks.Count);
 
@@ -564,12 +576,12 @@ sealed class Document
         if ((string)values[0] != "")
             throw new ArgumentException((string)values[0]);
         var runs = new List<TextRun>();
-        for (int i = 3; i + 3 < values.Count; i += 4)
+        for (int i = 4; i + 3 < values.Count; i += 4)
             runs.Add(new TextRun(
                 TextRange.Bytes((long)values[i], (long)values[i + 1]),
                 (string)values[i + 2], (string)values[i + 3]));
         string why = (string)values[1];
-        return new Kdoc(new Document((string)values[2], runs), why == "" ? null : why);
+        return new Kdoc(new Document((string)values[3], runs, (string)values[2]), why == "" ? null : why);
     }
 
     /// The document as a `.kdoc` file, the same bytes in nine bindings
@@ -577,7 +589,7 @@ sealed class Document
     /// breaks a wall Tx.SetDocument holds.
     public byte[] ToKdoc()
     {
-        List<object> values = Kaya.KdocWrite(KayaApp.DocumentBlob(this));
+        List<object> values = Kaya.KdocWrite(KayaApp.DocumentBlob(this, Extra));
         if ((string)values[0] != "")
             throw new InvalidOperationException("kaya: ToKdoc: " + (string)values[0]);
         return System.Text.Encoding.UTF8.GetBytes((string)values[1]);
@@ -2979,7 +2991,7 @@ sealed class KayaApp
     /// or the first Tx.SetDocument.
     public Document Document(Widget w) =>
         documents.TryGetValue(w.Id, out var doc)
-            ? new global::Document(doc.Text, new List<TextRun>(doc.Marks))
+            ? new global::Document(doc.Text, new List<TextRun>(doc.Marks), doc.Extra)
             : new global::Document("");
 
     /// The mirror lives while `rich` is on, as the core's does.
@@ -2998,7 +3010,7 @@ sealed class KayaApp
 
     internal void SeedDocument(ulong widget, Document document) =>
         documents[widget] = new global::Document(document.Text,
-            new List<TextRun>(document.Marks));
+            new List<TextRun>(document.Marks), document.Extra);
 
     /// A Document's BYTES as a record field holds them
     /// (docs/rich-text-plan.md §19, crates/kaya/src/wire.rs
@@ -3006,9 +3018,9 @@ sealed class KayaApp
     /// values per run. Hand-packed because KayaWire's value encoder is
     /// the generated file's own; guests/csharp/AbortCheck.cs compares
     /// these bytes against the wire rules read off by hand.
-    internal static byte[] DocumentBlob(Document document)
+    internal static byte[] DocumentBlob(Document document, params string[] head)
     {
-        var values = new List<object> { document.Text };
+        var values = new List<object>(head) { document.Text };
         foreach (TextRun run in document.Runs)
         {
             values.Add((long)run.Range.Start);

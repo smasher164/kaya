@@ -2,15 +2,22 @@
    tools/scenes/richdoc.steps (docs/rich-document-plan.md §9 step 2): a
    heading, a body paragraph with a preset colour, a bullet list with a
    nested item, a numbered list and a checklist, then the paragraph acts
-   from buttons, the platform's colour picker and a [.kdoc] round trip.
-   label#1 is the binding's own Document, folded from the same deltas, so
-   it must spell what the core holds. *)
+   from buttons, the platform's colour picker and a [.kdoc] round trip,
+   then a file carrying keys this kaya does not know (RD17). label#1 is the
+   binding's own Document, folded from the same deltas, so it must spell
+   what the core holds. *)
 
 open Kaya_app
 
 (* BYTE-IDENTICAL to guests/rust/richdoc.rs's DOC. *)
 let doc_source =
   "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs"
+
+(* BYTE-IDENTICAL to guests/rust/richdoc.rs's UNKNOWN. *)
+let unknown =
+  {|{"kaya": "document", "version": 1, "com.example.theme": {"page": "sepia"}, "paragraphs": [{"embed": "e1", "spans": [["Loose"]]}, {"com.example.pinned": true, "spans": [["Pinned"]]}]}|}
+
+let quoted extra = String.map (fun c -> if c = '"' then '\'' else c) extra
 
 let spell (runs : Run.t list) =
   String.concat "|"
@@ -99,11 +106,23 @@ let () =
                      let back = Document.of_kdoc bytes in
                      set_document editor back.document;
                      write kdoc
-                       (Printf.sprintf "kdoc %d bytes, read_only %s, same %b"
+                       (Printf.sprintf "kdoc %d bytes, read_only %s, same %b, extra %s"
                           (String.length bytes)
                           (Option.value back.read_only ~default:"none")
-                          (back.document = now));
+                          (back.document = now)
+                          (if back.document.extra = "" then "none"
+                           else quoted back.document.extra));
                      write runs (spell back.document.runs));
+                 (* button#5 *)
+                 button ~text:"unknown"
+                   ~on_click:(fun () ->
+                     let file = Document.of_kdoc unknown in
+                     set_document editor file.document;
+                     write kdoc
+                       (Printf.sprintf "opened read_only %s, extra %s"
+                          (Option.value file.read_only ~default:"none")
+                          (quoted file.document.extra));
+                     write runs (spell file.document.runs));
                ];
            ]
            ());

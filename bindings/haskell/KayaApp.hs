@@ -2598,13 +2598,13 @@ blockName b = case b of
 
 -- | A document with no runs yet, to mark up.
 documentOf :: Text -> Document
-documentOf txt = Document txt []
+documentOf txt = Document txt [] T.empty
 
 -- THE DOCUMENT COMES LAST, so a declaration composes:
 -- @blockRun (13, 24) Heading2 . boldRun (0, 6) $ documentOf text@.
 
 mark :: (Int, Int) -> Text -> MarkValue -> Document -> Document
-mark r n v doc = Document doc.text (doc.runs ++ [Run r n v])
+mark r n v doc = Document doc.text (doc.runs ++ [Run r n v]) doc.extra
 
 -- | A run's marks, suffixed: the plain names are the widget's own acts.
 boldRun, italicRun, underlineRun, strikeRun, codeRun ::
@@ -2685,9 +2685,9 @@ data Kdoc = Kdoc
 -- value here, as 'imageDominant' answers 'Nothing'.
 fromKdoc :: BS.ByteString -> Either Text Kdoc
 fromKdoc bytes = case kdocValues (R.kdocReadRaw bytes) of
-  (W.VStr refusal : W.VStr why : W.VStr txt : runs)
+  (W.VStr refusal : W.VStr why : W.VStr more : W.VStr txt : runs)
     | null refusal ->
-        Right (Kdoc (Document (T.pack txt) (runsOfValues runs)) (if null why then Nothing else Just (T.pack why)))
+        Right (Kdoc (Document (T.pack txt) (runsOfValues runs) (T.pack more)) (if null why then Nothing else Just (T.pack why)))
     | otherwise -> Left (T.pack refusal)
   vs -> errorWithoutStackTrace ("kaya: kaya_kdoc_read answered " ++ show (length vs) ++ " values out of shape")
 
@@ -2695,7 +2695,7 @@ fromKdoc bytes = case kdocValues (R.kdocReadRaw bytes) of
 -- (RD13); an error naming the run when it breaks a wall 'setDocument'
 -- holds.
 toKdoc :: Document -> BS.ByteString
-toKdoc doc = case kdocValues (R.kdocWriteRaw (documentBlob doc)) of
+toKdoc doc = case kdocValues (R.kdocWriteRaw (documentBlobAfter [W.VStr (T.unpack doc.extra)] doc)) of
   [W.VStr "", W.VStr file] -> TE.encodeUtf8 (T.pack file)
   (W.VStr refusal : _) -> errorWithoutStackTrace ("kaya: toKdoc: " ++ refusal)
   vs -> errorWithoutStackTrace ("kaya: kaya_kdoc_write answered " ++ show (length vs) ++ " values out of shape")
@@ -2711,9 +2711,13 @@ kdocValues bytes = unsafePerformIO $
           (v :) <$> walk next (n - 1)
     walk 8 (fromIntegral count)
 
--- | The attributes that cover whole paragraphs (RD1).
+-- | The attributes that cover whole paragraphs (RD1, RD17;
+-- crates\/kaya\/src\/richdoc.rs @is_paragraph_attr@).
 paragraphAttr :: Text -> Bool
-paragraphAttr n = n `elem` ["block", "list", "indent", "checked", "start", "align"]
+paragraphAttr n = n `elem` known || maybe False kept (T.stripPrefix "para:" n)
+  where
+    known = ["block", "list", "indent", "checked", "start", "align"]
+    kept key = not (T.null key) && key /= "spans" && key `notElem` known
 
 -- | A value's one spelling (crates\/kaya\/src\/richdoc.rs,
 -- @canonical_value@): a colour in upper case.
@@ -2817,11 +2821,12 @@ foldEdit e doc =
        in if start < 0 || start > stop || stop > len || not (boundary start)
             || not (boundary stop)
             then -- A mirror out of step with the core would splice garbage.
-              Document e.inserted e.runs
+              Document e.inserted e.runs doc.extra
             else
               Document
                 (utf8Chars (take start bytes ++ ins ++ drop stop bytes))
                 (normalizeRuns (kept ++ landed))
+                doc.extra
 
 -- | The core's @fold_format@, over any document.
 foldFormat :: Format -> Document -> Document
@@ -2844,7 +2849,7 @@ foldFormat act doc
           painted = case act.value of
             Just v -> kept ++ [Run (start, stop) n v]
             Nothing -> kept
-       in Document doc.text (normalizeRuns painted)
+       in Document doc.text (normalizeRuns painted) doc.extra
 
 -- One delivered act, into the live mirror (crates/kaya/src/app.rs,
 -- @absorb_edit@ / @absorb_format@).

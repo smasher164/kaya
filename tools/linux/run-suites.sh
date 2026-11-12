@@ -2742,6 +2742,9 @@ for proto in x11 wayland; do
         "$CARGO_TARGET_DIR/debug/examples/richdoc"
     run "$proto" richdocdark-rust env KAYA_APPEARANCE=dark KAYA_SELFTEST=richdoc \
         "$CARGO_TARGET_DIR/debug/examples/richdoc"
+    # What Orca is told of a drawn list marker, off the bus (RD18).
+    run "$proto" richdocax-rust env KAYA_SELFTEST=richdocax \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/richdoc"
     # THE RICH ROWS (docs/rich-text-plan.md §19): rust alone for richtext's
     # reason; every read is the core's document, so no a11y-leg.sh.
     run "$proto" richrows-rust env KAYA_SELFTEST=richrows \

@@ -1957,6 +1957,9 @@ func (r TextRun) IsFlag() bool { return r.Value == FlagValue }
 type Document struct {
 	Text string
 	Runs []TextRun
+	// Extra is a .kdoc's top-level members this kaya does not know, as one
+	// JSON object's text; "" when none (docs/rich-document-plan.md RD17).
+	Extra string
 }
 
 // NewDocument starts a document; the Mark chain paints its attributes.
@@ -2045,7 +2048,7 @@ func (d Document) Color(start, end int, rgb string) Document {
 // Equal is value equality: the same text and the same runs in the same order
 // (Rust's ==; docs/rich-document-plan.md §11).
 func (d Document) Equal(o Document) bool {
-	return d.Text == o.Text && slices.Equal(d.Runs, o.Runs)
+	return d.Text == o.Text && slices.Equal(d.Runs, o.Runs) && d.Extra == o.Extra
 }
 
 // AttrAt answers the attribute covering one byte offset, and whether
@@ -2492,13 +2495,12 @@ func absentValue(name, value string) bool {
 	return false
 }
 
-// paragraphAttr is whether name covers whole paragraphs (RD1).
+// paragraphAttr is whether name covers whole paragraphs (RD1, RD17;
+// crates/kaya/src/richdoc.rs is_paragraph_attr).
 func paragraphAttr(name string) bool {
-	switch name {
-	case "block", "list", "indent", "checked", "start", "align":
-		return true
-	}
-	return false
+	known := []string{"block", "list", "indent", "checked", "start", "align"}
+	key, ok := strings.CutPrefix(name, "para:")
+	return slices.Contains(known, name) || ok && key != "" && key != "spans" && !slices.Contains(known, key)
 }
 
 // CanUndo says whether an OwnUndo textarea's app has something to undo —

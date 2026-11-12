@@ -2267,9 +2267,14 @@ public enum KayaParagraphAlign: String {
     var name: String { rawValue }
 }
 
-/// The attributes that cover whole paragraphs (RD1).
+/// The attributes that cover whole paragraphs (RD1, RD17;
+/// crates/kaya/src/richdoc.rs is_paragraph_attr).
 func kayaParagraphAttr(_ name: String) -> Bool {
-    ["block", "list", "indent", "checked", "start", "align"].contains(name)
+    let known = ["block", "list", "indent", "checked", "start", "align"]
+    if known.contains(name) { return true }
+    guard name.hasPrefix("para:") else { return false }
+    let key = String(name.dropFirst("para:".count))
+    return !key.isEmpty && key != "spans" && !known.contains(key)
 }
 
 /// A value's one spelling (crates/kaya/src/richdoc.rs, canonical_value): a
@@ -2358,6 +2363,9 @@ public enum KayaEditSource: Int {
 public struct KayaDocument: Equatable, Sendable {
     public var text: String = ""
     public var runs: [KayaRun] = []
+    /// A `.kdoc`'s top-level members this kaya does not know, as one JSON
+    /// object's text; "" when none (docs/rich-document-plan.md RD17).
+    public var extra: String = ""
 
     public init(_ text: String = "") {
         self.text = text
@@ -2420,12 +2428,13 @@ public struct KayaDocument: Equatable, Sendable {
     public static func fromKdoc(_ bytes: Data) throws -> KayaKdoc {
         let values = kayaKdocValues(bytes) { kaya_kdoc_read($0, $1, $2, $3) }
         guard case .str(let refusal) = values[0], case .str(let why) = values[1],
-              case .str(let text) = values[2] else {
+              case .str(let extra) = values[2], case .str(let text) = values[3] else {
             preconditionFailure("kaya: kaya_kdoc_read answered \(values.count) values out of shape")
         }
         if !refusal.isEmpty { throw KayaKdocRefusal(sentence: refusal) }
         var doc = KayaDocument(text)
-        var i = 3
+        doc.extra = extra
+        var i = 4
         while i + 3 < values.count {
             guard case .i64(let start) = values[i], case .i64(let end) = values[i + 1],
                   case .str(let name) = values[i + 2], case .str(let value) = values[i + 3]
@@ -2441,7 +2450,7 @@ public struct KayaDocument: Equatable, Sendable {
     /// (RD13); a precondition failure naming the run when it breaks a wall
     /// setDocument holds.
     public func toKdoc() -> Data {
-        let values = kayaKdocValues(kayaDocumentBlob(self)) { kaya_kdoc_write($0, $1, $2, $3) }
+        let values = kayaKdocValues(kayaDocumentBlob(self, head: [extra])) { kaya_kdoc_write($0, $1, $2, $3) }
         guard case .str(let refusal) = values[0], case .str(let file) = values[1] else {
             preconditionFailure("kaya: kaya_kdoc_write answered \(values.count) values out of shape")
         }
@@ -2608,7 +2617,7 @@ func kayaFoldFormat(
 /// Hand-packed because KayaWire's value encoder is the generated file's
 /// own; the bytes are pinned against the wire rules in
 /// tools/checks/swift-abort/main.swift.
-func kayaDocumentBlob(_ doc: KayaDocument) -> Data {
+func kayaDocumentBlob(_ doc: KayaDocument, head: [String] = []) -> Data {
     var out = Data()
     func put32(_ v: UInt32) {
         withUnsafeBytes(of: v.littleEndian) { out.append(contentsOf: $0) }
@@ -2630,8 +2639,12 @@ func kayaDocumentBlob(_ doc: KayaDocument) -> Data {
     func pad() {
         while out.count % 8 != 0 { out.append(0) }
     }
-    put32(UInt32(1 + doc.runs.count * 4))
+    put32(UInt32(head.count + 1 + doc.runs.count * 4))
     put32(0)
+    for value in head {
+        str(value)
+        pad()
+    }
     str(doc.text)
     pad()
     for run in doc.runs {

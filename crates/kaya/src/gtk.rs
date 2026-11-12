@@ -871,6 +871,32 @@ fn refresh_rich_view(core: &CoreState, id: WidgetId) {
     apply_rich_geometry(view);
     let markers = core.scene.rich_markers(id).unwrap_or_default();
     rich.set_markers(markers);
+    refresh_item_description(core, id);
+}
+
+thread_local! {
+    /// The description each rich textarea last published, so a caret move
+    /// inside one item publishes no change.
+    static ITEM_DESCRIPTIONS: RefCell<HashMap<u64, String>> = RefCell::new(HashMap::new());
+}
+
+/// RD18 (docs/rich-document-plan.md §11): a drawn marker is no text, so the
+/// view's accessible DESCRIPTION is what the list item holding the caret
+/// tells (`bullet, 2 of 3`), and unset outside a list item.
+fn refresh_item_description(core: &CoreState, id: WidgetId) {
+    use gtk4::prelude::AccessibleExtManual;
+    let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else { return };
+    let caret = core.scene.rich_selection(id).map_or(0, |s| s.start);
+    let said = core.scene.rich_item_speech(id, caret).unwrap_or_default();
+    let changed = ITEM_DESCRIPTIONS.with_borrow_mut(|all| all.insert(id.0, said.clone()).as_deref() != Some(said.as_str()));
+    if !changed {
+        return;
+    }
+    if said.is_empty() {
+        view.reset_property(gtk4::AccessibleProperty::Description);
+    } else {
+        view.update_property(&[gtk4::accessible::Property::Description(&said)]);
+    }
 }
 
 /// THE QUOTE'S RULE (docs/rich-text-plan.md §18) AND THE LIST MARKERS
@@ -1894,6 +1920,7 @@ fn note_rich_selection(id: u64, start: u64, end: u64) {
             let Some(core) = core.as_mut() else { return };
             core.scene.set_text_selection(WidgetId(id), start, end);
             send_asks(core);
+            refresh_item_description(core, WidgetId(id));
         });
     });
 }
@@ -24061,6 +24088,41 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    /// The view's AT-SPI DESCRIPTION off the bus: what Orca is told of the
+    /// list item holding the caret (refresh_item_description).
+    fn ax_item(&self, t: crate::harness::Target) -> Result<String, String> {
+        #[cfg(feature = "harness")]
+        {
+            let (role, rank) = Self::on_main(move |core| {
+                let widget = target_widget(core, t)?;
+                Some((atspi_role_of(&widget)?, atspi_rank(&core.window, &widget)?))
+            })
+            .ok_or("the textarea is not in the accessibility tree")?;
+            return match atspi_collect(role, rank, true) {
+                Some(said) if said.is_empty() => Ok("<none>".to_owned()),
+                Some(said) => Ok(said),
+                None => Err(atspi_miss(&format!("no {role:?}#{rank} on the bus"))),
+            };
+        }
+        #[allow(unreachable_code)]
+        Err(crate::harness::not_built_yet("expect_ax_item"))
+    }
+
+    /// The Text interface's content off the bus, what Orca reads as the field.
+    fn ax_text(&self, t: crate::harness::Target) -> Result<String, String> {
+        #[cfg(feature = "harness")]
+        {
+            let (role, rank) = Self::on_main(move |core| {
+                let widget = target_widget(core, t)?;
+                Some((atspi_role_of(&widget)?, atspi_rank(&core.window, &widget)?))
+            })
+            .ok_or("the textarea is not in the accessibility tree")?;
+            return atspi_text_of(role, rank).ok_or_else(|| atspi_miss(&format!("no text on {role:?}#{rank}")));
+        }
+        #[allow(unreachable_code)]
+        Err(crate::harness::not_built_yet("expect_ax_text"))
+    }
+
     /// A real click on the drawn marker's centre, the lane's own pointer
     /// (tools/linux/dragdrive.py's `click`).
     fn click_marker(&self, t: crate::harness::Target, start: u64) -> Result<(), String> {
@@ -27727,15 +27789,18 @@ impl crate::harness::Stage for GtkStage {
             Some((atspi_role_of(&widget)?, atspi_rank(&core.window, &widget)?))
         });
         let Some((role, rank)) = found else { return "<not in the accessibility tree>".to_owned() };
-        match atspi_states(role, rank) {
+        let began = std::time::Instant::now();
+        let read = atspi_states(role, rank);
+        let took = began.elapsed().as_millis();
+        match read {
             Ok(states) => {
                 let (checked, pressed) = (states.contains(atspi::State::Checked), states.contains(atspi::State::Pressed));
                 format!(
-                    "{} (the bus's {role:?} #{rank}: checked {checked}, pressed {pressed})",
+                    "{} (the bus's {role:?} #{rank}: checked {checked}, pressed {pressed}; the bus read took {took} ms)",
                     if checked || pressed { "on" } else { "off" }
                 )
             }
-            Err(why) => atspi_miss(&why),
+            Err(why) => atspi_miss(&format!("{why} (the bus read took {took} ms)")),
         }
     }
     fn label_tint(&self, t: crate::harness::Target) -> String {

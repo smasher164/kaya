@@ -50,8 +50,8 @@ func FromKdoc(data []byte) (Kdoc, error) {
 	if refusal := vals[0].(string); refusal != "" {
 		return Kdoc{}, errors.New(refusal)
 	}
-	doc := Document{Text: vals[2].(string)}
-	for i := 3; i+3 < len(vals); i += 4 {
+	doc := Document{Text: vals[3].(string), Extra: vals[2].(string)}
+	for i := 4; i+3 < len(vals); i += 4 {
 		doc.Runs = append(doc.Runs, TextRun{
 			Range: decodedSpan("kdoc run", int(vals[i].(int64)), int(vals[i+1].(int64))),
 			Name:  vals[i+2].(string),
@@ -65,7 +65,7 @@ func FromKdoc(data []byte) (Kdoc, error) {
 // bindings (RD13). It panics naming the run when the document breaks a wall
 // Tx.SetDocument holds.
 func (d Document) ToKdoc() []byte {
-	vals := kdocCall(documentBlob(d), func(in *C.uint8_t, n C.size_t, out *C.uint8_t, cap C.size_t) C.size_t {
+	vals := kdocCall(documentBlob(d, d.Extra), func(in *C.uint8_t, n C.size_t, out *C.uint8_t, cap C.size_t) C.size_t {
 		return C.kaya_kdoc_write(in, n, out, cap)
 	})
 	if refusal := vals[0].(string); refusal != "" {

@@ -1333,6 +1333,14 @@ pub enum Step {
     /// markers the ARM drew (docs/rich-document-plan.md §11), refused naming
     /// both when its record disagrees with the core's numbering.
     ExpectMarkers(Target, String),
+    /// `expect_ax_item <target> "<said>"` — what the platform's accessibility
+    /// tree tells of the list item holding the caret beyond its text
+    /// (docs/rich-document-plan.md RD18), `<none>` when it tells nothing.
+    ExpectAxItem(Target, String),
+    /// `expect_ax_text <target> "<text>"` — the text the platform's
+    /// accessibility tree gives a screen reader for the field, newlines and
+    /// all (RD18's accessibility-only text on Compose).
+    ExpectAxText(Target, String),
     /// `click_marker <target> <start>` — a real click on the drawn marker of
     /// the paragraph starting at that byte (a checklist item's box).
     ClickMarker(Target, u64),
@@ -1469,6 +1477,8 @@ impl Step {
             | Step::ExpectEdit(t, _)
             | Step::SelectText(t, _)
             | Step::ExpectMarkers(t, _)
+            | Step::ExpectAxItem(t, _)
+            | Step::ExpectAxText(t, _)
             | Step::ClickMarker(t, _)
             | Step::PickTextColor(t, _)
             | Step::ExpectTextInk(t, ..) => vec![t],
@@ -1855,6 +1865,7 @@ impl Step {
             Step::Press { .. } => false,
             Step::SelectText(..) | Step::ClickMarker(..) | Step::PickTextColor(..) => false,
             Step::ExpectMarkers(..) | Step::ExpectTextInk(..) => true,
+            Step::ExpectAxItem(..) | Step::ExpectAxText(..) => true,
             Step::Hover(_) | Step::RestPointer(_) => false,
             Step::PointerDown(_) | Step::PointerUp => false,
             Step::ExpectBackHelp(..) => true,
@@ -3742,6 +3753,15 @@ pub trait Stage: Send + 'static {
     /// core's own numbering beside it.
     fn drawn_markers(&self, _target: Target) -> Result<(String, String), String> {
         Err(not_built_yet("expect_markers"))
+    }
+    /// What the platform's accessibility tree tells of the list item holding
+    /// the caret beyond its text; `<none>` when nothing.
+    fn ax_item(&self, _target: Target) -> Result<String, String> {
+        Err(not_built_yet("expect_ax_item"))
+    }
+    /// The field's text as the platform's accessibility tree gives it.
+    fn ax_text(&self, _target: Target) -> Result<String, String> {
+        Err(not_built_yet("expect_ax_text"))
     }
     /// A real click on a paragraph's drawn marker.
     fn click_marker(&self, _target: Target, _start: u64) -> Result<(), String> {
@@ -5989,6 +6009,20 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_markers wants a target and a quoted marker list: {line:?}")
                 })?;
                 Step::ExpectMarkers(parse_target(target)?, parse_string(text)?)
+            }
+            "expect_ax_item" | "expect_ax_text" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("{op} wants a textarea target and a quoted string: {line:?}")
+                })?;
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::Textarea {
+                    return Err(format!("{op} reads a rich textarea, not {target:?}: {line:?}"));
+                }
+                if op == "expect_ax_item" {
+                    Step::ExpectAxItem(target, parse_string(text)?)
+                } else {
+                    Step::ExpectAxText(target, parse_string(text)?)
+                }
             }
             "click_marker" => {
                 let (target, start) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -8895,7 +8929,7 @@ fn run_with_log(
                 let want = if *on { "on" } else { "off" };
                 word_reading(&stage.selected_read(*t), want, || format!("{} selected", target_spec(t)))
             })),
-            Step::ExpectChecked(t, on) => Some(poll(|| {
+            Step::ExpectChecked(t, on) => Some(poll_named("expect_checked", || {
                 let want = if *on { "on" } else { "off" };
                 word_reading(&stage.checked_read(*t), want, || format!("{} checked", target_spec(t)))
             })),
@@ -9542,6 +9576,14 @@ fn run_with_log(
                 Ok((drawn, _)) if drawn == *want => Ok(format!("markers {want:?}")),
                 Ok((drawn, _)) => Err(format!("markers {drawn:?}, wanted {want:?}")),
             })),
+            Step::ExpectAxItem(target, want) => Some(poll_named("expect_ax_item", || {
+                let got = stage.ax_item(*target).map_err(|why| format!("ax item: {why}"))?;
+                if got == *want { Ok(format!("ax item {want:?}")) } else { Err(format!("ax item {got:?}, wanted {want:?}")) }
+            })),
+            Step::ExpectAxText(target, want) => Some(poll_named("expect_ax_text", || {
+                let got = stage.ax_text(*target).map_err(|why| format!("ax text: {why}"))?;
+                if got == *want { Ok(format!("ax text {want:?}")) } else { Err(format!("ax text {got:?}, wanted {want:?}")) }
+            })),
             Step::ExpectTextInk(target, range, want) => Some(poll(|| {
                 let got = stage.text_ink(*target, *range).map_err(|why| format!("text ink: {why}"))?;
                 if text_ink_matches(&got, want) {
@@ -9778,7 +9820,18 @@ fn run_with_log(
         };
         let step = &step_norm;
         match outcome.map(|o| respell(o, authored, step)) {
-            Some(Ok(o)) => observed.push(o),
+            Some(Ok(o)) => {
+                // A STEP THAT PASSED SLOWLY is accounted like a failed one
+                // (docs/traps.md, the expect_checked that took 15 s and let a
+                // toast expire).
+                #[cfg(target_os = "linux")]
+                if cpu_at.elapsed() >= SLOW_STEP && !matches!(step, Step::Settle(_)) {
+                    if let Some((log, _)) = log {
+                        log(&format!("KAYA_HARNESS: slow step passed: cpu over the step: {}", cpu_at.account()));
+                    }
+                }
+                observed.push(o)
+            }
             Some(Err(e)) => {
                 // PRINTED THE MOMENT IT IS FINAL: the verdict below is the
                 // ONLY place `failures` is named and it needs the run to
@@ -10187,6 +10240,10 @@ pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 // the moment it matches, so the width costs a green run nothing.
 pub const POLL_DEADLINE: Duration = Duration::from_secs(15);
 
+/// How long a step may take and still pass without its CPU account printed.
+#[cfg(target_os = "linux")]
+const SLOW_STEP: Duration = Duration::from_secs(5);
+
 // The action wait's numbers, the same three in all three runners.
 const ANSWER_POLL: Duration = Duration::from_millis(5);
 const ANSWER_POLLS: u32 = 60;
@@ -10281,7 +10338,7 @@ pub const PRESS_KEYS: [&str; 7] = ["return", "tab", "space", "up", "down", "shif
 
 /// A rich document verb this backend's arm has not built yet
 /// (docs/rich-document-plan.md §9: the Mac first, the rest in step 4).
-fn not_built_yet(verb: &str) -> String {
+pub(crate) fn not_built_yet(verb: &str) -> String {
     format!("{verb} is not built on this backend yet (docs/rich-document-plan.md §9 step 4)")
 }
 
@@ -10502,6 +10559,10 @@ pub(crate) mod cpu {
                 nap => schedstat(nap),
             };
             Snap { at: Instant::now(), tid, thread, napper, pressure: pressure() }
+        }
+
+        pub(crate) fn elapsed(&self) -> std::time::Duration {
+            self.at.elapsed()
         }
 
         pub(crate) fn account(&self) -> String {
