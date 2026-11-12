@@ -102,7 +102,7 @@ static class RichdocScene
                                 + $"same {(same ? "true" : "false")}, extra {(extra == "" ? "none" : extra)}");
                         t.Write(runs, Spell(back.Document.Runs));
                     });
-                    tx.Button("unknown", onClick: t => // button#5
+                    tx.Button("keys", onClick: t => // button#5
                     {
                         Kdoc file = Document.FromKdoc(System.Text.Encoding.UTF8.GetBytes(Unknown));
                         t.SetDocument(editor, file.Document);

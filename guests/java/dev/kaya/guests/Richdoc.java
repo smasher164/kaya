@@ -106,7 +106,7 @@ public final class Richdoc {
                                 + (extra.isEmpty() ? "none" : extra));
                         t.write(runs, spell(back.document().runs()));
                     });
-                    tx.button("unknown", t -> { // button#5
+                    tx.button("keys", t -> { // button#5
                         KayaApp.Kdoc file = KayaApp.Document.fromKdoc(
                                 UNKNOWN.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                         t.setDocument(refs.editor, file.document());

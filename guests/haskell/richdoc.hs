@@ -97,7 +97,7 @@ main = kayaMain $ \app -> do
                         <> (if T.null back.document.extra then "none" else quoted back.document.extra)
                     )
                   writeSignal runs (spell back.document.runs),
-              buttonOn "unknown" $ do -- button#5
+              buttonOn "keys" $ do -- button#5
                 file <- either (fail . T.unpack) pure (fromKdoc (TE.encodeUtf8 unknown))
                 submitTx app $ do
                   setDocument app editor file.document

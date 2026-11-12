@@ -168,7 +168,7 @@ size = 'XL'
 unblocks = "the text editor's Writing Mode; a notes app on a CRDT"
 plan = 'docs/rich-document-plan.md'
 review = 'richdocbuild'
-text = "SHIPPED 2026-11-11 (72d17b78, 96f2e834, 57c31c19, 55ecc56d, 1027107c; review {review:richdocbuild}): lists, indentation, checklists, alignment and a free text colour mapped for the dark page, a .kdoc file and copy and paste with formatting through RTF and HTML, on five platforms and in nine bindings; the editor's Writing Mode is a rich tab. Planned on {review:richdoc} with eighteen rulings. Later slices: highlight, the safe save through a picked file, unknown keys kept through an edit (RD17) and drawn markers for screen readers (RD18)."
+text = "SHIPPED 2026-11-11 (72d17b78, 96f2e834, 57c31c19, 55ecc56d, 1027107c; review {review:richdocbuild}): lists, indentation, checklists, alignment and a free text colour mapped for the dark page, a .kdoc file and copy and paste with formatting through RTF and HTML, on five platforms and in nine bindings; the editor's Writing Mode is a rich tab. Planned on {review:richdoc} with eighteen rulings. Unknown keys kept through an edit (RD17) and the caret's list item for Orca and TalkBack (RD18) followed on 2026-11-12 (ad33e17a). Later slices: highlight, the safe save through a picked file, VoiceOver and Narrator (RD19, asked) and a model field's Document keeping its extra (RD20, asked)."
 
 [[menu]]
 title = '<b>The video editor itself</b>'

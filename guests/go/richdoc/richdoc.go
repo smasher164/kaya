@@ -120,7 +120,7 @@ func App() *kaya.App {
 					tx.Write(kdoc, fmt.Sprintf("kdoc %d bytes, read_only %s, same %t, extra %s", len(bytes), readOnly, same, extra))
 					tx.Write(runs, spell(back.Document.Runs))
 				})
-				tx.Button("unknown", func(tx *kaya.Tx) { // button#5
+				tx.Button("keys", func(tx *kaya.Tx) { // button#5
 					file, err := kaya.FromKdoc([]byte(unknown))
 					if err != nil {
 						panic("the scene's file reads: " + err.Error())

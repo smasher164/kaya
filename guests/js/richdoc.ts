@@ -82,7 +82,7 @@ const { last, runs, kdoc, editor } = app.window({ title: "richdoc", width: 560, 
       kaya.button("red", { onClick: () => editor.color("#DD1F24") }); // button#2
       kaya.button("colour", { onClick: () => editor.pickTextColor() }); // button#3
       kaya.button("kdoc", { onClick: onKdoc }); // button#4
-      kaya.button("unknown", { onClick: onUnknown }); // button#5
+      kaya.button("keys", { onClick: onUnknown }); // button#5
     });
     return editor;
   });

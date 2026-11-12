@@ -77,7 +77,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         ("red", Msg::Red),
                         ("colour", Msg::PickColour),
                         ("kdoc", Msg::Kdoc),
-                        ("unknown", Msg::Unknown),
+                        ("keys", Msg::Unknown),
                     ] {
                         let button = tx.button(title).id();
                         msgs.on_click(button, msg);

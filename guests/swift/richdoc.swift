@@ -93,7 +93,7 @@ KayaApp.run { app in
                             + "same \(back.document == now), extra \(extra.isEmpty ? "none" : extra)"))
                     t.write(runs, .str(spell(back.document.runs)))
                 }
-                tx.button("unknown") { t in  // button#5
+                tx.button("keys") { t in  // button#5
                     let file = try KayaDocument.fromKdoc(Data(unknown.utf8))
                     t.setDocument(editor, file.document)
                     t.write(

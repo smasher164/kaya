@@ -114,7 +114,7 @@ let () =
                            else quoted back.document.extra));
                      write runs (spell back.document.runs));
                  (* button#5 *)
-                 button ~text:"unknown"
+                 button ~text:"keys"
                    ~on_click:(fun () ->
                      let file = Document.of_kdoc unknown in
                      set_document editor file.document;

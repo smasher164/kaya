@@ -115,6 +115,6 @@ with app.window(title="richdoc", width=560.0, height=620.0):
             kaya.button("red", on_click=on_red)            # button#2
             kaya.button("colour", on_click=on_colour)      # button#3
             kaya.button("kdoc", on_click=on_kdoc)          # button#4
-            kaya.button("unknown", on_click=on_unknown)    # button#5
+            kaya.button("keys", on_click=on_unknown)    # button#5
 
 sys.exit(app.run())
