@@ -450,7 +450,9 @@ lanes = 'NNSNS'
 need_why = "the maintainer's ask of 2026-11-05 for Writing Mode; every notes and word-processing app has lists, indentation and text colour (Notes, Pages, Word, Google Docs, Notion)"
 parity_why = 'native lists in AppKit/UIKit (NSTextList) and RichEditBox; GTK and Compose have none in their editable views; a run colour everywhere'
 shape = 'paragraph attributes and a colour mark on the rich textarea, a core codec for a .kdoc file, copy and paste with formatting through RTF and HTML, Writing Mode as a rich tab'
-kaya = "RULED 2026-11-11 (docs/rich-document-plan.md, all sixteen rulings taken; RD12 amended to no Markdown and no DOCX); not built: lists, indent, checklists, alignment and a free text colour mapped for the dark page in the core; a JSON .kdoc file, RTF and HTML on the clipboard in the first build, SQLite for a notes app's library later; an Automerge mapping through block markers so a collaborative step needs no format change. Markers are drawn on GTK and Compose and native on Windows; the Mac draws them where NSTextList does not (macOS 14 and 15)."
+kaya = "Lists, indent, checklists, alignment and a free text colour mapped for the dark page in the core; a JSON .kdoc file; RTF and HTML on the clipboard (HTML only on Android); an Automerge mapping through block markers is planned so a collaborative step needs no format change. Markers are drawn by kaya on GTK, Compose and WinUI; the Mac and iOS draw them where NSTextList does not. Later slices: highlight (RD6), the safe save through a picked file (§4.1), unknown paragraph and document keys kept through an edit (RD17 A) and screen-reader exposure of drawn markers (RD18 B)."
+shipped = true
+shipped_note = "2026-11-11 (72d17b78, 96f2e834, 57c31c19, 55ecc56d, 1027107c): the rich document on five platforms and in nine bindings, the editor's rich tab and Make Rich Text · <a href=\"https://claude.ai/artifact/8xxAYSybH7th52nzpteUGE\">review page</a>"
 
 [[feature]]
 slug = 'sheet'

@@ -43,6 +43,7 @@ fontpicker = 'https://claude.ai/artifact/6RrGZauKea4rQyycBPn3oC'
 rulings1101 = 'https://claude.ai/artifact/64X8oeghtQchdNVYmdQMJn'
 growfit = 'https://claude.ai/artifact/SsduV7PtFoi344sadJopgo'
 richdoc = 'https://claude.ai/artifact/8PxsiUURHiARrkG5tgxMXq'
+richdocbuild = 'https://claude.ai/artifact/8xxAYSybH7th52nzpteUGE'
 timecode = '~/Projects/kaya-handoffs/2026-10-04-timecode/review/index.html'
 
 [[menu]]
@@ -162,11 +163,12 @@ text = 'SHIPPED 2026-10-06 (f835b14b): <code>drag &lt;src&gt; to &lt;dst&gt; at 
 [[menu]]
 title = '<a href="#item-rich_document">The rich document</a>'
 star = true
-status = 'needs ruling'
+status = 'shipped'
 size = 'XL'
 unblocks = "the text editor's Writing Mode; a notes app on a CRDT"
 plan = 'docs/rich-document-plan.md'
-text = "Asked by the maintainer on 2026-11-05: Writing Mode as a traditional rich document, with indentation, lists and a free text colour built into kaya's rich text, saved in its own format and extendable to the CRDT notes idea. Researched across Automerge, Peritext, json-joy, Yjs, Apple Notes, RTF, DOCX, the JSON editor formats and SQLite; sixteen rulings, all taken on 2026-11-11 (no Markdown or DOCX; copy and paste with formatting in the first build), on {review:richdoc}. Depth on the Mac first, then the four other arms and eight bindings."
+review = 'richdocbuild'
+text = "SHIPPED 2026-11-11 (72d17b78, 96f2e834, 57c31c19, 55ecc56d, 1027107c; review {review:richdocbuild}): lists, indentation, checklists, alignment and a free text colour mapped for the dark page, a .kdoc file and copy and paste with formatting through RTF and HTML, on five platforms and in nine bindings; the editor's Writing Mode is a rich tab. Planned on {review:richdoc} with eighteen rulings. Later slices: highlight, the safe save through a picked file, unknown keys kept through an edit (RD17) and drawn markers for screen readers (RD18)."
 
 [[menu]]
 title = '<b>The video editor itself</b>'

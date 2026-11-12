@@ -2,7 +2,8 @@
 
 Status: RULED 2026-11-11; the build began 2026-11-11 and §11 records it. RD9 RULED A and the safe save
 through a picked file (§4.1) RULED; every other ruling (RD1-RD8, RD10, RD11,
-RD13-RD16) RULED as recommended ("I like all the recommendations except
+RD13-RD16) RULED as recommended; RD17 RULED A and RD18 RULED B on
+2026-11-12, both later slices ("I like all the recommendations except
 rd12"); RD12 RULED as amended: no Markdown and no DOCX, the clipboard's RTF
 and HTML in the first build (the maintainer: "why do we even have markdown
 import and export?" and "i feel like that's out of scope for our rich text
@@ -985,7 +986,7 @@ the C pair `kaya_kdoc_read` and `kaya_kdoc_write` (values lists; the
 document in a document field's encoding), and Rust's `Document::from_kdoc`
 answers a `Kdoc { document, read_only }`.
 
-**RD8's interim (RD17 asks the rest).** A file whose paragraphs or top level
+**RD8's interim (RD17 RULED A 2026-11-12, not built yet).** A file whose paragraphs or top level
 carry a key this kaya does not know, or whose spans carry an unknown mark
 without a dot, or which `requires` anything, opens READ-ONLY with a sentence
 naming each; `history` is dropped, as §4 says.
@@ -1308,7 +1309,11 @@ RECOMMEND A. Documents are small, the read is needed for the length anyway,
 and a length check passes a provider that wrote the right number of wrong
 bytes. The hash is kaya's own and never leaves the device.
 
-### RD17. How a reader keeps unknown paragraph and document keys through an edit (ASKED 2026-11-11)
+### RD17. How a reader keeps unknown paragraph and document keys through an edit (RULED 2026-11-12: A)
+
+RULED A as recommended (the maintainer, 2026-11-12: "i agree with your
+recommendations"). Not built yet: the read-only interim stands until its
+slice.
 
 The mechanism, short: RD8 says every kaya reader keeps names it does not
 know. An unknown MARK with an app's dotted name is easy: it is a run like any
@@ -1339,7 +1344,10 @@ paragraph and a paragraph key never collide. B is nine folds of a second
 structure; C makes a newer kaya's file uneditable in an older one, which RD8
 ruled against.
 
-### RD18. What a screen reader hears of a drawn list marker (ASKED 2026-11-11)
+### RD18. What a screen reader hears of a drawn list marker (RULED 2026-11-12: B)
+
+RULED B as recommended (the maintainer, 2026-11-12: "i agree with your
+recommendations"). A slice of its own, not built yet.
 
 The mechanism, short: R3 rules that no marker is ever in the text, so the
 platforms that have no editable list (GTK and Compose) DRAW the "•", "2." or
