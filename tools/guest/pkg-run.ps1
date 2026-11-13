@@ -29,15 +29,30 @@ if (-not (Test-Path $manifest)) {
     exit 1
 }
 [xml]$staged = Get-Content -Path $manifest -Encoding UTF8
+function Stamp([string]$what) {
+    Write-Output ("pkg-run: {0} {1}" -f (Get-Date -Format 'HH:mm:ss.fff'), $what)
+}
+Stamp 'start'
 $pkg = Get-AppxPackage -Name $staged.Package.Identity.Name
 if (-not $pkg) {
     Write-Output "pkg-run: $($staged.Package.Identity.Name) is not installed on this guest"
     exit 1
 }
+# NEVER $pkg.InstallLocation: it asks the search indexer, and with Windows
+# Search down it blocked 510 s (docs/traps.md, the packaged leg launched
+# eight minutes late). check-steps holds it.
+$null = [Windows.Management.Deployment.PackageManager, Windows.Management.Deployment, ContentType = WindowsRuntime]
+$root = (New-Object Windows.Management.Deployment.PackageManager).FindPackageForUser('', $pkg.PackageFullName).InstalledPath
+if (-not $root) {
+    Write-Output "pkg-run: the platform names no installed path for $($pkg.PackageFullName)"
+    exit 1
+}
+Stamp "found $root"
 # Composed with -f rather than with escaped quotes inside a double-quoted
 # string: the escaped form failed to PARSE, which took the whole script down
 # and cost one leg its 298s deadline in silence (2026-09-08).
-$line = '/c C:\kaya\{0} "{1}" {2}' -f $Inner, $pkg.InstallLocation, $Slot
+$line = '/c C:\kaya\{0} "{1}" {2}' -f $Inner, $root, $Slot
+Stamp 'invoking'
 Invoke-CommandInDesktopPackage -PackageFamilyName $pkg.PackageFamilyName -AppId $AppId `
     -Command 'C:\Windows\System32\cmd.exe' -Args $line -PreventBreakaway
-Write-Output "pkg-run: $($pkg.PackageFamilyName)!$AppId <- $line"
+Stamp "invoked $($pkg.PackageFamilyName)!$AppId <- $line"

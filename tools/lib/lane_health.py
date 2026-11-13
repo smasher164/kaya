@@ -1402,6 +1402,119 @@ def ngen_verdict(results, text, problem):
     return lines, None
 
 
+# docs/traps.md, the packaged leg launched eight minutes late: a hard restart
+# with C: nearly full left EventLog START_PENDING, Windows Search crash-looping
+# behind it, and every indexer call blocking for minutes.
+GUEST_STATE_SCRIPT = r"""$ErrorActionPreference='Stop'
+try{$d=Get-PSDrive C;"disk="+$d.Free+"|"+($d.Used+$d.Free)}catch{"disk.error="+($_.Exception.Message -replace '\s+',' ')}
+foreach($n in @('EventLog','WSearch')){try{$s=Get-CimInstance Win32_Service -Filter "Name='$n'";$h=@(Get-CimInstance Win32_Service -Filter ("ProcessId="+$s.ProcessId)).Count;"svc="+$n+"|"+$s.State+"|"+$s.ProcessId+"|"+$h+"|"+$s.ExitCode}catch{"svc.error="+$n+"|"+($_.Exception.Message -replace '\s+',' ')}}
+try{foreach($f in @(Get-ChildItem C:\kaya\dumps -Filter *.dmp -ErrorAction SilentlyContinue)){"dump="+$f.Name+"|"+$f.Length+"|"+$f.LastWriteTimeUtc.ToString('o')}}catch{"dump.error="+($_.Exception.Message -replace '\s+',' ')}
+"""
+DISK_PRUNE_BELOW = 8 << 30
+DISK_FLOOR = 3 << 30
+DUMPS_KEPT = 2
+EVENTLOG_WAIT_S = 180
+
+
+def guest_state_command():
+    encoded = base64.b64encode(GUEST_STATE_SCRIPT.encode("utf-16-le")).decode()
+    return f"powershell -NoProfile -NonInteractive -EncodedCommand {encoded}"
+
+
+def guest_state(text, problem):
+    state = {"problem": None, "disk": None, "disk.error": None, "svc": {}, "svc.error": {},
+             "dumps": [], "dump.error": None}
+    for line in (text or "").splitlines():
+        key, eq, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if not eq:
+            continue
+        if key == "disk":
+            free, _, total = value.partition("|")
+            if free.isdigit() and total.isdigit():
+                state["disk"] = (int(free), int(total))
+            else:
+                state["disk.error"] = f"disk={value!r}"
+        elif key in ("disk.error", "dump.error"):
+            state[key] = value
+        elif key == "svc":
+            parts = value.split("|")
+            if len(parts) == 5:
+                state["svc"][parts[0]] = tuple(parts[1:])
+        elif key == "svc.error":
+            name, _, why = value.partition("|")
+            state["svc.error"][name] = why
+        elif key == "dump":
+            parts = value.split("|")
+            if len(parts) == 3 and parts[1].isdigit():
+                state["dumps"].append((parts[0], int(parts[1]), parts[2]))
+    if state["disk"] is None and not state["svc"] and not state["svc.error"] and not state["disk.error"]:
+        state["problem"] = problem or "the guest printed nothing"
+    return state
+
+
+def guest_state_sentence(state):
+    if state["problem"]:
+        return f"guest disk and services unreadable: {state['problem']}"
+    said = []
+    if state["disk"]:
+        free, total = state["disk"]
+        low = f", BELOW {gb(DISK_FLOOR)}" if free < DISK_FLOOR else ""
+        said.append(f"C: {gb(free)} free of {gb(total)}{low}")
+    else:
+        said.append(f"C: unreadable ({state['disk.error'] or 'no disk line'})")
+    for name in ("EventLog", "WSearch"):
+        if name in state["svc"]:
+            st, pid, shared, code = state["svc"][name]
+            tail = f", exit {code}" if code not in ("0", "") else ""
+            said.append(f"{name} {st} (pid {pid}{tail})")
+        else:
+            said.append(f"{name} unreadable ({state['svc.error'].get(name, 'no line')})")
+    if state["dump.error"]:
+        said.append(f"crash dumps unreadable ({state['dump.error']})")
+    else:
+        size = sum(n for _, n, _ in state["dumps"])
+        said.append(f"{len(state['dumps'])} crash dump(s) in C:\\kaya\\dumps, {gb(size)}")
+    return "guest " + "; ".join(said)
+
+
+def dumps_to_prune(state):
+    if not state["disk"] or state["disk"][0] >= DISK_PRUNE_BELOW:
+        return []
+    newest = sorted(state["dumps"], key=lambda d: d[2], reverse=True)
+    return [name for name, _, _ in newest[DUMPS_KEPT:]]
+
+
+def eventlog_restart(state):
+    """The cmd line that restarts a stuck EventLog, or None when it runs."""
+    st, pid, shared, _ = state["svc"].get("EventLog", ("", "0", "0", ""))
+    if st == "Running" or not state["svc"]:
+        return None
+    if st == "Start Pending" and pid not in ("", "0") and shared == "1":
+        return f"cmd /c taskkill /f /pid {pid} & sc start EventLog"
+    return "cmd /c sc start EventLog"
+
+
+def guest_state_refusal(state, after=""):
+    if state["problem"]:
+        return (f"deploy-win: the guest's disk and services could not be read{after} "
+                f"({state['problem']})")
+    found = []
+    if state["disk"] and state["disk"][0] < DISK_FLOOR:
+        found.append(f"C: has {gb(state['disk'][0])} free, below {gb(DISK_FLOOR)}, with "
+                     f"{len(state['dumps'])} crash dump(s) left in C:\\kaya\\dumps; free space "
+                     f"on the guest (Windows Update's cache, the search index) before a lane")
+    st = state["svc"].get("EventLog", ("unreadable",))[0]
+    if st != "Running":
+        found.append(f"EventLog is {st}{after}; with it down Windows Search crash-loops and "
+                     f"every call that asks the indexer blocks for minutes; restart the VM "
+                     f"(docs/traps.md, the wedged-VM class)")
+    if not found:
+        return None
+    return ("deploy-win: " + "; and ".join(found)
+            + " (docs/traps.md, the packaged leg launched eight minutes late)")
+
+
 def windows_report(lane, when, ssh_argv, runtimes):
     """`ssh_argv` is the lane's own ssh prefix up to and including the host."""
     t0 = time.monotonic()
@@ -2090,6 +2203,41 @@ def drive():
                   windows_sentences("", "ssh exited 255: Connection refused")))
     cases.append(("guest printed nothing", "guest reading failed: the guest printed nothing",
                   windows_sentences("\n", None)))
+    sick = guest_state(
+        "disk=246538240|67600641024\nsvc=EventLog|Start Pending|1788|1|0\n"
+        "svc=WSearch|Stopped|0|0|1722\ndump=old.dmp|698578084|2026-10-08T19:46:26Z\n"
+        "dump=mid.dmp|429824310|2026-10-09T19:24:08Z\ndump=new.dmp|90743712|2026-11-13T19:17:24Z\n",
+        None)
+    well = guest_state("disk=9663676416|67600641024\nsvc=EventLog|Running|2356|1|0\n"
+                       "svc=WSearch|Running|6592|1|0\n", None)
+    cases.append(("guest state", "guest C: 0.2 GB free of 63.0 GB, BELOW 3.0 GB; EventLog Start "
+                  "Pending (pid 1788); WSearch Stopped (pid 0, exit 1722); 3 crash dump(s)",
+                  [guest_state_sentence(sick)]))
+    cases.append(("guest state well", "EventLog Running (pid 2356); WSearch Running (pid 6592); 0 "
+                  "crash dump(s)", [guest_state_sentence(well)]))
+    cases.append(("guest state silent", "guest disk and services unreadable: ssh exited 255",
+                  [guest_state_sentence(guest_state("", "ssh exited 255: refused"))]))
+    cases.append(("guest state garbled", "C: unreadable (disk='x|y'); EventLog unreadable (no "
+                  "line); WSearch unreadable (Access denied); crash dumps unreadable (denied)",
+                  [guest_state_sentence(guest_state(
+                      "disk=x|y\nsvc.error=WSearch|Access denied\ndump.error=denied\n", None))]))
+    cases.append(("prune", "['old.dmp']", [repr(dumps_to_prune(sick))]))
+    cases.append(("no prune", "[]", [repr(dumps_to_prune(well))]))
+    cases.append(("restart stuck", "cmd /c taskkill /f /pid 1788 & sc start EventLog",
+                  [repr(eventlog_restart(sick))]))
+    cases.append(("restart shared host", "'cmd /c sc start EventLog'", [repr(eventlog_restart(
+        guest_state("svc=EventLog|Start Pending|900|4|0\n", None)))]))
+    cases.append(("restart stopped", "'cmd /c sc start EventLog'", [repr(eventlog_restart(
+        guest_state("svc=EventLog|Stopped|0|0|0\n", None)))]))
+    cases.append(("no restart", "None", [repr(eventlog_restart(well))]))
+    cases.append(("refusal both", "deploy-win: C: has 0.2 GB free, below 3.0 GB, with 3 crash "
+                  "dump(s) left", [str(guest_state_refusal(sick, " after the lane's repair"))]))
+    cases.append(("refusal eventlog", "EventLog is Start Pending after the lane's repair",
+                  [str(guest_state_refusal(sick, " after the lane's repair"))]))
+    cases.append(("refusal unread", "deploy-win: the guest's disk and services could not be "
+                  "read (ssh did not answer within 60s)",
+                  [str(guest_state_refusal(guest_state("", "ssh did not answer within 60s")))]))
+    cases.append(("no refusal", "None", [str(guest_state_refusal(well))]))
 
     seen = _apps_run([(APPS_START, None),
                       (APPS_START + PREVIEW + HIJACK + PY_GUEST + DAEMON + AXAGENT, None),

@@ -20744,3 +20744,101 @@ the slider's arrow keys) poll IsLoaded from the harness thread for up to
 how long it waited: the same loop under the same load read 12 green of 12,
 and with the wall cut to 0 ms, 8 red of 12 printing "loaded false, after 0
 ms waiting for its Loaded". check-harness-ceiling clause D.
+
+## The packaged leg launched eight minutes late (measured 2026-11-13)
+
+Matrix 2 of the quiet-tail charge (20261113T192036Z) lost both packaged
+Windows legs, notifypkg_rust and taskspkg_rust, to "the guest wrote no output
+before the timeout". The guests had not hung: their complete, passing output
+files were on the VM afterwards, written 637 s and 770 s after each leg began,
+long after the runner's 298 s deadline, so a late tasks guest ran beside
+other legs. The VM had been force-restarted at 11:17 local after matrix 1
+found it wedged (ssh connected and hung, QEMULauncher near 590% CPU, `utmctl`
+timing out with OSStatus -1712; the lane died in vm_boot with 0 legs), and it
+came back with C: at 246 MB free (ten full crash dumps in C:\kaya\dumps were
+4 GB of it, WER's DumpCount was 10), the Windows Event Log service stuck in
+START_PENDING from boot, DiagTrack failing fast in its SQLite store, and
+Windows Search crash-looping every two minutes with 1722, "The RPC server is
+unavailable" (SCM 7023/7034, 48 times by 12:40).
+
+A cdb stack of the stuck tools/guest/pkg-run.ps1 put it in PowerShell reading
+`AppxPackage.InstallLocation`: Windows.ApplicationModel's
+`PackageServer::get_InstalledLocation` builds a StorageFolder, and
+windows.storage's `IsFolderInIndexedLocation` asks the search indexer by
+`CoCreateInstance`, which waits on the SCM while Search will not start. Timed
+over ssh: 510,817 ms with EventLog down, 24,646 ms once EventLog ran and
+Search was between restarts, 22 ms with both running. The platform's
+`Package.InstalledPath` (a string, no StorageFolder) and the registry's
+`PackageRootFolder` answered in 16 and 21 ms on the sick VM. pkg-run.ps1 now
+takes `InstalledPath` and stamps each step in its invoke log; with that, the
+same sick VM ran notifypkg_rust green in 1 s and taskspkg_rust in 17 s,
+against two hand reruns red at 301 and 303 s before it. check-steps refuses
+`.InstallLocation` in pkg-run.ps1 (watched against the shipped file).
+
+Freeing 4 GB of old dumps and killing EventLog's svchost (it was alone in
+it) brought EventLog to RUNNING within two minutes and Search started 40 s
+later. The lane now reads C:'s free space, EventLog and Search and the dumps
+before anything else (deploy-win's guest_services): below 8 GB it deletes
+all but the two newest dumps, a stuck EventLog alone in its host is killed
+and restarted and waited for up to 180 s, and C: under 3 GB or EventLog not
+RUNNING after that refuses the lane. WER keeps three dumps now. A packaged
+leg's timeout prints the invoke log into the leg log, which the bundle
+carries, and stops the late invoker (tools/guest/pkg-stop.ps1); forced with
+a 420 s sleep in pkg-run.ps1, the bundle read "pkg-run: 12:48:15.680 start"
+and "pkg-stop: stopped the invoker 10472". check-flightrec NG10-NG15.
+
+The two timeouts were also the windows lane's 1962 s against its 1900
+ceiling: its suites read 1885 s against 1429-1503 on the day's three earlier
+runs, and the two timed-out blocks account for the difference. One wedge
+today; a second in one day is a finding.
+
+## The HLS stop that waited for a download thread forever (measured 2026-11-13)
+
+linux media_delivery-rust-notsdemux-wayland, matrix 2 of the quiet-tail
+charge: 60 s inside `expect label#1 "hls_mpegts.m3u8"`, the step after a
+click that switched the player from hls_fmp4 37 ms after loading it. The
+bundle's thread stacks were 437 unnamed frames: debuginfod.debian.net
+answers 404 for the image's forky build ids. Named from the snapshot's
+debian-debug -dbgsym packages: the main thread in
+`gst_hls_demux_change_state` -> `downloadhelper_stop` (downloadhelper.c:1068,
+`g_thread_join`), the download thread in `dh_transfer_thread_func`
+(:1017, `g_main_loop_run`) blocked in ppoll. downloadhelper_stop calls
+`g_main_loop_quit` (:1060) before joining, and `g_main_loop_run` sets the
+loop running again on entry, so a stop that lands before the new thread has
+entered its loop loses the quit and the join never returns. 1.28.7 and
+GStreamer's main have the same code. A bare python playbin3 (fakesinks, no
+kaya) set to PAUSED and then NULL after 0-40 ms, with 8 spinners in its
+container, hung 6 times in 700 tries, every one with that pair of stacks
+(beside the libsoup aborts kaya's drain already covers). Twenty runs of
+both notsdemux legs through kaya under 10 spinners did not hang.
+
+A wait before the stop does NOT close it. The same probe, waiting (up to
+2 s) until as many threads named `adaptive-downlo` were blocked in poll
+(/proc/self/task/<tid>/syscall) as the pipeline had Demuxer/Adaptive
+elements at PAUSED, hung 3 times in 700: playbin3's streaming thread can
+bring a demuxer to PAUSED, and start its thread, between that check and
+set_state(NULL). It was not kept. The fix is upstream's: the transfer
+thread must not be able to enter g_main_loop_run after the quit (check
+`dh->running` under transfer_lock before running, or quit from inside the
+loop with an idle source). docs/deferred.md holds the entry.
+
+The recorder grew: tools/linux/stack-names.py now falls back to the owning
+package's -dbgsym from snapshot.debian.org's debian-debug at the image's
+date when debuginfod has nothing; on this red it named every frame but
+glibc's (Debian ships libc6-dbg, not a -dbgsym) in 32 s, and every one of
+its refusals was made to print.
+
+## A video view with no frame at a host load near 200 (seen 2026-11-13)
+
+linux media_formats-rust-x11, matrix 1 of the quiet-tail charge, while the
+Windows VM was wedged at about 590% CPU and the host load was near 200: the
+leg-end `expect_video_ink video#0 "C83C1E"` read "the video view snapshotted
+to nothing at 160x90: no frame yet" for its whole 15 s, and the next step
+read the clip played past 1 s and ended. The leg log already says why: over
+that step the main loop's thread ran 425 ms of 15091, a task waited 4002 ms
+for a CPU, a 20 ms nap overslept by up to 95 ms, and the container's
+loadavg read 13.72. It passed on matrix 2, and 20 runs of the leg alone
+under 24 spinners in the docker VM were all green (30 s each). Not
+reproduced; the bundle carries the CPU reading that names starvation, and
+the wedge that caused it is in "The packaged leg launched eight minutes
+late".

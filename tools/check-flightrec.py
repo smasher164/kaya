@@ -2583,6 +2583,25 @@ def census_lane_health(src):
     elif not (0 <= order[0] < order[1] < order[2] < order[3]):
         found.append(f"{WIN}: the native-image phase does not run after vm-ready and "
                      f"joined, failing the lane, before the deploy and every leg")
+    guest = py_block(win, "guest_services")
+    if warm.count("\n    guest_services()\n") != 1:
+        found.append(f"{WIN}: vm_warm does not read the guest's disk and services once")
+    elif not 0 <= warm.find("guest_services()") < warm.find("native_images()"):
+        found.append(f"{WIN}: the guest's disk and services are read after the native images")
+    for needle, what in (("lane_health.dumps_to_prune(", "prunes the crash dumps"),
+                         ("lane_health.eventlog_restart(", "restarts a stuck EventLog"),
+                         ("lane_health.guest_state_refusal(", "refuses a guest still sick")):
+        if needle not in guest:
+            found.append(f"{WIN}: guest_services no longer {what} (`{needle}`)")
+    if guest.count("die(refusal)") != 1:
+        found.append(f"{WIN}: guest_services does not stop the lane on its refusal")
+    suite = py_block(win, "run_one_suite")
+    timed_out = suite[suite.find("kill_guests(log=log)"):suite.find("if guests_wedged(")]
+    for needle, what in (("out_{name}-invoke.txt", "prints the package invoker's log"),
+                         ("pkg-stop.ps1 -Leg {name}", "stops the late invoker")):
+        if needle not in timed_out:
+            found.append(f"{WIN}: a packaged leg's timeout no longer {what} (`{needle}`; "
+                         f"docs/traps.md, the packaged leg launched eight minutes late)")
     phase = py_block(win, "native_images")
     for needle, what in (("lane_health.ngen_plan(", "reads the queues"),
                          ("lane_health.ngen_drain_command(", "drains a pending queue"),
@@ -4062,7 +4081,24 @@ for label, rel, pattern, repl, want, check, subs in (
          r"lane_health\.ngen_drain_command\(framework\)", "framework", "no longer drains",
          census_lane_health, 1),
         ("NG4 a refusal printed and the lane run anyway", WIN, r"^( +)die\(refusal\)\n",
-         r"\1print(refusal)\n", "does not stop the lane", census_lane_health, 2),
+         r"\1print(refusal)\n", "does not stop the lane", census_lane_health, 3),
+        ("NG10 the guest's disk and services unread", WIN, r"^    guest_services\(\)\n", "",
+         "does not read the guest's disk and services once", census_lane_health, 1),
+        ("NG11 a sick guest refused and run anyway", WIN,
+         r"^    if refusal:\n        die\(refusal\)\n\n\ndef vm_warm",
+         "    if refusal:\n        print(refusal)\n\n\ndef vm_warm",
+         "guest_services does not stop the lane", census_lane_health, 1),
+        ("NG12 a packaged timeout silent on its invoker", WIN,
+         r'run_ssh_out\(f"cmd /c type C:\\\\kaya\\\\out_\{name\}-invoke\.txt"',
+         'run_ssh_out(f"cmd /c ver"', "prints the package invoker's log", census_lane_health, 1),
+        ("NG13 the late invoker left running", WIN, r"pkg-stop\.ps1 -Leg \{name\}",
+         "pkg-run.ps1", "stops the late invoker", census_lane_health, 1),
+        ("NG14 a full disk not called low", LANE_HEALTH,
+         r"if free < DISK_FLOOR else", "if False else",
+         "branch `guest state` did not print", lane_health_checks, 1),
+        ("NG15 a stuck EventLog left alone", LANE_HEALTH,
+         r'if st == "Running" or not state\["svc"\]:', "if True:",
+         "branch `restart stuck` did not print", lane_health_checks, 1),
         ("NG5 the pending count read off another word", LANE_HEALTH,
          r"-SimpleMatch 'StatusPending'", "-SimpleMatch 'Pending'",
          "lost its pending native images", lane_health_checks, 1),
@@ -4232,6 +4268,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(303 + (5 if DRIVES else 0))
+gate.negatives_ran(309 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

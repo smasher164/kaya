@@ -477,7 +477,46 @@ def native_images():
         die(refusal)
 
 
+def guest_services():
+    """docs/traps.md, the packaged leg launched eight minutes late."""
+    ssh = ["ssh", "-n", "-o", "BatchMode=yes", *SSH_MUX, HOST]
+
+    def read():
+        return lane_health.guest_state(*lane_health._run([*ssh, lane_health.guest_state_command()],
+                                                          timeout=60))
+    state = read()
+    print("deploy-win: " + lane_health.guest_state_sentence(state), flush=True)
+    prune = lane_health.dumps_to_prune(state)
+    if prune:
+        _, why = lane_health._run([*ssh, "cmd /c del /q " + " ".join(
+            f"C:\\kaya\\dumps\\{name}" for name in prune)], timeout=60)
+        print(f"deploy-win: C: is below {lane_health.gb(lane_health.DISK_PRUNE_BELOW)} free, "
+              f"so the crash dumps past the newest {lane_health.DUMPS_KEPT} went: "
+              f"{', '.join(prune)} ({why or 'exit 0'})", flush=True)
+        state = read()
+    restart = lane_health.eventlog_restart(state)
+    if restart:
+        _, why = lane_health._run([*ssh, restart], timeout=60)
+        print(f"deploy-win: EventLog was {state['svc']['EventLog'][0]}; ran `{restart}` "
+              f"({why or 'exit 0'})", flush=True)
+        t0 = time.monotonic()
+        while True:
+            state = read()
+            if state["svc"].get("EventLog", ("",))[0] == "Running":
+                break
+            if time.monotonic() - t0 > lane_health.EVENTLOG_WAIT_S:
+                break
+            time.sleep(10)
+        print(f"deploy-win: after {int(time.monotonic() - t0)}s, "
+              + lane_health.guest_state_sentence(state), flush=True)
+    refusal = lane_health.guest_state_refusal(state, " after the lane's repair"
+                                              if prune or restart else "")
+    if refusal:
+        die(refusal)
+
+
 def vm_warm():
+    guest_services()
     native_images()
     lane_health_reading("start")
 
@@ -1277,6 +1316,7 @@ def deploy_artifacts():
                ROOT / "tools/guest/flightrec.ps1",
                ROOT / "tools/guest/pkg-install.ps1",
                ROOT / "tools/guest/pkg-run.ps1",
+               ROOT / "tools/guest/pkg-stop.ps1",
                ROOT / "tools/guest/relaunch-com.ps1",
                ROOT / "tools/guest/relaunch-launch.ps1",
                ROOT / "tools/guest/relaunch-link.ps1",
@@ -2356,6 +2396,15 @@ def run_one_suite(name, slot, log):
         FR.collect(name)
         (LEGS_DIR / f"{name}.collected").touch()
         kill_guests(log=log)
+        if name in lane.PACKAGED_LEGS:
+            # docs/traps.md, the packaged leg launched eight minutes late.
+            said = run_ssh_out(f"cmd /c type C:\\kaya\\out_{name}-invoke.txt", log=log)
+            print(f"{name}: the package invoker's log at the timeout:\n{said}" if said
+                  else f"{name}: the package invoker wrote nothing before the timeout",
+                  file=log)
+            print(run_ssh_out(f"powershell -NoProfile -ExecutionPolicy Bypass -File "
+                              f"C:\\kaya\\pkg-stop.ps1 -Leg {name}", log=log)
+                  or f"{name}: pkg-stop.ps1 printed nothing", file=log)
         # A plain timeout is recoverable; the WEDGED state is not, and
         # taskkill cannot tell you which you have (docs/traps.md,
         # "Windows guests wedge UNKILLABLY"). Restart once per run: a

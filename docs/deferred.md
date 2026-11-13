@@ -9,6 +9,21 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## GAP — GStreamer's adaptive demuxer can lose its own stop and wait forever (docs/traps.md, the HLS stop that waited for a download thread forever; 2026-11-13)
+KEY: downloadhelper_stop, dh_transfer_thread_func, g_main_loop_quit, adaptive-downlo, hlsdemux2, adaptivedemux2, media_delivery, notsdemux, stack-names, dbgsym
+
+A playbin3 on an HLS source stopped while its demuxer's download thread is
+still starting hangs the stopping thread in `g_thread_join` for good: the
+quit lands before `g_main_loop_run`, which sets the loop running again.
+Measured without kaya, 6 hangs in 700 quick start-stops under load; seen
+once in a matrix (media_delivery-rust-notsdemux-wayland, 60 s step
+ceiling). A wait for the download threads before kaya's stop measured 3 in
+700 and was not kept, since the demuxer can start between the wait and the
+stop. What closes it: the upstream fix (the thread checks `running` before
+it enters its loop, or the quit is posted into the loop), not yet reported
+to GStreamer, taken by the image when it lands, or a kaya stop that cannot
+race a demuxer's READY->PAUSED; neither is done.
+
 ## BUILD — the rich document (docs/rich-document-plan.md), depth on the mac (2026-11-11); iOS, GTK, WinUI and Compose arms are the breadth slice (§9 step 4)
 KEY: richdoc, expect_markers, click_marker, pick_text_color, expect_text_ink, select_text, shift+tab, backspace, kaya_text_key, kaya_text_markers, kaya_text_copy, kaya_text_paste, kaya_ink_for_dark, kaya_ink_from_dark, text_color, kayaDrawnMarkers, kaya.draw.marker, KayaRichFragment, DEPTH STUB richdoc
 

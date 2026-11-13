@@ -111,7 +111,7 @@ relaunched UTM, `utmctl start`), the interactive session again had a second
 
 | run | tree | wall | verdict | why red |
 |---|---|---:|---|---|
-| 20261113T192036Z | 212b240a + 111960b9 | 2131 | red | linux media_delivery-rust-notsdemux-wayland: the harness step ceiling, 60 s inside `Expect(label#1, "hls_mpegts.m3u8")` at a container load of 5.9; windows taskspkg_rust: act one's `column@today_header ground top F2B326 in the light, wanted F3B53D`; windows notifypkg_rust: the guest wrote no output before the timeout (the foreground was the taskbar) |
+| 20261113T192036Z | 212b240a + 111960b9 | 2131 | red | linux media_delivery-rust-notsdemux-wayland: the harness step ceiling, 60 s inside `Expect(label#1, "hls_mpegts.m3u8")` at a container load of 5.9; windows taskspkg_rust and notifypkg_rust: the guest wrote no output before the timeout (an earlier draft of this row gave taskspkg a colour read that is in no log of the run; docs/traps.md, the packaged leg launched eight minutes late) |
 
 Rows: mac 996, android 1027, linux 1247, ios 1402, the sweep 446 from
 about 1027 to about 1473, linux-quiet 54 from about 1473 BESIDE the windows

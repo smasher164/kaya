@@ -3433,12 +3433,18 @@ def packaged_invoker(text):
     ):
         if want not in text:
             bad.append(f"tools/guest/pkg-run.ps1: {why}")
+    if re.search(r"\.InstallLocation\b", text):
+        bad.append("tools/guest/pkg-run.ps1: reads .InstallLocation, which asks "
+                   "the search indexer and blocked 510 s with Windows Search down "
+                   "(docs/traps.md, the packaged leg launched eight minutes "
+                   "late); read Package.InstalledPath")
     return bad
 
 
 _invoker = (ROOT / "tools/guest/pkg-run.ps1").read_text(encoding="utf-8")
-if packaged_invoker(_invoker):
-    selftest_fail("the real pkg-run.ps1 was refused")
+_invoker_bad = packaged_invoker(_invoker)
+if _invoker_bad:
+    selftest_fail("the real pkg-run.ps1 was refused: " + "; ".join(_invoker_bad))
 _invoker_code = "\n".join("" if line.lstrip().startswith("#") else line
                           for line in _invoker.splitlines())
 _cut, _n = sub_count(r"-PreventBreakaway", "", _invoker_code)
@@ -3448,6 +3454,13 @@ if _n != 1:
     selftest_fail("the -PreventBreakaway negative perturbed nothing")
 if not packaged_invoker(_cut):
     selftest_fail("a pkg-run.ps1 without -PreventBreakaway passed")
+_slow, _n = sub_count(r"\$root, \$Slot", "$pkg.InstallLocation, $Slot", _invoker_code)
+print(f"check-steps: self-test pkg-run.ps1's indexer-bound InstallLocation, "
+      f"{_n} substitution(s)")
+if _n != 1:
+    selftest_fail("the InstallLocation negative perturbed nothing")
+if not packaged_invoker(_slow):
+    selftest_fail("a pkg-run.ps1 reading .InstallLocation passed")
 if packaged_invoker(_invoker):
     status = 1
     print("check-steps: tools/guest/pkg-run.ps1 strays from the shape a "
