@@ -21,11 +21,14 @@ for a FAILED binary, for a suite that never built, for a nonzero exit
 under green lines, and for a COLLAPSE below a floor of 600, which is
 the `harness` feature's wall — without the feature the harness tests
 vanish rather than fail. Four watched negatives over doctored
-transcripts, the count printed. ONCE A MATRIX since 2026-10-06:
-validate-all's own --build runs it, keys its inputs (build-id's
-`unit-suite` set) and hands the key to the sweep, which skips its run
-only while the key still holds (check-gates holds both halves).
-transcripts, the count printed. It builds libkaya and the SwiftUI
+transcripts, the count printed. ONCE A MATRIX since 2026-10-06, and
+OFF THE MATRIX'S START since 2026-11-13: validate-all's niced
+`gates.py --warm` runs it beside the lanes in the sweep's own cargo
+target, keys its inputs (build-id's `unit-suite` set) before it runs,
+and hands the key on only when it passed; the sweep skips its run only
+while the key still holds, and a red rung 1 is the verdict's `rung1`
+row (check-gates holds every half; docs/traps.md, the sweep's second
+unit suite, for why the start once kept it). It builds libkaya and the SwiftUI
 interpreter FIRST — a
 gate cannot verify an artifact the run has not built yet, and one
 that tried read the PREVIOUS run's dylib and called it stale, which

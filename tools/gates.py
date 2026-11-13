@@ -300,11 +300,15 @@ if TARGET != ROOT / "target":
 
 
 # What the sweep's own target needs compiled before the sweep: the lib BUILD
-# makes and the harness test binary check-abort's rust-async cases run.
+# makes. Rung 1 follows it on the warm (warm_rung1), and its cargo test builds
+# the harness test binary check-abort's rust-async cases run.
 WARM = [
     ["cargo", "build", "--locked", "--lib"],
-    ["cargo", "test", "--locked", "-p", "kaya", "--features", "harness", "--no-run"],
 ]
+# The warm's exit when rung 1 itself is red, and the line that hands its key
+# on: validate-all reads both (tools/check-gates.py holds the pair).
+WARM_RUNG1_RED = 4
+WARM_RUNG1_KEY = "warm: rung 1 passed over key "
 
 
 class Truncated(list):
@@ -573,9 +577,13 @@ def rung1_ran_at_matrix_start():
     return None
 
 
-def build():
+def build(lanes_start=False):
     """Build what the gates read, before any of them reads it."""
     for what, cmd in BUILD:
+        if what == RUNG1 and lanes_start:
+            print(f"build: {what} — on the sweep's warm beside the lanes, not at the "
+                  f"matrix's start (tools/validate-all.py)", flush=True)
+            continue
         if what == RUNG1 and (key := rung1_ran_at_matrix_start()):
             print(f"build: {what} — this matrix's start ran it over the same inputs "
                   f"(key {key}); not run again", flush=True)
@@ -590,6 +598,21 @@ def build():
                   f"stands on going red.", file=sys.stderr)
             return False
     return True
+
+
+def warm_rung1():
+    """Rung 1 on validate-all's warm: keyed BEFORE it runs, so inputs that move under it
+    miss the key and the sweep runs it again."""
+    key = subprocess.run(["tools/build-id.py", "--gate", "unit-suite"], cwd=ROOT,
+                         stdout=subprocess.PIPE, text=True, check=False)
+    print(f"warm: {RUNG1} (tools/unit-suite.py, cargo target {TARGET})", flush=True)
+    if subprocess.call(["tools/unit-suite.py"], cwd=ROOT) != 0:
+        print(f"warm: {RUNG1} is RED — the matrix fails on it (validate-all's rung1 row)",
+              file=sys.stderr, flush=True)
+        return WARM_RUNG1_RED
+    if key.returncode == 0 and key.stdout.strip():
+        print(f"{WARM_RUNG1_KEY}{key.stdout.strip()}", flush=True)
+    return 0
 
 
 def selftest():
@@ -803,7 +826,7 @@ def main(args):
         # validate-all's t0: the keyed keys carry the artifacts' REAL
         # bytes, so the token is taken only after the same builds the
         # sweep itself starts with.
-        return 0 if build() else 1
+        return 0 if build(lanes_start=True) else 1
     if args == ["--warm"]:
         # validate-all's t0, niced beside the lanes: the sweep's own target
         # compiled before the sweep needs it, so its start after Android does
@@ -811,14 +834,14 @@ def main(args):
         if os.environ.get("KAYA_ONLY") or os.environ.get("KAYA_EXCLUSIVE") == "only":
             print("warm: a filtered or exclusive-only matrix runs no sweep; nothing warmed",
                   flush=True)
-            return 0
+            return warm_rung1()
         for cmd in WARM:
             print(f"warm: {' '.join(cmd)} (cargo target {TARGET})", flush=True)
             if subprocess.call(cmd, cwd=ROOT) != 0:
                 print(f"warm: {' '.join(cmd)} FAILED — the sweep builds it itself",
                       file=sys.stderr)
                 return 1
-        return 0
+        return warm_rung1()
     if args == ["--fingerprint"]:
         # Line one is the token; line two the per-gate keys behind it, so
         # a lane whose token misses can name the gate that moved.

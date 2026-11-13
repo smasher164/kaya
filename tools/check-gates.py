@@ -352,24 +352,59 @@ def quiet_tail_problem(text):
     return None
 
 
-# RUNG 1 RUNS ONCE A MATRIX (docs/traps.md, the sweep's second unit suite):
-# validate-all keys rung 1's inputs right after its own --build ran it, and
-# the sweep skips its run only while the current key equals that one.
-RUNG1_KEYED = ('rung1 = subprocess.run(["tools/build-id.py", "--gate", "unit-suite"],')
-RUNG1_SET = 'os.environ["KAYA_MATRIX_RUNG1_KEY"] = rung1.stdout.strip()'
+# RUNG 1 RUNS ONCE A MATRIX, ON THE SWEEP'S WARM (docs/traps.md, the sweep's
+# second unit suite): the warm keys rung 1's inputs BEFORE it runs and hands the
+# key on only when it passed; validate-all reads it after joining the warm and
+# before the sweep, the start's --build leaves rung 1 out, the sweep's own build
+# runs it unless the key still holds, and a red one is a verdict row.
+RUNG1_FROM_WARM = 'rung1 = rung1_from_warm(warm_rc, (LANES_DIR / "gates-warm.log").read_text('
+RUNG1_SET = 'os.environ["KAYA_MATRIX_RUNG1_KEY"] = rung1'
 RUNG1_SAME = 'if now.returncode == 0 and now.stdout.strip() == handed:'
 RUNG1_ASKED = 'if what == RUNG1 and (key := rung1_ran_at_matrix_start()):'
+RUNG1_START = 'return 0 if build(lanes_start=True) else 1'
+RUNG1_SWEEP = 'if not build():'
+RUNG1_KEYED = 'key = subprocess.run(["tools/build-id.py", "--gate", "unit-suite"], cwd=ROOT,'
+RUNG1_RUN = 'if subprocess.call(["tools/unit-suite.py"], cwd=ROOT) != 0:'
+RUNG1_RED_RETURN = "return WARM_RUNG1_RED"
+RUNG1_HANDED = 'print(f"{WARM_RUNG1_KEY}{key.stdout.strip()}", flush=True)'
+RUNG1_ROW = 'lane_done["rung1"] = ("FAIL", int(time.monotonic() - T0))'
 
 
 def rung1_skip_problem(matrix, gates):
-    build = matrix.find('if subprocess.run(["tools/gates.py", "--build"]).returncode != 0:')
-    keyed, sets = matrix.find(RUNG1_KEYED), matrix.find(RUNG1_SET)
-    if not 0 <= build < keyed < sets:
-        return ("tools/validate-all.py must key rung 1's inputs only after its own "
-                "--build ran rung 1, and hand that key to the sweep")
+    warm = matrix.find(WARM_WAIT)
+    reads, sets = matrix.find(RUNG1_FROM_WARM), matrix.find(RUNG1_SET)
+    sweep = matrix.find(GATE_LAUNCH)
+    if not 0 <= warm < reads < sets < sweep or matrix.count(RUNG1_SET) != 1:
+        return ("tools/validate-all.py must read rung 1's key from the warm only after "
+                "joining it, and hand it to the sweep before launching it")
+    if '"--gate", "unit-suite"' in matrix:
+        return ("tools/validate-all.py must not key rung 1 itself: the warm keys it "
+                "before running it, and a key taken anywhere else vouches for a run "
+                "over other inputs")
+    if RUNG1_ROW not in matrix:
+        return "tools/validate-all.py must make a red rung 1 on the warm a row of its verdict"
     if RUNG1_SAME not in gates or RUNG1_ASKED not in gates:
-        return ("tools/gates.py may skip rung 1 only when this matrix's start keyed the "
+        return ("tools/gates.py may skip rung 1 only when this matrix's warm keyed the "
                 "same inputs (the current unit-suite key equal to the handed one)")
+    main = gates[gates.find("\ndef main(args):"):]
+    if RUNG1_START not in main or RUNG1_SWEEP not in main:
+        return ("tools/gates.py's --build (the matrix's start) must leave rung 1 to the "
+                "warm, and the sweep's own build must still run it")
+    fn = re.search(r"(?ms)^def warm_rung1\(\):\n(.*?)(?=^\S)", gates)
+    body = fn.group(1) if fn else ""
+    at = [body.find(s) for s in (RUNG1_KEYED, RUNG1_RUN, RUNG1_RED_RETURN, RUNG1_HANDED)]
+    if not 0 <= at[0] < at[1] < at[2] < at[3]:
+        return ("tools/gates.py's warm_rung1 must key the inputs before running the "
+                "suite, and hand the key on only past the red return")
+    red_g = re.search(r"(?m)^WARM_RUNG1_RED = (\d+)$", gates)
+    red_m = re.search(r"(?m)^WARM_RUNG1_RED = (\d+)$", matrix)
+    line_g = re.search(r'(?m)^WARM_RUNG1_KEY = "([^"]+)"$', gates)
+    line_m = re.search(r'(?m)^WARM_RUNG1_KEY = re\.compile\(r"\^([^"(]+)\(', matrix)
+    if (not red_g or not red_m or red_g.group(1) != red_m.group(1) or not line_g
+            or not line_m or line_g.group(1) != line_m.group(1)):
+        return ("tools/gates.py's WARM_RUNG1_RED and WARM_RUNG1_KEY must equal "
+                "tools/validate-all.py's, or a red rung 1 reads as a warm build failure "
+                "and a green one hands no key")
     return None
 
 
@@ -1233,17 +1268,35 @@ if doctored == gates_text:
     fail("self-test NR1 applied no substitution — the rung-1 clause is not reading gates.py")
 elif rung1_skip_problem(matrix_text, doctored) is None:
     fail("self-test NR1: a sweep that skips rung 1 on a stale key passed")
-# NR2 — the key taken before the build that runs rung 1.
-_build = ('    if subprocess.run(["tools/gates.py", "--build"]).returncode != 0:\n'
-          '        sys.exit(1)\n')
-_set = '    os.environ["KAYA_MATRIX_RUNG1_KEY"]'
-doctored = matrix_text.replace(_build, "", 1).replace(_set, _build + _set, 1)
-print(f"check-gates: self-test NR2 moved the --build after the key, "
-      f"{int(doctored != matrix_text)} substitution(s)")
-if doctored == matrix_text:
-    fail("self-test NR2 applied no substitution")
-elif rung1_skip_problem(doctored, gates_text) is None:
-    fail("self-test NR2: a key taken before rung 1 ran passed")
+# NR2-NR6 — each half of the warm's handshake cut from a copy.
+for _label, _which, _old, _new in (
+        ("the key handed before the warm is joined", "matrix",
+         "    android_lane_proc.wait()\n",
+         '    os.environ["KAYA_MATRIX_RUNG1_KEY"] = rung1\n    android_lane_proc.wait()\n'),
+        ("the warm keying after the suite ran", "gates",
+         "    key = subprocess.run([\"tools/build-id.py\", \"--gate\", \"unit-suite\"], cwd=ROOT,\n"
+         "                         stdout=subprocess.PIPE, text=True, check=False)\n"
+         "    print(f\"warm: {RUNG1} (tools/unit-suite.py, cargo target {TARGET})\", flush=True)\n"
+         "    if subprocess.call([\"tools/unit-suite.py\"], cwd=ROOT) != 0:\n",
+         "    print(f\"warm: {RUNG1} (tools/unit-suite.py, cargo target {TARGET})\", flush=True)\n"
+         "    if subprocess.call([\"tools/unit-suite.py\"], cwd=ROOT) != 0:\n"
+         "        pass\n"
+         "    key = subprocess.run([\"tools/build-id.py\", \"--gate\", \"unit-suite\"], cwd=ROOT,\n"
+         "                         stdout=subprocess.PIPE, text=True, check=False)\n"
+         "    if False:\n"),
+        ("rung 1 put back at the start's --build", "gates",
+         RUNG1_START, "return 0 if build() else 1"),
+        ("the red rung 1 row dropped", "matrix", RUNG1_ROW, "pass"),
+        ("the warm's red exit renumbered on one side", "matrix",
+         "WARM_RUNG1_RED = 4\n", "WARM_RUNG1_RED = 2\n")):
+    _texts = {"matrix": matrix_text, "gates": gates_text}
+    _n = _texts[_which].count(_old)
+    _texts[_which] = _texts[_which].replace(_old, _new, 1)
+    print(f"check-gates: self-test NR2 {_label}, {_n} substitution(s)")
+    if _n != 1:
+        fail(f"self-test NR2 ({_label}) did not apply exactly once")
+    elif rung1_skip_problem(_texts["matrix"], _texts["gates"]) is None:
+        fail(f"self-test NR2: a matrix with {_label} passed")
 problem = prune_problem(gates_text, mac_text)
 if problem is not None:
     fail(problem)

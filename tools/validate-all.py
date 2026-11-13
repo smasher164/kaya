@@ -397,6 +397,30 @@ def run_lane(name, argv, env=None):
     lane_names.append(name)
 
 
+WARM_RUNG1_RED = 4
+WARM_RUNG1_KEY = re.compile(r"^warm: rung 1 passed over key ([0-9a-f]+)$", re.M)
+
+
+def rung1_from_warm(rc, text):
+    """The key the warm's green rung 1 handed on, or None; a red one becomes the rung1 row,
+    its log the warm's."""
+    key = WARM_RUNG1_KEY.search(text)
+    if rc == 0 and key:
+        print(f"rung1: PASS on the warm; key {key.group(1)} handed to the sweep", flush=True)
+        return key.group(1)
+    if rc == WARM_RUNG1_RED:
+        shutil.copy2(LANES_DIR / "gates-warm.log", LANES_DIR / "rung1.log")
+        lane_done["rung1"] = ("FAIL", int(time.monotonic() - T0))
+        lane_names.append("rung1")
+        print("rung1: FAIL — the unit suite is red on the warm (gates-warm.log); "
+              + ("a filtered or exclusive-only matrix runs no sweep" if only.active()
+                 or os.environ.get("KAYA_EXCLUSIVE") == "only"
+                 else "the sweep runs it again and refuses its gates"), flush=True)
+        return None
+    print(f"rung1: the warm handed no key (rc={rc}); the sweep runs rung 1 itself", flush=True)
+    return None
+
+
 T0 = time.monotonic()
 # A HOST THAT SLEEPS STOPS EVERY CLOCK A WALL READS (docs/traps.md, the
 # matrix that slept 22 hours on battery): the power source rides the launch
@@ -466,14 +490,10 @@ if MODE == "parallel":
     # artifacts' REAL BYTES — a token over the previous build's made the
     # mac lane sweep twice (791s against 620, 2026-09-01).
     # tools/check-gates.py holds the order.
+    # RUNG 1 IS NOT HERE: it runs on the sweep's warm below, beside the lanes
+    # (docs/traps.md, the sweep's second unit suite).
     if subprocess.run(["tools/gates.py", "--build"]).returncode != 0:
         sys.exit(1)
-    # RUNG 1 RAN JUST NOW: the sweep skips its own run while these inputs
-    # still hold (tools/gates.py's rung1_ran_at_matrix_start).
-    rung1 = subprocess.run(["tools/build-id.py", "--gate", "unit-suite"],
-                           stdout=subprocess.PIPE, text=True, check=False)
-    if rung1.returncode == 0 and rung1.stdout.strip():
-        os.environ["KAYA_MATRIX_RUNG1_KEY"] = rung1.stdout.strip()
     got = subprocess.run(["tools/gates.py", "--fingerprint"],
                          stdout=subprocess.PIPE, text=True,
                          encoding="utf-8", errors="replace",
@@ -517,6 +537,13 @@ if MODE == "parallel":
           f"the lanes' launch (the sweep's own target, compiled beside them)", flush=True)
     if warm_rc != 0:
         keep_lane_log("gates-warm")
+    # RUNG 1 RAN ON THE WARM: its key lets the sweep skip a second run while these
+    # inputs still hold (tools/gates.py's rung1_ran_at_matrix_start); a red one is
+    # a row of the verdict.
+    rung1 = rung1_from_warm(warm_rc, (LANES_DIR / "gates-warm.log").read_text(
+        encoding="utf-8", errors="replace"))
+    if rung1:
+        os.environ["KAYA_MATRIX_RUNG1_KEY"] = rung1
     run_lane("gates", ["nice", "-n", "10", "tools/gates.py"],
              env={"CARGO_TARGET_DIR": str(SWEEP_TARGET)})
 else:

@@ -218,9 +218,12 @@ docs/gates.md.
      of 600, which is the `harness` feature's wall). The reason is
      mechanical: `cargo test` relinks the host libkaya and NO GATE MAY (the
      sweep refuses a verdict if that library moves under it), while BUILD is
-     the library's one writer. Once a matrix: validate-all's own --build
-     runs rung 1, keys its inputs (build-id's `unit-suite` set) and hands the
-     key to the sweep, which skips its run only while the key still holds.
+     the library's one writer. Once a matrix, and not at its start (since
+     2026-11-13): validate-all's niced warm runs rung 1 beside the lanes in
+     the sweep's own target, keyed before it runs (build-id's `unit-suite`
+     set), and hands the key to the sweep only when it passed; the sweep
+     skips its run only while the key still holds, and a red one is the
+     verdict's `rung1` row.
    - BUILD also builds libkaya and the SwiftUI interpreter FIRST, since a
      gate cannot verify an artifact the run has not built yet, and ends with
      tools/prune-objects.py.
