@@ -15396,6 +15396,8 @@ rewrote no `lib-kaya` fingerprint. Re-read on three matrices that night: the
 mac lane's core-build+gates 30, 27 and 24 s (49 on the record, 439 on the
 reverted ones) with no lib recompile, the linux lane one compile, the windows
 build's second invocation none (docs/measurements/matrix-wall-2026-11-13.md).
+The fourth, the first green one (1646df47, a changed core): mac 45, linux 36,
+the windows build one lib compile in 201 s.
 
 ## The Windows foreign-drop witness dropped onto dnd.exe's own console window (measured 2026-10-06)
 
