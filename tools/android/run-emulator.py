@@ -2981,8 +2981,14 @@ def hal_failures(serial):
 
 
 def boot_id(serial):
-    return out_of(["timeout", "10", "adb", "-s", serial, "shell", "cat",
-                   "/proc/sys/kernel/random/boot_id"]).strip()
+    """A snapshot restore keeps the kernel's boot_id (measured 2026-11-12: two
+    cold boots of emulator-5558 from default_boot read b660fecd), so the boot
+    is the id plus when its uptime started, to the minute."""
+    kernel = out_of(["timeout", "10", "adb", "-s", serial, "shell", "cat",
+                     "/proc/sys/kernel/random/boot_id"]).strip()
+    uptime = out_of(["timeout", "10", "adb", "-s", serial, "shell", "cat", "/proc/uptime"]).split()
+    began = int((time.time() - float(uptime[0])) // 60) if uptime else 0
+    return f"{kernel[:8]}@{began}"
 
 
 def bank_hal_failures(serial, leg):
@@ -3016,7 +3022,7 @@ def hal_history(serial):
     uptime = out_of(["timeout", "10", "adb", "-s", serial, "shell", "cat", "/proc/uptime"]).split()
     up = f"up {float(uptime[0]):.0f}s" if uptime else "uptime unread"
     events = held.get("events", []) if held.get("boot") == boot else []
-    head = f"; earlier in this boot ({up}, boot {boot[:8] or '?'})"
+    head = f"; earlier in this boot ({up}, boot {boot or '?'})"
     if not events:
         return f"{head} no leg's log held a failed read"
     return (f"{head} the HAL had already failed: "
