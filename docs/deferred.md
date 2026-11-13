@@ -24,6 +24,16 @@ it enters its loop, or the quit is posted into the loop), not yet reported
 to GStreamer, taken by the image when it lands, or a kaya stop that cannot
 race a demuxer's READY->PAUSED; neither is done.
 
+## OPEN — file the HLS stop hang with GStreamer (needs a GitLab account; 2026-11-13)
+KEY: gstreamer-hls-stop-hang, downloadhelper_stop, gitlab.freedesktop.org, hlsprobe.py
+
+The report is written and ready to paste: docs/probes/gstreamer-hls-stop-hang-2026-11-13.md,
+with its probe beside it. Filing it needs an account on
+gitlab.freedesktop.org, which the maintainer does not have (2026-11-13), so it
+waits for one. Closing this entry means the issue's URL here and in the GAP
+entry above, then watching for the fix to reach a GStreamer release the image
+can take.
+
 ## BUILD — the rich document (docs/rich-document-plan.md), depth on the mac (2026-11-11); iOS, GTK, WinUI and Compose arms are the breadth slice (§9 step 4)
 KEY: richdoc, expect_markers, click_marker, pick_text_color, expect_text_ink, select_text, shift+tab, backspace, kaya_text_key, kaya_text_markers, kaya_text_copy, kaya_text_paste, kaya_ink_for_dark, kaya_ink_from_dark, text_color, kayaDrawnMarkers, kaya.draw.marker, KayaRichFragment, DEPTH STUB richdoc
 

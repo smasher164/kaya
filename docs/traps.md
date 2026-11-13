@@ -20792,6 +20792,20 @@ ceiling: its suites read 1885 s against 1429-1503 on the day's three earlier
 runs, and the two timed-out blocks account for the difference. One wedge
 today; a second in one day is a finding.
 
+The second wedge came at about 14:50 the same day, half an hour after the
+green matrix at 30964a58 (which read C: at 5.1 GB free): ssh stalled after
+SSH2_MSG_KEXINIT, the idle VM's QEMULauncher sat near 400% CPU, and after a
+TERM to it, a UTM relaunch and `utmctl start` it answered in about 20 s.
+C: then read 177 MB free of 64 GB. The new consumer was Windows Update:
+C:\Windows\SoftwareDistribution\Download held 6.0 GB written that day.
+Clearing it (wuauserv and bits stopped first), the temp folders and a
+duplicate llvm-mingw.zip freed 5.7 GB, and `dism /online /cleanup-image
+/startcomponentcleanup` took used space from 64.3 to 52.0 GB in all, 9.8 GB
+free. So guest_services' 3 GB floor is checked only at the lane's start, and
+an update download between matrices can take the disk to nothing; both wedges
+followed a full C:. The host's disk was at 14 GB free at the same time
+(target/ at 197 GB, 58 GB of it cargo incremental caches, cleared).
+
 ## The HLS stop that waited for a download thread forever (measured 2026-11-13)
 
 linux media_delivery-rust-notsdemux-wayland, matrix 2 of the quiet-tail
