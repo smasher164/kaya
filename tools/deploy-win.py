@@ -122,6 +122,35 @@ def die(msg):
     sys.exit(1)
 
 
+def beside(phase, fn):
+    """Run `fn` on a thread beside the main line; the returned join prints the phase's own
+    TIMING line (leaving the main line's clock alone) and answers whether it passed."""
+    box = {"ok": False, "secs": 0}
+
+    def run():
+        t = time.monotonic()
+        try:
+            box["ok"] = fn() is not False
+        except SystemExit as e:
+            box["ok"] = e.code in (None, 0)
+        except Exception:  # noqa: BLE001 — printed, and the join fails the lane naming the phase
+            traceback.print_exc()
+        box["secs"] = int(time.monotonic() - t)
+
+    thread = threading.Thread(target=run, name=phase, daemon=True)
+    thread.start()
+
+    def join():
+        thread.join()
+        print(f"TIMING {phase} {box['secs']}s", flush=True)
+        if not box["ok"]:
+            print(f"deploy-win: {phase}, run beside the main line, FAILED; its lines are above",
+                  file=sys.stderr, flush=True)
+        return box["ok"]
+
+    return join
+
+
 # NO check-targets HERE (the maintainer, 2026-10-06; docs/traps.md, the
 # lanes' duplicate target checks): the build below compiles the target
 # before the VM is touched.
@@ -448,9 +477,13 @@ def native_images():
         die(refusal)
 
 
-native_images()
-timing("native-images")
-lane_health_reading("start")
+def vm_warm():
+    native_images()
+    lane_health_reading("start")
+
+
+# VM-ONLY, SO BESIDE THE CROSS BUILD (docs/measurements/windows-lane-2026-10-09.md).
+_vm_warm = beside("native-images", vm_warm)
 BUILD_EXAMPLES = []
 for _s in SCENES + DEPTH_SCENES:
     BUILD_EXAMPLES += ["--example", _s]
@@ -539,7 +572,15 @@ def xwin_env(base):
                 KAYA_XWIN_HOST_CLANG=host, KAYA_XWIN_CLANG=str(pathlib.Path(cl).parent / "clang"))
 
 
+def core_lib_builds():
+    """Identities of the core's lib fingerprints: cargo rewrites one only when it compiles
+    that unit. (`Compiling kaya` cannot tell: an example relink prints it too.)"""
+    return {p: (p.stat().st_size, p.stat().st_mtime_ns)
+            for p in TARGET.glob(".fingerprint/kaya-*/lib-kaya")}
+
+
 print("== building (aarch64-pc-windows-msvc, release) ==", flush=True)
+_lib_builds = None
 for build_args in (
         ["cargo", "xwin", "build", "--locked", "--features", "harness",
          "--release", "--target", "aarch64-pc-windows-msvc", "--lib"],
@@ -556,6 +597,16 @@ for build_args in (
             a, cwd=ROOT, check=False, env=e).returncode, TARGET,
             content_fresh.examples_in(build_args), "{name}.exe", "deploy-win") != 0:
         sys.exit(1)
+    if _lib_builds is not None and core_lib_builds() != _lib_builds:
+        die("deploy-win: the --example build compiled the core's lib AGAIN after the --lib "
+            "build (.fingerprint/kaya-*/lib-kaya moved), about two minutes of the lane's wall. "
+            "The example graph's dev-dependencies turn on a feature of one of kaya's "
+            "dependencies that the lib graph lacks; name it in crates/kaya/Cargo.toml's "
+            "examples'-features block. To see which: "
+            "CARGO_LOG=cargo::core::compiler::fingerprint=info on the second build, then diff "
+            "the deps of .fingerprint/kaya-*/lib-kaya.json between the two (docs/traps.md, "
+            "the android pool's lib/example rebuild).")
+    _lib_builds = core_lib_builds()
 # THE CAPTURE LEGS' SYNTHETIC DEVICES (tools/winvcam): the virtual cameras'
 # media source and the helper that makes them and plays the cable's tone,
 # its own workspace, built every run like the guests it serves.
@@ -606,6 +657,8 @@ if _missing:
     print("\n".join(_missing), file=sys.stderr)
     sys.exit(1)
 timing("build")
+if not _vm_warm():
+    sys.exit(1)
 
 # THE UNIT TEST BINARY BUILDS ON THE HOST WHILE THE VM IS STAGED, warmed and
 # probed: it touches no VM, and its 90-110 s when the core moved used to be
@@ -1453,6 +1506,7 @@ def verify_deployed():
 
 
 verify_deployed()
+DEPLOYED = True
 timing("deploy")
 
 
@@ -1621,9 +1675,6 @@ def go_warm():
     print("== go warm (dev.kaya/guests/go/cmd built once, alone) ==")
 
 
-if SUITE == "all" or any(leg.endswith("_go") or leg == "go" for leg in LEGS):
-    go_warm()
-timing("go-warm")
 
 # THE CAPTION TITLE'S AIM. NO SCENE CAN SEE IT: every harness read of a
 # title goes through the string, the same whether the TextBlock sits on
@@ -1698,6 +1749,11 @@ def caption_centre_verdict(text, want_clear):
 
 
 def caption_centre_probe():
+    if not globals().get("DEPLOYED"):
+        print("deploy-win: the caption-centre probe was started before this run's deploy was "
+              "verified, so it would measure the PREVIOUS run's toolbar.exe and kaya.dll; start "
+              "it after verify_deployed()", file=sys.stderr)
+        return False
     print("== the caption title's aim (title-centre-probe, on the guest) ==",
           flush=True)
     log = LEGS_DIR / "caption-centre.log"
@@ -2793,6 +2849,15 @@ if not (SUITE.startswith("probe=")
         sys.exit(1)
 timing("desk-warm")
 
+# THE CAPTION PROBE NEEDS THE DESKTOP TO ITSELF and the deployed toolbar.exe, so it starts
+# after the deploy, the package install and the desktop's warm-up, and runs beside the
+# session-0 and host phases below; joined before the first leg.
+_caption = beside("caption-centre", caption_centre_probe) if SUITE == "all" else None
+
+if SUITE == "all" or any(leg.endswith("_go") or leg == "go" for leg in LEGS):
+    go_warm()
+timing("go-warm")
+
 
 def queued_legs():
     return lane.legs() if SUITE == "all" else LEGS
@@ -2901,12 +2966,8 @@ timing("unit-tests")
 
 rec_suite_start()
 if SUITE == "all":
-    # FIRST, AND ALONE: the probe drives a real border drag and a width
-    # sweep on the one window it can find by class, so it needs the
-    # desktop to itself.
-    if not caption_centre_probe():
+    if not _caption():
         status = 1
-    timing("caption-centre")
     # THE ROSTER IS DATA: tools/lib/lanes/win.py, blocks between drains.
     for at, block in enumerate(lane.ORDER):
         for leg in block:

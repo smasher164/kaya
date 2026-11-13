@@ -2561,15 +2561,19 @@ def census_lane_health(src):
     if 'lane_health.windows_report("windows", when,' not in reading:
         found.append(f"{WIN}: lane_health_reading no longer reads the guest")
     win = src[WIN]
-    calls = win.count("\nnative_images()\n")
-    order = [win.find('\ntiming("vm-ready")\n'), win.find("\nnative_images()\n"),
-             win.find('\nlane_health_reading("start")\n')]
+    warm = py_block(win, "vm_warm")
+    calls = warm.count("\n    native_images()\n")
+    order = [win.find('\ntiming("vm-ready")\n'),
+             win.find('\n_vm_warm = beside("native-images", vm_warm)\n'),
+             win.find("\nif not _vm_warm():\n    sys.exit(1)\n"), win.find('\ntiming("deploy")\n')]
     if calls != 1:
-        found.append(f"{WIN}: the native-image phase is called {calls} times at the top "
-                     f"level, wanted once")
-    elif not (0 <= order[0] < order[1] < order[2]):
+        found.append(f"{WIN}: the native-image phase is called {calls} times in vm_warm, "
+                     f"wanted once")
+    elif not 0 <= warm.find("native_images()") < warm.find('lane_health_reading("start")'):
+        found.append(f"{WIN}: the native-image phase does not run before the start reading")
+    elif not (0 <= order[0] < order[1] < order[2] < order[3]):
         found.append(f"{WIN}: the native-image phase does not run after vm-ready and "
-                     f"before the start reading and every leg")
+                     f"joined, failing the lane, before the deploy and every leg")
     phase = py_block(win, "native_images")
     for needle, what in (("lane_health.ngen_plan(", "reads the queues"),
                          ("lane_health.ngen_drain_command(", "drains a pending queue"),
@@ -3922,7 +3926,7 @@ for label, rel, pattern, repl, want, check in (
         ("LH1 the windows lane's end reading cut", WIN,
          r'^lane_health_reading\("end"\)\n', "", "called 1/0 times", census_lane_health),
         ("LH2 the windows lane's start reading cut", WIN,
-         r'^lane_health_reading\("start"\)\n', "", "called 0/1 times", census_lane_health),
+         r'^    lane_health_reading\("start"\)\n', "", "called 0/1 times", census_lane_health),
         ("LH3 the iOS end reading after the verdict", IOS,
          r'^(lane_health\.ios_report\("ios", "end", .*\n)((?:.*\n)*?)(if status == 0:\n'
          r' +print\("run-sim: ALL PASS"\)\n.*\n.*\n)', r"\2\3\1",
@@ -4030,12 +4034,15 @@ for label, rel, pattern, repl, want, check in (
     changed = doctored(rel, pattern, repl, label)
     gate.negative(label, lambda: check(changed), want=want)
 for label, rel, pattern, repl, want, check, subs in (
-        ("NG1 the native-image phase cut", WIN, r"^native_images\(\)\n", "",
+        ("NG1 the native-image phase cut", WIN, r"^    native_images\(\)\n", "",
          "called 0 times", census_lane_health, 1),
         ("NG2 the native-image phase after the start reading", WIN,
-         r'^native_images\(\)\ntiming\("native-images"\)\nlane_health_reading\("start"\)\n',
-         'lane_health_reading("start")\nnative_images()\ntiming("native-images")\n',
-         "does not run after vm-ready and before", census_lane_health, 1),
+         r'^    native_images\(\)\n    lane_health_reading\("start"\)\n',
+         '    lane_health_reading("start")\n    native_images()\n',
+         "does not run before the start reading", census_lane_health, 1),
+        ("NG2b the native-image phase never joined", WIN,
+         r"^if not _vm_warm\(\):\n    sys\.exit\(1\)\n", "",
+         "joined, failing the lane", census_lane_health, 1),
         ("NG3 a pending queue never drained", WIN,
          r"lane_health\.ngen_drain_command\(framework\)", "framework", "no longer drains",
          census_lane_health, 1),
@@ -4210,6 +4217,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(300 + (5 if DRIVES else 0))
+gate.negatives_ran(301 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

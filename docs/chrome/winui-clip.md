@@ -305,11 +305,13 @@ editor_go                              PASS  verdicts=1  IDENTICAL=True
 (`winui-title-center.md` §11.1). It has one now, and the driver is REUSED
 rather than copied: `tools/deploy-win.py` gained a `caption_centre_probe`
 phase that calls it with `KAYA_TCP_NO_DEPLOY=1` (the lane has just built and
-shipped what it would rebuild). It runs FIRST in the `all` arm, alone,
-before anything is submitted to the suite pool — the probe drives a real
-border drag and a width sweep on the one window it finds by class, so it
-needs the desktop to itself, the same reason the menus legs sit between
-drains. `tools/deploy-win.py <host> caption-centre` runs it alone.
+shipped what it would rebuild). It runs before anything is submitted to
+the suite pool — the probe drives a real border drag and a width sweep on
+the one window it finds by class, so it needs the desktop to itself, the
+same reason the menus legs sit between drains. Since 2026-11-13 it starts
+right after the desktop warm-up, on a thread beside go-warm, the capture
+check, the media server and the guest's unit tests (session-0 and host
+work), and is joined before the first leg. `tools/deploy-win.py <host> caption-centre` runs it alone.
 
 **The count rules, so the phase cannot pass having measured nothing:**
 

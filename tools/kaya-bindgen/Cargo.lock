@@ -1245,6 +1245,7 @@ dependencies = [
  "once_cell",
  "pango",
  "png",
+ "serde_core",
  "serde_json",
  "skrifa 0.46.2",
  "static_vcruntime",

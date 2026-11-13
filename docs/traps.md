@@ -15299,6 +15299,20 @@ identical units; `--lib`, `--lib --example ...` and `--lib` again rebuild no
 kaya. On the mac lane this was core-build+gates 439 s on the matrices where
 nothing else left the example graph built.
 
+IT CAME BACK with the rich document's `.kdoc` reader (2026-11-05): serde_json
+brought serde_core, and the examples' serde turns on serde_core's `result`,
+which the lib graph lacked. The windows release build compiled kaya in both of
+its invocations (1m55s and 1m54s on the 2026-11-13 record matrix, build 245 s
+against 5-8 s warm); the fingerprint log named `UnitDependencyInfoChanged` on
+kaya's lib, and the two lib-kaya.json files differed only in serde_json's hash,
+whose two units differed only in serde_core's features. Named in the manifest
+2026-11-13 (the build then 37 s for the lib, 24 s relinking the examples, 0.2 s
+warm). tools/deploy-win.py now refuses when its --example build rewrites a
+`.fingerprint/kaya-*/lib-kaya` the --lib build left, since that is the one
+lane that builds the two graphs back to back on every run (watched red with
+the line removed). Counting `Compiling kaya` lines cannot tell: an example
+relink prints it too.
+
 ## The android capture tone read high with no HAL failure (sighted 2026-10-05)
 
 capture-compose went red on the 18:07Z full matrix reading `samples 681 Hz`
@@ -15369,6 +15383,17 @@ graph the mac lane's `cargo build --lib --example ...` reads; with it gone the
 start's `cargo build --lib` left the lib graph, and the mac lane recompiled
 kaya twice (3m16s and 3m32s, core-build+gates 439 s against 136 s) on two
 matrices. The key handshake is back.
+
+MOVED AGAIN 2026-11-13, onto the sweep's warm rather than into the sweep:
+validate-all's niced `gates.py --warm` runs rung 1 beside the lanes in the
+sweep's own target and hands the sweep its key, and the start keeps only
+libkaya, the SwiftUI dylib and the prune (about 80 s of the start's 107 on the
+record matrix of that date). The revert's cause is gone: the lib and example
+graphs build identical kaya units again (the serde_core `result` feature named
+in the manifest the same day, the entry on the android pool's lib/example
+rebuild), and a host `cargo build --lib` followed by `--lib --example ...`
+rewrote no `lib-kaya` fingerprint. The premise is re-read on each matrix: the
+mac lane's core-build+gates phase and the linux and windows core builds.
 
 ## The Windows foreign-drop witness dropped onto dnd.exe's own console window (measured 2026-10-06)
 

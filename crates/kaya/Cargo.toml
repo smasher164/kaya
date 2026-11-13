@@ -49,7 +49,7 @@ intl-memoizer = "0.5.3"
 png = "0.18.1"
 zune-jpeg = { version = "0.5.15", default-features = false, features = ["std"] }
 # THE EXAMPLES' FEATURES, NAMED HERE TOO (docs/traps.md, the android pool's
-# lib/example rebuild): rusqlite and automerge turn these on, and a library
+# lib/example rebuild): the dev-dependencies turn these on, and a library
 # graph without them recompiled kaya on every --lib/--example switch.
 # The rich document's `.kdoc` reader (docs/rich-document-plan.md §4, RD13):
 # a file from outside is parsed by the one JSON reader the ecosystem trusts;
@@ -58,6 +58,7 @@ serde_json = "1.0.145"
 either = { version = "1", features = ["use_std"] }
 flate2 = { version = "1.1", features = ["zlib-rs"] }
 once_cell = { version = "1", features = ["std"] }
+serde_core = { version = "1", features = ["result"] }
 
 [dev-dependencies]
 # THE EXAMPLES' DEPENDENCIES, never the library's. The task manager's

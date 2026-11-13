@@ -1493,6 +1493,7 @@ dependencies = [
  "pango",
  "png",
  "rusqlite",
+ "serde_core",
  "serde_json",
  "skrifa 0.46.2",
  "static_vcruntime",
