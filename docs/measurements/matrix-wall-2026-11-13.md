@@ -103,3 +103,21 @@ saving it was made for needs a windows lane that outlasts the sweep, which
 on a clean core (windows about 1660) it may not. The rebuild cuts took
 linux-quiet from 66 s to 50; the sweep's own libkaya aged the derive once
 (no record yet) and skipped it on its second build.
+
+After the coordinator restarted the VM and UTM (killed the wedged QEMU,
+relaunched UTM, `utmctl start`), the interactive session again had a second
+800x600 display beside its 1280x800 one; `DisplaySwitch.exe /internal` as an
+`/it` task left the 1280x800 one alone (docs/traps.md, UTM's graceful stop).
+
+| run | tree | wall | verdict | why red |
+|---|---|---:|---|---|
+| 20261113T192036Z | 212b240a + 111960b9 | 2131 | red | linux media_delivery-rust-notsdemux-wayland: the harness step ceiling, 60 s inside `Expect(label#1, "hls_mpegts.m3u8")` at a container load of 5.9; windows taskspkg_rust: act one's `column@today_header ground top F2B326 in the light, wanted F3B53D`; windows notifypkg_rust: the guest wrote no output before the timeout (the foreground was the taskbar) |
+
+Rows: mac 996, android 1027, linux 1247, ios 1402, the sweep 446 from
+about 1027 to about 1473, linux-quiet 54 from about 1473 BESIDE the windows
+lane (its 16 media_tracks legs green), windows 2016 (1962 net, over its 1900
+ceiling; build 12 with the core unchanged), android-quiet 100 after windows.
+The wall is the start, the windows lane and android-quiet (about 10 + 2016 +
+100); the old order would have added linux-quiet's 54 s after them. The
+media_formats-rust-x11 video-ink red of the first run passed here.
+
