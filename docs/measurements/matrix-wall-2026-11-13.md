@@ -121,3 +121,23 @@ The wall is the start, the windows lane and android-quiet (about 10 + 2016 +
 100); the old order would have added linux-quiet's 54 s after them. The
 media_formats-rust-x11 video-ink red of the first run passed here.
 
+
+## The reds of the quiet-tail matrices, 30964a58 (charges: reds-1113)
+
+The packaged Windows legs no longer read the search indexer, the lane reads
+and repairs the guest's disk and Event Log before anything else, and the
+linux stack names fall back to Debian's debug archive (docs/traps.md, the
+packaged leg launched eight minutes late; the HLS stop that waited for a
+download thread forever, a GAP in docs/deferred.md; a video view with no
+frame at a host load near 200).
+
+| run | tree | wall | verdict | why red |
+|---|---|---:|---|---|
+| 20261113T215816Z | 30964a58 | 1840 | ALL PASS | |
+
+Rows: mac 1038, android 1078, linux 1346 (931 net), ios 1548 (1285 net),
+windows 1730 (1708 net against 1900; build 181 with the core changed,
+suites 1408, notifypkg_rust 6 s and taskspkg_rust 23 s), the sweep 492,
+linux-quiet 48, android-quiet 99. The guest read "C: 5.0 GB free of 63.0
+GB; EventLog Running; WSearch Running; 1 crash dump" at the start. The wall
+is the start, the windows lane and android-quiet.
