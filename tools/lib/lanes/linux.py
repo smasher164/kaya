@@ -47,9 +47,9 @@ WAYLAND_ONLY = {
 }
 
 # THE QUIET TAIL (the maintainer's ruling of 2026-10-16, android's QUIET one lane
-# over): these scenes' legs run in a `linux-quiet` row after every lane and the
-# sweep (KAYA_QUIET=skip on the parallel lane, =only after), each with its
-# reason. tools/check-exclusive.py holds the set, tools/check-gates.py the order.
+# over): these scenes' legs run in a `linux-quiet` row once every lane but
+# windows, and the sweep, have exited (2026-11-13; KAYA_QUIET=skip on the
+# parallel lane, =only after), each with its reason. tools/check-exclusive.py holds the set, tools/check-gates.py the order.
 QUIET = {
     "media_tracks": "the play-through's second cue is a 1 s window, and a matrix "
                     "stops the docker VM for longer (docs/traps.md, a linux VM off "

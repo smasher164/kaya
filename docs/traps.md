@@ -182,6 +182,27 @@ the mac lane's C and C# guests go through its by_content. SwiftPM, cabal,
 dune, go and gradle compare by stat equality or content, and the other
 lanes' C, C# and Java builds start from an empty directory.
 
+## The core recompiled for a configuration nobody built (measured 2026-11-13)
+
+Every linux lane, every linux-quiet row, every gate sweep (four times), the
+iOS lane and the windows lane printed "content_fresh: the core's build script
+under ... baked another tree's id (N run(s)); cargo reruns it" on every
+matrix, core changed or not, and recompiled kaya-derive and kaya. The linux
+target volume held eight build/kaya-*/output files: two of this build's
+configurations and six of feature sets no lane builds any more, at mtime 0
+from an earlier aging and still carrying old ids. Aging an output only makes
+cargo rerun it when a build uses it, so those six stayed stale for good, and
+age_stale_core aged kaya-derive's dep-lib reference for them on every build,
+which recompiled the derive and the core. linux-quiet's core-build read 17 s
+on the green matrix at 1646df47 with the core unchanged since the linux lane
+built it. content_fresh now records the core id and the derive libraries'
+identities (`.kaya-derive-aged.json` in the profile) after a successful build
+that aged the derive, and ages the derive again only when either moved; the
+stale outputs are still aged. Measured on linux-quiet alone: core-build 19 s
+with no record, then 1 s; a core file edited between runs, and then put back
+with `shutil.copy2` (an old mtime), each rebuilt kaya (16 s and 15 s). GUARD:
+check-build-id 5a.
+
 ## The last row's one-row band: a mac table scroll past the document's end (measured 2026-10-13)
 
 The mac native table's `scroll(toRow:)` and its anchor's re-park put the row's
@@ -17546,7 +17567,13 @@ machine off every CPU (1541 ms against 1 ms under the pause). GUARD:
 check-flightrec's linux step cpu census (SC1-SC3). REMEDY (the maintainer,
 2026-10-16): the media_tracks legs run in the matrix's `linux-quiet` row after
 every lane, the sweep and the android tail (tools/lib/lanes/linux.py's QUIET;
-check-gates NQ3, check-exclusive 5e).
+check-gates NQ3, check-exclusive 5e). MOVED 2026-11-13 (the maintainer asked
+for the easy tail cuts): the row starts once every lane but windows, and the
+sweep, have exited, and android-quiet waits for it. On the green matrix at
+1646df47 only the windows VM ran from the sweep's exit (T0+1721) to the
+windows lane's end (T0+1953), 232 s of room for a 66 s row; the stops this
+entry measured came from five lanes at a host load of 121, not from one VM.
+check-gates NQ1, NQ3 and NQ4 hold the new order.
 
 The same pass gave a red linux leg the guest's own picture: the lane's `shot`
 is taken after the guest exits, so netimage-java-wayland's shape red had a
@@ -20067,6 +20094,16 @@ and go.mod for the Go host. Each build now stamps a digest of those beside
 its apk (`QUIET_GUESTS`, written after the apk's proofs, removed before any
 build) and a reuse requires it equal; the rerun printed "go builds its apk"
 and went red on Android as on the other four.
+
+THE JVM HOST NEVER REUSED ITS APK AFTER A CORE CHANGE (measured 2026-11-13):
+the JVM digest read android/javahost/src, which holds jniLibs/arm64-v8a/
+libkaya.so, and build_suite takes the digest before the build copies the new
+library in, so the stamp named the previous library's bytes and the row
+printed "jvm builds its apk" on every matrix whose core moved (build-jvm 6 s
+on the row). jniLibs is out of the digest (QUIET_LIBS proves that library),
+the build writes no stamp when its own digest moved under it, and the row
+prints which proof failed (reuse_why_not, every branch printed by its
+self-test on each launch).
 
 
 ## Foreign window titles in a red leg's summary (2026-11-01)

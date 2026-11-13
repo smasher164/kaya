@@ -33,7 +33,11 @@ dev_shell_or_die()
 #                 prose builder. Several literals in one position are
 #                 ONE answer; INTERPOLATION is a format placeholder in a
 #                 format!/panic! string, so a `concat!` argument is a
-#                 constant however many braces it has.
+#                 constant however many braces it has. In PYTHON
+#                 (2026-11-13) it is a `return` of a string literal, an
+#                 f-string or a `+` of them, interpolating when an
+#                 f-string carries a {…}; a nested function's returns are
+#                 its own.
 #   TRANSPORT     is not authorship, and the SHAPE says which is which:
 #                 `kaya_asset_why_not` returns a usize and authors no
 #                 word, so it is CENSUSED and raises nothing.
@@ -48,6 +52,7 @@ dev_shell_or_die()
 # A language joins when a diagnostic in it lands and not before; one
 # named in a still-unread language FAILS naming the extension point.
 
+import ast
 import os
 import re
 import subprocess
@@ -363,18 +368,19 @@ SWIFT_FUNC = re.compile(r"\bfunc\s+(" + NAME + r")\s*\(")
 RUST_FN = re.compile(r"\bfn\s+(" + NAME + r")\s*(?=[(<])")
 # Every STILL-UNREAD language's definition keyword, for the refusal
 # below. `fn` came off this list when the Rust arm landed, and `fun` with
-# the Kotlin arm (2026-09-30): each is read
+# the Kotlin arm (2026-09-30), and `def` with the Python arm (2026-11-13): each is read
 # now, and a pattern kept for a language nothing can reach is the
 # vacuous guard this repo has been bitten by twice.
-OTHER_FUNC = re.compile(r"\b(?:def|func|sub)\s+(" + NAME + r")\s*[(<]")
+OTHER_FUNC = re.compile(r"\b(?:func|sub)\s+(" + NAME + r")\s*[(<]")
 KOTLIN_FUN = re.compile(r"\bfun\s+(?:<[^>]*>\s*)?(" + NAME + r")\s*\(")
 SWIFT_EXT = ".swift"
 RUST_EXT = ".rs"
 KOTLIN_EXT = (".kt", ".kts")
+PY_EXT = ".py"
 # The extensions with a clause analysis behind them. Everything else in
 # CODE_EXT gets the refusal, and an override may only redirect a file
 # this gate actually reads.
-READ_EXT = (SWIFT_EXT, RUST_EXT, *KOTLIN_EXT)
+READ_EXT = (SWIFT_EXT, RUST_EXT, *KOTLIN_EXT, PY_EXT)
 CODE_EXT = (".swift", ".rs", ".kt", ".kts", ".java", ".cs", ".go",
             ".py", ".ml", ".mli", ".hs", ".c", ".h", ".m")
 # "assets" joined 2026-08-28: an assets directory holds packaged
@@ -789,6 +795,69 @@ def audit_rust(path, text):
     return bad, census
 
 
+def py_answers(text, fn):
+    """report()'s answers for one Python function: (start, [(start, end, interp)]) per return."""
+    starts = [0]
+    for ln in text.splitlines(keepends=True):
+        starts.append(starts[-1] + len(ln))
+
+    def off(lineno, col):
+        line = text[starts[lineno - 1]:starts[lineno]]
+        return starts[lineno - 1] + len(line.encode("utf-8")[:col].decode("utf-8", "replace"))
+
+    def parts(node):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left, right = parts(node.left), parts(node.right)
+            return None if left is None or right is None else left + right
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return [(node, False)]
+        if isinstance(node, ast.JoinedStr):
+            return [(node, any(isinstance(v, ast.FormattedValue) for v in node.values))]
+        return None
+
+    found, unseen = [], False
+    todo = list(fn.body)
+    while todo:
+        node = todo.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            continue
+        if isinstance(node, ast.Return) and node.value is not None:
+            got = parts(node.value)
+            if got is None:
+                unseen = unseen or not (isinstance(node.value, ast.Constant)
+                                        and node.value.value is None)
+            else:
+                lits = [(off(n.lineno, n.col_offset), off(n.end_lineno, n.end_col_offset), i)
+                        for n, i in got]
+                found.append((lits[0][0], lits))
+        todo.extend(ast.iter_child_nodes(node))
+    return sorted(found), unseen
+
+
+def audit_python(path, text):
+    """(findings, census) for one Python source, read through its own parser."""
+    bad, census = [], []
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as e:
+        return [f"{path}: {e} — this gate could not read the file, so it is "
+                f"not reporting on it"], census
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                or not re.fullmatch(NAME, fn.name):
+            continue
+        cl, unseen = py_answers(text, fn)
+        b, c = report(
+            path, text, fn.lineno, fn.name, cl, unseen,
+            f"{path}:{fn.lineno}: {fn.name} returns prose this gate cannot see: no "
+            "`return` in it carries a string literal or an f-string. Write the "
+            "answers as returns, or teach tools/check-diagnostics.py to follow "
+            "this shape.")
+        bad += b
+        census.append(c)
+    return bad, census
+
+
 def code_files(roots):
     for r in roots:
         base = ROOT / r
@@ -826,13 +895,18 @@ def audit(roots, override=None):
             bad += b
             census += c
             continue
+        if path.endswith(PY_EXT):
+            b, c = audit_python(path, text)
+            bad += b
+            census += c
+            continue
         # Every language with no clause analysis yet: named, not read.
         # Refuse loudly.
         for m in OTHER_FUNC.finditer(text):
             bad.append(
                 f"{path}:{text[:m.start()].count(chr(10)) + 1}: "
                 f"{m.group(1)} is a diagnostic by the naming "
-                f"convention, but this gate reads Swift, Rust and Kotlin only, "
+                f"convention, but this gate reads Swift, Rust, Kotlin and Python only, "
                 f"so nothing is checking it. Add this language to "
                 f"tools/check-diagnostics.py (a lexer and an "
                 f"interpolation rule, ~30 lines) — do not rename the "
@@ -1068,6 +1142,46 @@ for label, doctored, want in (
     got, _ = audit([KT_TARGET], {os.path.normpath(KT_TARGET): out})
     if not any(want in b for b in got):
         print(f"check-diagnostics: SELF-TEST FAILED — the Kotlin copy "
+              f"({label}) was not refused for it. What it said:",
+              file=sys.stderr)
+        print("\n".join(got) or "(nothing)", file=sys.stderr)
+        raise SystemExit(1)
+
+# THE PYTHON ARM, watched the same two ways on a copy of run-emulator's reuse diagnostic.
+PY_TARGET = "tools/android/run-emulator.py"
+PY_NAME = "reuse_why_not"
+py_text = (ROOT / PY_TARGET).read_text(encoding="utf-8")
+py_fn = next((n for n in ast.walk(ast.parse(py_text))
+              if isinstance(n, ast.FunctionDef) and n.name == PY_NAME), None)
+if py_fn is None:
+    g.refuse(f"self-test: no {PY_NAME} in {PY_TARGET} — re-point the "
+             f"Python self-test at the diagnostic that replaced it")
+py_cl, _ = py_answers(py_text, py_fn)
+if len(py_cl) < 2:
+    g.refuse(f"self-test: {PY_NAME} reads {len(py_cl)} answer(s); the Python arm "
+             f"cannot see the shape it is meant to watch")
+lines = py_text.splitlines(keepends=True)
+body_at = sum(len(x) for x in lines[:py_fn.body[0].lineno - 1])
+body_end = sum(len(x) for x in lines[:py_fn.end_lineno])
+py_sole_text = (py_text[:body_at] + '    return "the apk cannot be reused"\n'
+                + py_text[body_end:])
+second = py_cl[1][1]
+py_prose_text = (py_text[:second[0][0]] + '"the apk is stale"'
+                 + py_text[second[-1][1]:])
+for label, doctored, want in (
+        ("replaced the body with a single answer", py_sole_text,
+         f"{PY_NAME} has exactly ONE answer"),
+        ("answer 2 rewritten to interpolate nothing", py_prose_text,
+         f"{PY_NAME} answer 2 of ")):
+    if doctored == py_text:
+        g.refuse("self-test: the Python perturbation changed NOTHING — 0 "
+                 "substitutions is a failed self-test")
+    out = T / ("py-" + label.split()[0] + ".py")
+    out.write_text(doctored, encoding="utf-8")
+    print(f"check-diagnostics: self-test: Python {label} (1 substitution)")
+    got, _ = audit([PY_TARGET], {os.path.normpath(PY_TARGET): out})
+    if not any(want in b for b in got):
+        print(f"check-diagnostics: SELF-TEST FAILED — the Python copy "
               f"({label}) was not refused for it. What it said:",
               file=sys.stderr)
         print("\n".join(got) or "(nothing)", file=sys.stderr)

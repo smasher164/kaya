@@ -287,15 +287,21 @@ def matrix_parallel_problem(text):
     return None
 
 
-# THE QUIET TAIL (the maintainer's ruling of 2026-10-05; tools/lib/lanes/
-# android.py's QUIET): the parallel Android lane leaves its microphone legs
-# out, and they run alone once every waiter, the sweep's included, is joined.
+# THE QUIET TAILS. The linux real-time media legs (the maintainer, 2026-10-16;
+# lanes/linux.py's QUIET) start once every lane but windows and the sweep have
+# exited (2026-11-13); the android microphone legs (2026-10-05; lanes/android.py's
+# QUIET) run alone after that, linux-quiet joined too (docs/traps.md, the
+# emulator's audio input entry and a linux VM off every CPU).
 ANDROID_SKIP = 'env={"KAYA_QUIET": "skip"})'
 QUIET_LAUNCH = 'run_lane("android-quiet", ["tools/android/run-emulator.py"],'
 QUIET_ENV = 'env={"KAYA_QUIET": "only"})'
-JOIN = ["for waiter in lane_waiters:", "waiter.join()"]
-# The linux real-time media legs (the maintainer, 2026-10-16; lanes/linux.py's
-# QUIET), the same shape after the android tail.
+JOIN_ALL = "join_lanes()"
+JOIN_BUT_WINDOWS = 'join_lanes(but={"windows"})'
+JOIN_DEF = """def join_lanes(but=()):
+    for name, waiter in list(lane_waiters.items()):
+        if name not in but:
+            waiter.join()
+"""
 LINUX_SKIP = 'env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", ""), "KAYA_QUIET": "skip"})'
 LINUX_QUIET_LAUNCH = 'run_lane("linux-quiet", ["tools/validate-linux.py"],'
 LINUX_QUIET_ENV = 'env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", ""), "KAYA_QUIET": "only"})'
@@ -333,29 +339,33 @@ def quiet_tail_problem(text):
         return ("tools/validate-all.py must launch the parallel Android lane with "
                 "KAYA_QUIET=skip, or its microphone legs run beside the other lanes "
                 "(docs/traps.md, the emulator's audio input entry)")
-    rest = text[parallel.end():]
-    tail = re.search(r'(?ms)^if MODE == "parallel":\n(.*?)^    for name in lane_names:', rest)
-    if tail is None:
-        return "tools/validate-all.py's collection block is missing"
-    body = [line.strip() for line in code_lines(tail.group(1)) if line.strip()]
-    at = next((i for i, line in enumerate(body) if line.startswith(QUIET_LAUNCH)), None)
-    if (at is None or body[:2] != JOIN or body[at + 1] != QUIET_ENV
-            or body[at + 2:at + 4] != JOIN or QUIET_LAUNCH in "".join(lines)):
-        return ("tools/validate-all.py must run the android-quiet lane with "
-                "KAYA_QUIET=only only after joining every lane and the sweep, and "
-                "join it before the collection")
     linux = next((i for i, line in enumerate(lines)
                   if line.startswith(PLATFORM_LAUNCHES[1])), None)
     if linux is None or lines[linux + 1:linux + 2] != [LINUX_SKIP]:
         return ("tools/validate-all.py must launch the parallel linux lane with "
                 "KAYA_QUIET=skip, or its real-time media legs run under the matrix's "
                 "load (docs/traps.md, a linux VM off every CPU for longer than a cue)")
-    lq = next((i for i, line in enumerate(body) if line.startswith(LINUX_QUIET_LAUNCH)), None)
-    if (lq is None or lq < at + 4 or body[lq + 1] != LINUX_QUIET_ENV
-            or body[lq + 2:lq + 4] != JOIN or body[lq - 2:lq] != JOIN):
+    if JOIN_DEF not in text:
+        return ("tools/validate-all.py's join_lanes must join every lane's waiter "
+                "except the ones it is told to leave running")
+    rest = text[parallel.end():]
+    tail = re.search(r'(?ms)^if MODE == "parallel":\n(.*?)^    for name in lane_names:', rest)
+    if tail is None:
+        return "tools/validate-all.py's collection block is missing"
+    body = [line.strip() for line in code_lines(tail.group(1)) if line.strip()]
+    flat = "".join(lines)
+    if (body[:1] != [JOIN_BUT_WINDOWS] or not body[1:2]
+            or not body[1].startswith(LINUX_QUIET_LAUNCH)
+            or body[2:4] != [LINUX_QUIET_ENV, JOIN_ALL] or LINUX_QUIET_LAUNCH in flat):
         return ("tools/validate-all.py must run the linux-quiet lane with "
-                "KAYA_QUIET=only after the android tail is joined, and join it "
-                "before the collection")
+                "KAYA_QUIET=only once every lane but windows, and the sweep, have "
+                "exited, and join it before the android tail")
+    at = next((i for i, line in enumerate(body) if line.startswith(QUIET_LAUNCH)), None)
+    if (at is None or at < 4 or body[at + 1:at + 3] != [QUIET_ENV, JOIN_ALL]
+            or body[-1] != JOIN_ALL or QUIET_LAUNCH in flat):
+        return ("tools/validate-all.py must run the android-quiet lane with "
+                "KAYA_QUIET=only only after joining every lane, the sweep and "
+                "linux-quiet, and join it before the collection")
     return None
 
 
@@ -947,35 +957,26 @@ if len(planted) != 2 or len(census(on_disk + planted, listed_scripts,
     fail("self-test N4b: a `*-selftest` script in neither list was not "
          "reported — a self-test outside check-* would rot unrun again")
 
-# NQ1 — the quiet tail launched before the lanes are joined.
-doctored, n = re.subn(
-    r'(?ms)^(    for waiter in lane_waiters:\n        waiter\.join\(\)\n)'
-    r'(    # THE QUIET TAIL.*?\n)(    if os\.environ)',
-    "\\2\\3", matrix_text, count=1)
-print(f"check-gates: self-test NQ1 removed the join before the quiet tail, {n} substitution(s)")
-if n != 1:
-    fail("self-test NQ1 did not remove exactly one join — the quiet-tail clause is "
-         "not reading the real collection block")
-elif quiet_tail_problem(doctored) is None:
-    fail("self-test NQ1: a quiet tail launched beside running lanes passed")
-
-# NQ3 — the parallel linux lane runs its real-time media legs in place, and
-# the linux tail launched beside the android one.
+# NQ1/NQ3/NQ4 — the quiet tails launched beside lanes they must not overlap.
 for _label, _pattern, _repl in (
-        ("cut the linux lane's KAYA_QUIET=skip",
+        ("NQ1 launched android-quiet before linux-quiet was joined",
+         r'(?ms)(^    run_lane\("linux-quiet".*?\n.*?\n)    join_lanes\(\)\n', "\\1"),
+        ("NQ3 cut the linux lane's KAYA_QUIET=skip",
          r'(env=\{"KAYA_JOBS": os\.environ\.get\("KAYA_LINUX_JOBS", ""\)), '
          r'"KAYA_QUIET": "skip"\}\)',
          r"\1})"),
-        ("ran the linux tail before the android tail was joined",
-         r'(?ms)^(        for waiter in lane_waiters:\n            waiter\.join\(\)\n)'
-         r'(    # AND THE LINUX REAL-TIME.*?\n)(    run_lane\("linux-quiet")',
-         "\\2\\3")):
+        ("NQ3 launched linux-quiet beside the running sweep",
+         r'join_lanes\(but=\{"windows"\}\)', 'join_lanes(but={"windows", "gates"})'),
+        ("NQ3 launched linux-quiet before any lane was joined",
+         r'(?m)^    join_lanes\(but=\{"windows"\}\)\n', ""),
+        ("NQ4 made join_lanes skip the lanes it should join",
+         r"if name not in but:", "if name in but:")):
     doctored, n = re.subn(_pattern, _repl, matrix_text, count=1)
-    print(f"check-gates: self-test NQ3 {_label}, {n} substitution(s)")
+    print(f"check-gates: self-test {_label}, {n} substitution(s)")
     if n != 1:
-        fail(f"self-test NQ3 ({_label}) did not apply exactly once")
+        fail(f"self-test {_label} did not apply exactly once")
     elif quiet_tail_problem(doctored) is None:
-        fail(f"self-test NQ3: a matrix that {_label} passed")
+        fail(f"self-test: a matrix that {_label} passed")
 
 # NQ2 — the parallel Android lane runs its microphone legs in place.
 doctored, n = re.subn(r'\n +env=\{"KAYA_QUIET": "skip"\}\)', ")", matrix_text, count=1)

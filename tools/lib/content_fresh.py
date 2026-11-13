@@ -12,6 +12,7 @@ import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 STAMP = ".kaya-sources.json"
+DERIVE_STAMP = ".kaya-derive-aged.json"
 
 
 def _core_id():
@@ -25,21 +26,30 @@ def _age(path):
     os.utime(path, (0, 0))
 
 
+def derive_record(profile, want):
+    return {"core": want, "derive": sorted([p.name, *_identity(p)]
+                                           for p in profile.glob("deps/*kaya_derive-*")
+                                           if p.suffix in (".so", ".dylib", ".dll"))}
+
+
 def age_stale_core(profile, want):
-    """Every kaya build-script run under `profile` whose baked id is not `want` is aged, with the
-    derive crate's reference, so cargo reruns it and recompiles the core from these bytes."""
+    """Every kaya build-script run under `profile` whose baked id is not `want` is aged, so cargo
+    reruns it and recompiles the core from these bytes; the derive crate's reference too, unless
+    DERIVE_STAMP holds `want` and the derive artifacts it recorded (docs/traps.md, the core recompiled for a configuration nobody built)."""
     stale = []
     for out in sorted(profile.glob("build/kaya-*/output")):
         m = re.search(r"KAYA_BUILD_ID=([0-9a-f]{16})", out.read_text(encoding="utf-8", errors="replace"))
         if m and m.group(1) != want:
             stale.append(out)
     if not stale:
-        return []
+        return [], False
     for out in stale:
         _age(out)
+    if _load(profile / DERIVE_STAMP) == derive_record(profile, want):
+        return stale, False
     for ref in profile.glob(".fingerprint/kaya-derive-*/dep-lib-kaya_derive"):
         _age(ref)
-    return stale
+    return stale, True
 
 
 def examples_in(cmd):
@@ -96,12 +106,17 @@ def cargo(run, profile, examples=(), artifact="{name}", who="content_fresh", cor
     either be written by this build or match the sources the stamp beside it was taken from;
     one that does neither is aged and built again, and a second miss refuses."""
     profile = pathlib.Path(profile)
-    aged = age_stale_core(profile, core_id or _core_id())
+    want = core_id or _core_id()
+    aged, derive_aged = age_stale_core(profile, want)
     if aged:
         print(f"{who}: the core's build script under {profile} baked another tree's id "
-              f"({len(aged)} run(s)); cargo reruns it", flush=True)
+              f"({len(aged)} run(s)); cargo reruns it"
+              + ("" if derive_aged else ", and the derive crate was already rebuilt over "
+                 f"these sources ({DERIVE_STAMP})"), flush=True)
     start = time.time_ns()
     rc = run()
+    if rc == 0 and derive_aged:
+        _save(profile / DERIVE_STAMP, derive_record(profile, want))
     if rc != 0 or not examples:
         return rc
     stamp = profile / "examples" / STAMP

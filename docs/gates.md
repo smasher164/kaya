@@ -140,7 +140,11 @@ them. It also pins validate-all's launch order: the Docker start
 before the build and every lane, NK1/NK2 watched; ALL FIVE platform lanes
 start together before the runner waits for Android's recorded lane pid;
 the one gate sweep starts at niceness 10 after it exits, FOUR GATES WIDE
-since 2026-09-07, while any longer lanes continue. IN A CARGO TARGET OF
+since 2026-09-07, while any longer lanes continue. The quiet tails come
+after: linux-quiet once every lane but windows, and the sweep, have exited
+(2026-11-13), and android-quiet alone once everything else, linux-quiet
+included, has (docs/traps.md, a linux VM off every CPU and the emulator's
+audio input entry); NQ1-NQ4 watch the overlaps and the skip launches red. IN A CARGO TARGET OF
 ITS OWN SINCE 2026-10-16 (CARGO_TARGET_DIR=target/gate-sweep,
 host_lib.SWEEP_TARGET): the mac guests load the lanes' libkaya by path,
 a gate's cargo build relinked it once and seven legs died in dyld, so
@@ -1027,7 +1031,9 @@ in from git and requires the red)
 cannot have measured — see invariant 3. The shape it can see is a
 failure path with ONE answer, or an answer that interpolates nothing:
 such a sentence is printed for every cause it does not name, and it is
-believed)
+believed. It reads Swift, Rust, Kotlin and, since 2026-11-13, Python
+(through `ast`; run-emulator.py's reuse_why_not was the first), each arm
+watched red on a copy of a real diagnostic both ways)
 
 ## tools/check-harness-ceiling.py
 
@@ -2000,7 +2006,10 @@ guests take a full build when their sources' bytes moved. Clause 3 holds
 the core id to every file libkaya's dep-info names, and build.rs's rerun
 list to the id's inputs; clause 4 counts each runner's routed builds;
 clause 5 runs the trap on a scratch crate and a make probe. Watched red:
-each aging cut and by_content's decision cut.
+each aging cut and by_content's decision cut. Clause 5a (2026-11-13;
+docs/traps.md, the core recompiled for a configuration nobody built) runs
+the derive crate's aging over six cases on a scratch profile and watches
+the stamp's comparison cut red.
 
 ## tools/check-pins.py
 

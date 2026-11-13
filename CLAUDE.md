@@ -406,20 +406,21 @@ docs/gates.md.
    in series, 654 + 422 = 1082s on the last such matrix; launched at t0
    beside the lanes it slowed every lane by 150-200s for a 116s gain
    (matrix #24), which is why it still waits.
-   THE ANDROID MICROPHONE LEGS RUN LAST (the maintainer, 2026-10-05): the
-   emulator's audio input breaks whenever the host starves it, so the
+   THE LINUX REAL-TIME MEDIA LEGS RUN BESIDE THE WINDOWS TAIL (the
+   maintainer, 2026-10-16; moved 2026-11-13): media_tracks' second cue is
+   a 1 s window and a matrix stops the docker VM for longer, so the
+   parallel linux lane runs with KAYA_QUIET=skip and a `linux-quiet` row
+   runs tools/lib/lanes/linux.py's QUIET scenes once every lane but
+   windows, and the sweep, have exited; only the windows VM runs beside
+   it (docs/traps.md, a linux VM off every CPU for longer than a cue;
+   check-gates holds the order, check-exclusive the set). They are not
+   exclusive: --no-exclusive keeps them and --exclusive leaves them out.
+   AND THE ANDROID MICROPHONE LEGS RUN LAST (the maintainer, 2026-10-05):
+   the emulator's audio input breaks whenever the host starves it, so the
    parallel Android lane runs with KAYA_QUIET=skip and the `android-quiet`
-   row runs its QUIET legs alone after every lane and the sweep
-   (docs/traps.md, the emulator's audio input entry; check-gates holds the
-   order, check-exclusive the set).
-   AND THE LINUX REAL-TIME MEDIA LEGS RUN AFTER IT (the maintainer,
-   2026-10-16): media_tracks' second cue is a 1 s window and a matrix stops
-   the docker VM for longer, so the parallel linux lane runs with
-   KAYA_QUIET=skip and a `linux-quiet` row runs tools/lib/lanes/linux.py's
-   QUIET scenes once the android tail is joined (docs/traps.md, a linux VM
-   off every CPU for longer than a cue; check-gates holds the order,
-   check-exclusive the set). They are not exclusive: --no-exclusive keeps
-   them and --exclusive leaves them out.
+   row runs its QUIET legs alone after every lane, the sweep and
+   linux-quiet (docs/traps.md, the emulator's audio input entry;
+   check-gates holds the order, check-exclusive the set).
    `--serial` is for the special cases: single-lane benchmarking,
    debugging under contention, recording mode. The
    lanes remain individually runnable (`tools/validate-linux.py`,

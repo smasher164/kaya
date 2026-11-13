@@ -60,7 +60,7 @@ atexit.register(lambda: shutil.rmtree(LANES_DIR, ignore_errors=True))
 
 lane_names = []
 lane_procs = []
-lane_waiters = []
+lane_waiters = {}
 lane_done = {}
 status = 0
 
@@ -393,13 +393,19 @@ def run_lane(name, argv, env=None):
 
     waiter = threading.Thread(target=_wait)
     waiter.start()
-    lane_waiters.append(waiter)
+    lane_waiters[name] = waiter
     lane_procs.append(proc)
     lane_names.append(name)
 
 
 WARM_RUNG1_RED = 4
 WARM_RUNG1_KEY = re.compile(r"^warm: rung 1 passed over key ([0-9a-f]+)$", re.M)
+
+
+def join_lanes(but=()):
+    for name, waiter in list(lane_waiters.items()):
+        if name not in but:
+            waiter.join()
 
 
 def rung1_from_warm(rc, text):
@@ -559,26 +565,25 @@ else:
 
 
 if MODE == "parallel":
-    for waiter in lane_waiters:
-        waiter.join()
+    # THE LINUX REAL-TIME MEDIA LEGS (the maintainer, 2026-10-16; lanes/linux.py's
+    # QUIET) start once every lane but windows and the sweep have exited: only the
+    # windows VM runs beside them (2026-11-13, docs/traps.md, a linux VM off every
+    # CPU for longer than a cue). Not exclusive, so an --exclusive run leaves them
+    # out and --no-exclusive keeps them.
+    join_lanes(but={"windows"})
+    run_lane("linux-quiet", ["tools/validate-linux.py"],
+             env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", ""), "KAYA_QUIET": "only"})
+    join_lanes()
     # THE QUIET TAIL (the maintainer's ruling of 2026-10-05; lanes/android.py's
     # QUIET): the emulator's microphone breaks when the host starves it, so its
-    # legs run once every other lane and the sweep have exited.
+    # legs run once every other lane, the sweep and linux-quiet have exited.
     if os.environ.get("KAYA_EXCLUSIVE", "") == "skip":
         print("quiet: the android microphone legs are exclusive and this run "
               "leaves exclusive legs out; not launched", flush=True)
     else:
         run_lane("android-quiet", ["tools/android/run-emulator.py"],
                  env={"KAYA_QUIET": "only"})
-        for waiter in lane_waiters:
-            waiter.join()
-    # AND THE LINUX REAL-TIME MEDIA LEGS (the maintainer, 2026-10-16;
-    # lanes/linux.py's QUIET), after the android tail. Not exclusive, so an
-    # --exclusive run leaves them out and --no-exclusive keeps them.
-    run_lane("linux-quiet", ["tools/validate-linux.py"],
-             env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", ""), "KAYA_QUIET": "only"})
-    for waiter in lane_waiters:
-        waiter.join()
+        join_lanes()
     for name in lane_names:
         verdict, secs = lane_done.get(name, ("FAIL", 0))
         log = LANES_DIR / f"{name}.log"

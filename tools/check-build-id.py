@@ -342,6 +342,53 @@ with scratch_dir("check-build-id-") as tmp:
         finally:
             content_fresh._age = real_age
 
+    # 5a. The derive crate's aging (docs/traps.md, the core recompiled for a configuration
+    # nobody built): a stale run of another configuration ages the derive once per core id
+    # and derive build, and again when either moves or the build that followed failed.
+    def derive_cases():
+        prof = tmp / "derive-probe"
+        shutil.rmtree(prof, ignore_errors=True)
+        out = prof / "build/kaya-0000000000000000/output"
+        ref = prof / ".fingerprint/kaya-derive-0000000000000000/dep-lib-kaya_derive"
+        lib = prof / "deps/libkaya_derive-0000000000000000.so"
+        for f, body in ((out, "cargo::rustc-env=KAYA_BUILD_ID=00000000000000aa\n"),
+                        (ref, "x"), (lib, "derive v1")):
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(body, encoding="utf-8")
+
+        def aged_now(rc=0, want="00000000000000bb"):
+            os.utime(ref, None)
+            content_fresh.cargo(lambda: rc, prof, core_id=want, who="check-build-id derive probe")
+            return ref.stat().st_mtime == 0
+
+        seen = [("no stamp yet", aged_now(), True),
+                ("the stamp holds this core id and derive build", aged_now(), False)]
+        lib.write_text("derive v2", encoding="utf-8")
+        seen.append(("the derive library was rebuilt since", aged_now(), True))
+        seen.append(("the core id moved", aged_now(want="00000000000000cc"), True))
+        seen.append(("a build at another core id failed",
+                     aged_now(rc=1, want="00000000000000dd"), True))
+        seen.append(("the next build at that id follows a failure",
+                     aged_now(want="00000000000000dd"), True))
+        for label, got, wanted in seen:
+            print(f"check-build-id: self-test 5a {label}: derive "
+                  + ("aged" if got else "left alone"))
+        return [label for label, got, wanted in seen if got != wanted]
+
+    wrong = derive_cases()
+    for label in wrong:
+        fail(f"content_fresh's derive aging is wrong when {label}")
+    if not wrong:
+        real_record = content_fresh.derive_record
+        content_fresh.derive_record = lambda profile, want: content_fresh._load(
+            profile / content_fresh.DERIVE_STAMP) or real_record(profile, want)
+        print("check-build-id: self-test 5a with the stamp's comparison cut")
+        try:
+            if not derive_cases():
+                fail("self-test failed: with the derive stamp's comparison cut, 5a passed")
+        finally:
+            content_fresh.derive_record = real_record
+
     # 5b. by_content on a make probe: a prerequisite restored with an old
     # mtime gets a full build.
     mk = tmp / "make-probe"

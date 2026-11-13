@@ -4498,9 +4498,10 @@ def guest_digest(suite):
     h = hashlib.sha256()
     for name in QUIET_GUESTS[suite]:
         p = ROOT / name
+        # jniLibs holds the library QUIET_LIBS proves, copied in after this digest is taken.
         for f in sorted([p] if p.is_file() else
                         (x for x in p.rglob("*") if x.is_file()
-                         and "__pycache__" not in x.parts)):
+                         and not {"__pycache__", "jniLibs"} & set(x.parts))):
             body = f.read_bytes()
             h.update(f"{f.relative_to(ROOT)}\0{len(body)}\0".encode())
             h.update(body)
@@ -4520,21 +4521,75 @@ def packaged(apk, lib):
         return None
 
 
+def reuse_why_not(apk, lib, digest, verify):
+    """None when `apk` may be installed as built, else the first proof it failed."""
+    if not apk.is_file():
+        return f"there is no {apk.name}"
+    if not lib.is_file():
+        return f"there is no {lib.name} to compare it with"
+    if packaged(apk, lib) != lib.read_bytes():
+        return f"{apk.name} packages other bytes than {lib.name}"
+    stamp = guest_stamp(apk)
+    if not stamp.is_file():
+        return f"there is no {stamp.name}, so the build that wrote it did not finish its proofs"
+    was = stamp.read_text(encoding="utf-8")
+    if was != digest:
+        return f"its guest sources read {digest}, and it was built from {was}"
+    if not verify(["--verify", str(lib)]):
+        return f"build-id --verify refused {lib.name} (the line above)"
+    if not verify(["--verify", "--component", "compose", str(apk)]):
+        return f"build-id's interpreter verify refused {apk.name} (the line above)"
+    return None
+
+
 def reuse_built(suite, apk):
     if QUIET_MODE != "only" or suite not in QUIET_LIBS:
         return False
-    lib = ROOT / QUIET_LIBS[suite]
-    fresh = (apk.is_file() and lib.is_file()
-             and packaged(apk, lib) == lib.read_bytes()
-             and guest_stamp(apk).is_file()
-             and guest_stamp(apk).read_text(encoding="utf-8") == guest_digest(suite)
-             and run([str(ROOT / "tools/build-id.py"), "--verify", str(lib)]).returncode == 0
-             and run([str(ROOT / "tools/build-id.py"), "--verify", "--component", "compose",
-                      str(apk)]).returncode == 0)
-    print(f"quiet: {suite} " + ("installs the apk this matrix built" if fresh
-                                else "builds its apk, since none of this tree's stands ready"),
-          flush=True)
-    return fresh
+    why = reuse_why_not(apk, ROOT / QUIET_LIBS[suite], guest_digest(suite), lambda args: run(
+        [str(ROOT / "tools/build-id.py"), *args]).returncode == 0)
+    print(f"quiet: {suite} " + ("installs the apk this matrix built" if why is None
+                                else f"builds its apk: {why}"), flush=True)
+    return why is None
+
+
+def reuse_why_not_selftest():
+    """Every branch of reuse_why_not made to print, on a scratch apk."""
+    with tempfile.TemporaryDirectory(prefix="kaya-reuse-") as tmp:
+        tmp = pathlib.Path(tmp)
+        apk, lib = tmp / "host-debug.apk", tmp / "libkaya.so"
+        lib.write_bytes(b"lib v1")
+
+        def pack(body):
+            with zipfile.ZipFile(apk, "w") as z:
+                z.writestr(f"lib/arm64-v8a/{lib.name}", body)
+
+        def ok(args):
+            return True
+
+        def refuse(flag):
+            return lambda args: flag not in args
+
+        cases = [("no apk", lambda: None, ok, "there is no host-debug.apk"),
+                 ("no lib", lambda: (pack(b"lib v1"), lib.unlink()), ok, "there is no libkaya.so"),
+                 ("other bytes", lambda: (lib.write_bytes(b"lib v1"), pack(b"lib v0")), ok,
+                  "packages other bytes"),
+                 ("no stamp", lambda: pack(b"lib v1"), ok, "there is no host-debug.apk.guests"),
+                 ("moved", lambda: guest_stamp(apk).write_text("0" * 16, encoding="utf-8"), ok,
+                  "it was built from 0000000000000000"),
+                 ("core id", lambda: guest_stamp(apk).write_text("1" * 16, encoding="utf-8"),
+                  refuse(str(lib)), "refused libkaya.so"),
+                 ("apk id", lambda: None, refuse(str(apk)), "verify refused host-debug.apk"),
+                 ("reused", lambda: None, ok, None)]
+        for name, setup, verify, want in cases:
+            setup()
+            got = reuse_why_not(apk, lib, "1" * 16, verify)
+            print(f"run-emulator: reuse self-test {name}: {got or 'installs the apk as built'}",
+                  flush=True)
+            if (got is None) != (want is None) or (want and want not in got):
+                die(f"run-emulator: SELF-TEST FAIL — reuse_why_not answered {got!r} for {name}")
+
+
+reuse_why_not_selftest()
 
 
 def build_suite(suite):
@@ -4649,7 +4704,13 @@ def build_suite(suite):
     if not apk_assets_verify(apk):
         return False
     if guests is not None:
-        guest_stamp(apk).write_text(guests, encoding="utf-8")
+        after = guest_digest(suite)
+        if after == guests:
+            guest_stamp(apk).write_text(guests, encoding="utf-8")
+        else:
+            print(f"quiet: {suite}'s guest sources read {guests} before its build and {after} "
+                  f"after it, so no quiet row can reuse this apk: either a file in QUIET_GUESTS "
+                  f"is one the build writes, or the sources moved under the build", flush=True)
     timing(f"build-{suite}", clock="build")
     targets = ([*SERIALS, TABLET_SERIAL] if suite == "compose"
                else list(SERIALS))
