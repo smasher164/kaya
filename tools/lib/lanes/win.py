@@ -68,8 +68,7 @@ OFF_SCENES = {"chatkeyboard": "Windows has no software keyboard on this lane (do
               "autofillkeyboard": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)",
               "chatkeyboardland": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)",
               "editorkeyboard": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)",
-              "windowmem": "TwoPaneView and NavigationView have no sidebar divider a user can drag (docs/tasks-s4-plan.md P8)",
-              "richdocax": "the field's accessible text cannot be read in process; parked on a ruling (docs/rich-document-plan.md RD21)"}
+              "windowmem": "TwoPaneView and NavigationView have no sidebar divider a user can drag (docs/tasks-s4-plan.md P8)"}
 
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
 # exclusive.py): the drag family, already alone inside this lane for the
@@ -675,6 +674,11 @@ ORDER = [
     [
      "richdocdark_rust",
     ],
+    # What Narrator is told of the markers (docs/rich-document-plan.md RD19):
+    # alone for richdoc_rust's reason, its `press return`.
+    [
+     "richdocax_rust",
+    ],
     # ownundo_rust ALONE, ranges' first reason: its `type` verb puts REAL
     # KEYSTROKES on the system input queue and foregrounds the guest to do it
     # (docs/rich-text-plan.md §14 — the app's history is made of what was
@@ -1014,7 +1018,8 @@ GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "media_timeout": "media", "media_reader": "media", "capture_denied": "capture",
               "music_home": "music", "music_playlist": "music", "music_header": "music",
               "music_headerdark": "music", "music_dock": "music", "music_dockdark": "music", "music_artist": "music",
-              "music_artistdark": "music", "music_search": "music", "music_context": "music"}
+              "music_artistdark": "music", "music_search": "music", "music_context": "music",
+              "richdocax": "richdoc"}
 
 # THE MEDIA SUITE'S SERVER (docs/media-plan.md §7a): the VM reaches the host
 # over UTM's bridge, so the runner binds it there, on this lane's own port,
@@ -1088,6 +1093,11 @@ MODS = {
     # THE CAPTION MARK OPENS THE WINDOW MENU (docs/deferred.md, the caption
     # mark's system menu): no other lane draws a mark in its caption.
     "identity": {"append": "expect_caption_menu"},
+    # INVARIANT 1'S CARVE-OUT (docs/rich-document-plan.md RD21, RULED A): the
+    # RichEdit's own provider serves Narrator the field's text, and the
+    # field's in-process peer answers the Text pattern with null.
+    "richdocax": {"drop": ((("expect_ax_text textarea#0",), "expect_ax_item",
+                            "WinUI's in-process tree publishes no Text pattern for a RichEditBox (RD21)"),)},
 }
 
 
@@ -1104,6 +1114,14 @@ def staged_scenes(scenes_dir, out_dir):
             continue
         if "cut" in cut:
             prefix, dropped = scene_cut.scene_prefix(path, cut["cut"], cut["keep"], who="windows")
+        elif "drop" in cut:
+            lines = [line for line in path.read_text(encoding="utf-8").splitlines()
+                     if not line.lstrip().startswith("#")]
+            prefix, taken = scene_cut.drop_blocks(lines, cut["drop"])
+            for why, gone in taken:
+                for line in gone:
+                    print(f"deploy-win: NOT RUN on this host ({why}): {path.stem}: {line.strip()}")
+            dropped = []
         else:
             prefix, dropped = path.read_text(encoding="utf-8").splitlines(), []
         for line in dropped:

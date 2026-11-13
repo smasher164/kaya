@@ -6,7 +6,7 @@ RD13-RD16) RULED as recommended; RD17 RULED A and RD18 RULED B on
 2026-11-12 ("I like all the recommendations except rd12") and BUILT the same
 day, RD18 on GTK and Compose; RD19 (the Mac, iOS and WinUI half of RD18) and
 RD20 (a Document kept in a model field) RULED A and B respectively on 2026-11-12 and BUILT
-the same day, RD21 (WinUI's field text read) ASKED 2026-11-12; RD12 RULED as amended: no Markdown and no DOCX, the clipboard's RTF
+the same day, RD21 (WinUI's field text read) RULED A and BUILT 2026-11-12; RD12 RULED as amended: no Markdown and no DOCX, the clipboard's RTF
 and HTML in the first build (the maintainer: "why do we even have markdown
 import and export?" and "i feel like that's out of scope for our rich text
 editor"). The review page is
@@ -992,9 +992,9 @@ caret's item is the text view's accessibility hint (an app's own hint after
 it), announced as it changes. WinUI names each drawn marker element with the
 core's string and sets its PositionInSet, SizeOfSet and Level, so Narrator
 meets "bullet, 2 of 3" where it met "•"; the read checks all four against the
-core. `richdocax.steps` runs on the Mac, iOS, GTK and Compose; WinUI's field
-text cannot be read in process (RD21), so the scene is parked there while
-all nine of its item reads were measured green.
+core. `richdocax.steps` runs on all five lanes; WinUI's field text cannot be
+read in process, so that lane drops the one `expect_ax_text` read and says
+why (RD21 A) and runs every item read.
 
 **Colour (RD5) as built.** `brand::ink_for_dark` maps a stored colour (as it
 reads on the light reference page `#FFFFFF`) to the dark reference page
@@ -1529,7 +1529,9 @@ waits.
 
 RULED A (the maintainer, 2026-11-12: "A, but ledger C as an option, cause i
 didn't realize we stopped using the accessibility reader on windows"). C is
-kept on docs/deferred.md as an option, not a plan.
+kept on docs/deferred.md as an option, not a plan. BUILT 2026-11-12:
+tools/lib/lanes/win.py's MODS drops the one read through scene_cut's drop
+grammar and prints the reason as the leg's NOT RUN line.
 
 The mechanism, short: `richdocax.steps` reads the field's accessible text
 (`expect_ax_text`) because Compose once drew a U+200B where a newline was, and
