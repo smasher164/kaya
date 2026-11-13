@@ -15392,8 +15392,10 @@ record matrix of that date). The revert's cause is gone: the lib and example
 graphs build identical kaya units again (the serde_core `result` feature named
 in the manifest the same day, the entry on the android pool's lib/example
 rebuild), and a host `cargo build --lib` followed by `--lib --example ...`
-rewrote no `lib-kaya` fingerprint. The premise is re-read on each matrix: the
-mac lane's core-build+gates phase and the linux and windows core builds.
+rewrote no `lib-kaya` fingerprint. Re-read on three matrices that night: the
+mac lane's core-build+gates 30, 27 and 24 s (49 on the record, 439 on the
+reverted ones) with no lib recompile, the linux lane one compile, the windows
+build's second invocation none (docs/measurements/matrix-wall-2026-11-13.md).
 
 ## The Windows foreign-drop witness dropped onto dnd.exe's own console window (measured 2026-10-06)
 
