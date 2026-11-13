@@ -561,10 +561,10 @@ RUNG1 = "the unit suite (rung 1)"
 
 
 def rung1_ran_at_matrix_start():
-    """The key validate-all took right after its own --build ran rung 1,
-    when it still names these inputs: the sweep then does not run it twice
-    in one matrix (docs/traps.md, the sweep's second unit suite). A hand
-    run has no key and runs it."""
+    """The key this matrix's warm took before its green rung 1, when it still
+    names these inputs: the sweep then does not run it twice in one matrix
+    (docs/traps.md, the sweep's second unit suite). A hand run has no key and
+    runs it."""
     handed = os.environ.get("KAYA_MATRIX_RUNG1_KEY", "")
     if not handed:
         return None
@@ -585,7 +585,7 @@ def build(lanes_start=False):
                   f"matrix's start (tools/validate-all.py)", flush=True)
             continue
         if what == RUNG1 and (key := rung1_ran_at_matrix_start()):
-            print(f"build: {what} — this matrix's start ran it over the same inputs "
+            print(f"build: {what} — this matrix's warm ran it over the same inputs "
                   f"(key {key}); not run again", flush=True)
             continue
         print(f"build: {what} ({' '.join(cmd)})", flush=True)
