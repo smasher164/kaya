@@ -135,7 +135,9 @@ validate-mac reaches must be one list. Its census clause is the part
 that bites — every gate script on disk is either in the sweep or in
 gates.py's EXCLUDED table WITH A REASON — and it is what would have
 caught the four gates this paragraph was missing while the lane ran
-them. It also pins validate-all's launch order: ALL FIVE platform lanes
+them. It also pins validate-all's launch order: the Docker start
+(tools/lib/docker_up.py; docs/traps.md, a matrix launched with Docker down)
+before the build and every lane, NK1/NK2 watched; ALL FIVE platform lanes
 start together before the runner waits for Android's recorded lane pid;
 the one gate sweep starts at niceness 10 after it exits, FOUR GATES WIDE
 since 2026-09-07, while any longer lanes continue. IN A CARGO TARGET OF
@@ -1087,7 +1089,13 @@ class-and-title guard is half that rule and the gate reads it: without
 happens to hold the foreground. Eight more watched negatives, eighteen
 clauses counted. The Rust half's runtime proof is in the unit suite instead,
 where a wedged MockStage read leaves a child process under its own
-verdict)
+verdict.
+AND A WINUI VERB HANDS A CONTROL THE KEYBOARD ONLY ONCE IT HAS LOADED,
+since 2026-11-13 (docs/traps.md, the textarea the first step reached before
+it loaded): no `.Focus(` in the harness impls, `take_keyboard` the one door,
+and the `LoadWait` it takes made only by `await_loaded`'s IsLoaded poll
+under its wall. Three watched negatives: a direct Focus, a forged LoadWait,
+the poll cut)
 
 ## tools/check-empty-child.py
 

@@ -34,6 +34,7 @@ from packaging import android as packaging_android
 from packaging import mark
 from packaging import identity as app_identity
 from lanes import android as lane
+import android_modem
 import content_fresh
 import exclusive
 import only  # noqa: E402
@@ -836,29 +837,13 @@ assert_outside_band(TABLET_SERIAL, "tablet")
 # the guest misses the virtual AP's beacons and drops the association for
 # seconds, failing whatever fetch is in flight (docs/traps.md, the virtual
 # WiFi the host's load disconnected). The snapshot restores with WiFi on, so
-# every run turns it off and reads back that the default network is cellular.
+# every run turns it off and reads back that the default network is cellular;
+# a modem out of service is set home (tools/lib/android_modem.py).
 def modem_network(serial, label):
-    adb(serial, "shell", "svc", "wifi", "disable", stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL)
-    seen = ""
-    for _ in range(100):
-        dump = adb_out(serial, "shell", "dumpsys", "connectivity").replace("\r", "")
-        m = re.search(r"Active default network: (\d+)", dump)
-        agent = ""
-        if m:
-            agent = next((ln for ln in dump.splitlines()
-                          if f"NetworkAgentInfo{{network{{{m.group(1)}}}" in ln), "")
-        wifi_on = adb_out(serial, "shell", "settings", "get", "global",
-                          "wifi_on").strip()
-        seen = (f"wifi_on={wifi_on!r}, active default "
-                f"{m.group(1) if m else '<none>'}: "
-                f"{agent[:80] if agent else '<no agent line>'}")
-        if wifi_on == "0" and "Transports: CELLULAR" in agent:
-            print(f"{label} ({serial}): network is the modem's ({seen})")
-            return
-        time.sleep(0.2)
-    die(f"{label} ({serial}): the default network is not the modem's after "
-        f"20s ({seen}); a fetch over the virtual WiFi drops under host load")
+    ok, said = android_modem.modem_network(serial, label)
+    if not ok:
+        die(said)
+    print(said)
 
 
 for _serial in SERIALS:

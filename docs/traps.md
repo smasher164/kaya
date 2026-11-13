@@ -20257,7 +20257,7 @@ no beacons to miss. So tools/android/run-emulator.py turns the virtual WiFi off
 on every pool device and the tablet on every run and reads back that the
 default network is cellular (modem_network), and android_system_events selects
 the link's events and the captions-fetch failure, so a network red names the
-flap. check-flightrec "android modem network", NWF1 to NWF3.
+flap. check-flightrec "android modem network", NWF1 to NWF5 (tools/lib/android_modem.py).
 
 ## The attribute edits that re-estimated the document (measured 2026-11-03)
 
@@ -20658,3 +20658,50 @@ FrameworkElementAutomationPeer.CreatePeerForElement on a RichEditBox answers
 GetPattern(PatternInterface::Text) with null: Narrator's text comes from the
 native RichEdit's own provider. docs/rich-document-plan.md RD21.
 
+## A matrix launched with Docker down (measured 2026-11-13)
+
+Three matrices on 2026-11-13 (docs/measurements/matrix-wall-2026-11-13.md):
+the first launched with Docker stopped and linux and linux-quiet went red in
+2 s; the second had Docker started by hand with `open -a Docker`, whose
+dashboard window took the foreground over mac chat-go-swiftui. Measured on an
+idle host with Terminal in front (Docker Desktop 4.95.0): with
+`OpenUIOnStartupDisabled` absent from
+~/Library/Group Containers/group.com.docker/settings-store.json, both
+`docker desktop start --detach` and `open -g -j -a Docker` brought
+com.electron.dockerdesktop to the front with one window on screen; with it
+true, the front app stayed Terminal, no Docker window was on screen, and
+the API answered in about 2 s. So validate-all calls
+tools/lib/docker_up.py's ensure() before anything launches: the API up is
+left alone; down, it turns the setting on, starts Docker, waits up to 180 s
+for `docker info`, reads the front app's bundle id before and after, and
+refuses the matrix naming what to do if the API never answers or Docker
+took the front. check-gates NK1/NK2.
+
+## The modem a cold boot left out of service (measured 2026-11-13)
+
+Matrices 2 and 3 of 2026-11-13 lost the android lane at its preflight on
+emulator-5556: no default network. The phone read voice and data
+OUT_OF_SERVICE in `dumpsys telephony.registry` while the console's
+`gsm status` said home; re-asserting `emu gsm voice home` and
+`emu gsm data home` brought it back within 8 s with no reboot. Forced with
+`gsm voice unregistered` + `gsm data unregistered`: the cellular network
+agent STAYS the default but reads `ni{MOBILE[HSPA] SUSPENDED`, which the
+old read-back (Transports: CELLULAR) passed. tools/lib/android_modem.py
+now also requires CONNECTED, and after 3 s without it reads both sides of
+the modem and sets it home once, printing what it read; the wall is 30 s
+by the clock (the old 100-try loop measured about 28 s on a quiet host
+while its sentence said 20). check-flightrec NWF4/NWF5.
+
+## The textarea the first step reached before it loaded (measured 2026-11-13)
+
+windows richdocax_rust's first step, select_text at +42 ms (scene ready at
+38 ms), failed "the textarea would not take the keyboard (loaded false)":
+RichEditBox.Focus answers false before the control's Loaded. Looping the leg
+12 times on the windows lane with 14 host CPU spinners: 7 red, 5 green.
+The UI thread cannot wait for its own Loaded, so the WinUI backend's
+keyboard verbs (click on a text kind, select_text, compose, clear_search,
+the slider's arrow keys) poll IsLoaded from the harness thread for up to
+5 s (`await_loaded`) and focus through `take_keyboard`, whose refusal says
+how long it waited: the same loop under the same load read 12 green of 12,
+and with the wall cut to 0 ms, 8 red of 12 printing "loaded false, after 0
+ms waiting for its Loaded". check-harness-ceiling clause D.

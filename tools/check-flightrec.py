@@ -83,6 +83,7 @@ VALIDATE_ALL = "tools/validate-all.py"
 MAC_RUNNER = "tools/validate-mac.py"
 LINUX_HOST = "tools/validate-linux.py"
 MAC_LANE = "tools/lib/lanes/mac.py"
+MODEM = "tools/lib/android_modem.py"
 # Each lane reads its health at start and at end, the end before its verdict
 # (docs/traps.md, the windows lane slowed by a rebooted VM's Defender).
 HEALTH_CALLS = {
@@ -112,7 +113,7 @@ def sources():
              STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS, SWIFTUI,
              DOOR_RECORD, ACT2_EXEC, COMPOSE, JOURNAL, *DOOR_LEGS, LEG_CEILING, STACK_NAMES, GTK_RS,
              LANE_HEALTH, VALIDATE_ALL, MAC_RUNNER, LINUX_HOST, MAC_LANE,
-             ANDROID_MEDIA, CAPTURE_LEG, SCENE_RS)}
+             ANDROID_MEDIA, CAPTURE_LEG, SCENE_RS, MODEM)}
 
 
 def census_android_app_shot(src):
@@ -323,13 +324,21 @@ def census_android_modem_network(src):
     """docs/traps.md, the virtual WiFi the host's load disconnected: every
     pool device and the tablet run on the modem's network, read back, and
     the system timeline carries the link's events."""
-    runner = src[ANDROID]
+    runner, modem = src[ANDROID], src[MODEM]
     found = []
-    if '"svc", "wifi", "disable"' not in runner:
+    if '"svc", "wifi", "disable"]' not in modem:
         found.append("android: the runner no longer turns the virtual WiFi off")
-    if '"Transports: CELLULAR" in agent' not in runner:
+    if ('"Transports: CELLULAR" in agent' not in modem
+            or r'ni\{MOBILE\[\w*\] CONNECTED' not in modem):
         found.append("android: the runner no longer reads back that the default network "
-                     "is the modem's")
+                     "is the modem's, connected")
+    # docs/traps.md, the modem a cold boot left out of service.
+    if ('["adb", "-s", serial, "emu", "gsm", what, "home"]' not in modem
+            or 'for what in ("voice", "data"):' not in modem
+            or "if down:" not in modem):
+        found.append("android: a modem out of service is no longer set home through the console")
+    if "android_modem.modem_network(serial, label)" not in runner:
+        found.append("android: the runner no longer checks the network through android_modem")
     for call in ('    modem_network(_serial, "phone pool")',
                  'modem_network(TABLET_SERIAL, "tablet")'):
         if call not in runner:
@@ -3165,18 +3174,24 @@ for verb in ("image_needed", "image_released"):
                    f'crate::vtrace::note("{verb}_cut", format_args!(', f"NIN the core's {verb} cut")
     gate.negative(f"NIN a row image's {verb} the trace does not show",
                   lambda: census_core_image_needs(cut), want=f"{verb} is no longer")
-nwf1 = doctored(ANDROID, r'"svc", "wifi", "disable"', '"svc", "wifi", "enable"',
+nwf1 = doctored(MODEM, r'"svc", "wifi", "disable"', '"svc", "wifi", "enable"',
                 "NWF1 the WiFi left on")
 gate.negative("NWF1 a pool device on the virtual WiFi",
               lambda: census_android_modem_network(nwf1),
               want="no longer turns the virtual WiFi off")
-nwf2 = doctored(ANDROID, r'"Transports: CELLULAR" in agent', "True", "NWF2 the modem read-back cut")
+nwf2 = doctored(MODEM, r'"Transports: CELLULAR" in agent', "True", "NWF2 the modem read-back cut")
 gate.negative("NWF2 a default network nobody read back",
               lambda: census_android_modem_network(nwf2), want="no longer reads back")
 nwf3 = doctored(LANE_PY, r"CTRL-EVENT-\(\?:DISCONNECTED\|CONNECTED\|BEACON-LOSS\)",
                 "CTRL-EVENT-NOTHING", "NWF3 the link's events unselected")
 gate.negative("NWF3 a system timeline without the link's events",
               lambda: census_android_modem_network(nwf3), want="no longer selects")
+nwf4 = doctored(MODEM, r"if down:", "if False:", "NWF4 the modem repair cut")
+gate.negative("NWF4 a modem out of service left as it is",
+              lambda: census_android_modem_network(nwf4), want="no longer set home")
+nwf5 = doctored(MODEM, r" CONNECTED\"", ' SUSPENDED"', "NWF5 a suspended network accepted")
+gate.negative("NWF5 a suspended cellular network read as the modem's",
+              lambda: census_android_modem_network(nwf5), want="connected")
 nsc1 = doctored(SWIFTUI, r'\+ \(save \? "; " \+ kayaSaveCancelLeftovers\(\) : ""\)\)', ")",
                 "NSC1 the save cancel's leftovers unread")
 gate.negative("NSC1 a save sheet's cancel that says nothing of the directory",
@@ -4217,6 +4232,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(301 + (5 if DRIVES else 0))
+gate.negatives_ran(303 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

@@ -881,13 +881,65 @@ g.counted("windows foreground-dance clauses read",
            "terminate", "last resort's close", "last resort reached",
            "refusal"], floor=18)
 
+# --- Clause D: A WINUI VERB HANDS A CONTROL THE KEYBOARD ONLY ONCE IT HAS
+# --- LOADED (docs/traps.md, the textarea the first step reached before it
+# --- loaded): `.Focus(` in the harness impls is a refusal, take_keyboard is the
+# --- one door, and the LoadWait it needs is made only by await_loaded's poll.
+def keyboard_door(path):
+    bad = []
+    text = pathlib.Path(path).read_text(encoding="utf-8")
+    code = re.sub(r"//[^\n]*", "", text)
+    start = code.find('#[cfg(feature = "harness")]\nimpl WinUiStage {')
+    end = code.find("fn widget_id_for_target(", start)
+    if start < 0 or end < 0:
+        return [f"{path}: the harness impls (impl WinUiStage .. widget_id_for_target) "
+                f"are not where this clause reads them"]
+    door = rust_body(code, "fn take_keyboard<")
+    direct = code[start:end].count(".Focus(") - (door or "").count(".Focus(")
+    if direct:
+        bad.append(f"{path}: {direct} `.Focus(` call(s) in the harness impls; a verb hands "
+                   f"a control the keyboard through take_keyboard, after await_loaded")
+    if door is None or door.count(".Focus(") != 1 or "waited: LoadWait" not in code[
+            code.find("fn take_keyboard<"):code.find("fn take_keyboard<") + 300]:
+        bad.append(f"{path}: take_keyboard is not the one Focus that takes a LoadWait")
+    poll = rust_body(code, "fn await_loaded(")
+    if poll is None or "IsLoaded()" not in poll or "std::thread::sleep(" not in poll \
+            or "WALL" not in poll:
+        bad.append(f"{path}: await_loaded no longer polls IsLoaded under its wall")
+    made = [m.start() for m in re.finditer(r"(?<!struct )\bLoadWait\(", code)]
+    at = code.find(poll, code.find("fn await_loaded(")) if poll is not None else -1
+    inside = (at, at + len(poll)) if at >= 0 else (0, 0)
+    forged = [m for m in made if not inside[0] <= m < inside[1]]
+    if forged:
+        bad.append(f"{path}: {len(forged)} LoadWait made outside await_loaded; the wait "
+                   f"for Loaded is skipped there")
+    return bad
+
+
+for line in keyboard_door(ROOT / WINUI):
+    g.finding(line)
+for label, pattern, repl, want in (
+        ("the select_text direct Focus perturbation",
+         r"if let Err\(why\) = take_keyboard\(&field, FocusState::Programmatic, waited\)\? \{\n"
+         r"                return Ok\(Err\(format!\(\"the textarea \{why\}\"\)\)\);",
+         "if !field.Focus(FocusState::Programmatic)? {\n"
+         "                return Ok(Err(\"would not\".to_owned()));", "`.Focus(` call(s)"),
+        ("the forged LoadWait perturbation",
+         r"let waited = Self::await_loaded\(move \|core\| \{\n            rich_target_id",
+         "let waited = LoadWait(std::time::Duration::ZERO);\n        let _ = (move |core| {\n"
+         "            rich_target_id", "made outside await_loaded"),
+        ("the await_loaded poll perturbation",
+         r"Some\(fe\) => fe\.IsLoaded\(\),", "Some(_fe) => Ok(true),", "no longer polls")):
+    doctored = g.perturb(label, WINUI, pattern, repl)
+    g.negative(f"clause D: {label}", lambda d=doctored: keyboard_door(d), want=want)
+
 # An ABSENT harness is a failure that NAMES IT, never a skip.
 absent = g.scratch() / "no-such-harness.kt"
 g.negative("an absent harness",
            lambda: check(HARNESS, SWIFTUI, str(absent)),
            want=f"cannot read {absent}")
 
-g.negatives_ran(29)
+g.negatives_ran(32)
 
 # --- Clause B: the runtime negative, where the toolchain exists. ------
 if platform.system() == "Darwin":

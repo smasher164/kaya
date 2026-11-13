@@ -23300,11 +23300,13 @@ impl WinUiStage {
         const WM_KEYDOWN: u32 = 0x0100;
         const WM_KEYUP: u32 = 0x0101;
         let key = if up { VK_UP } else { VK_DOWN };
+        let loaded = pick.clone();
+        let waited = Self::await_loaded(move |core| loaded(core).cast().ok());
         let focus = pick.clone();
         let told = Self::on_ui(move |core| {
             let slider = focus(core);
-            if !slider.Focus(FocusState::Keyboard)? {
-                return Ok(Err("the slider refused keyboard focus".to_owned()));
+            if let Err(why) = take_keyboard(&slider, FocusState::Keyboard, waited)? {
+                return Ok(Err(format!("the slider {why}")));
             }
             // SAFETY: plain user32 calls on this thread's own focus window.
             let site = unsafe { GetFocus() };
@@ -23802,6 +23804,28 @@ impl WinUiStage {
         rx.recv().expect("the dispatcher applied the step")
     }
 
+    /// docs/traps.md, the textarea the first step reached before it loaded: the
+    /// UI thread cannot wait for its own Loaded, so the harness thread polls it.
+    /// A control `pick` cannot find is not waited for; the verb refuses it.
+    fn await_loaded(
+        pick: impl Fn(&CoreState) -> Option<FrameworkElement> + Send + Clone + 'static,
+    ) -> LoadWait {
+        const WALL: std::time::Duration = std::time::Duration::from_secs(5);
+        let t0 = std::time::Instant::now();
+        loop {
+            let pick = pick.clone();
+            let loaded = Self::on_ui_read(move |core| match pick(core) {
+                Some(fe) => fe.IsLoaded(),
+                None => Ok(true),
+            })
+            .unwrap_or(true);
+            if loaded || t0.elapsed() >= WALL {
+                return LoadWait(t0.elapsed());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(16));
+        }
+    }
+
     fn on_ui_read<T: Send + 'static>(
         f: impl FnOnce(&CoreState) -> windows_core::Result<T> + Send + 'static,
     ) -> windows_core::Result<T> {
@@ -24022,6 +24046,33 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
 
 /// THE WIDGET A RICH VERB'S TARGET NAMES: a textarea, or a LABEL since R8
 /// (docs/rich-text-plan.md §15) — the mac's `kayaTextTarget`, this side.
+/// How long a harness verb waited for its control's Loaded; made only by
+/// `WinUiStage::await_loaded` (docs/traps.md, the textarea the first step
+/// reached before it loaded; check-harness-ceiling clause D).
+#[cfg(feature = "harness")]
+#[derive(Clone, Copy)]
+struct LoadWait(std::time::Duration);
+
+/// The one door through which a harness verb hands a control the keyboard
+/// (check-harness-ceiling clause D).
+#[cfg(feature = "harness")]
+fn take_keyboard<C: windows_core::Interface>(
+    control: &C,
+    state: FocusState,
+    waited: LoadWait,
+) -> windows_core::Result<Result<(), String>> {
+    let element: UIElement = control.cast()?;
+    if element.Focus(state)? {
+        return Ok(Ok(()));
+    }
+    let fe: FrameworkElement = control.cast()?;
+    Ok(Err(format!(
+        "would not take the keyboard (loaded {}, after {} ms waiting for its Loaded)",
+        fe.IsLoaded()?,
+        waited.0.as_millis()
+    )))
+}
+
 #[cfg(feature = "harness")]
 fn rich_target_id(core: &CoreState, t: crate::harness::Target) -> Option<u64> {
     use crate::harness::TargetKind as K;
@@ -25760,6 +25811,9 @@ impl crate::harness::Stage for WinUiStage {
     /// user's click and drag leave them, and the core told at once (the
     /// SelectionChanged raise is asynchronous).
     fn select_text(&self, t: crate::harness::Target, range: crate::harness::TextRange) -> Result<(), String> {
+        let waited = Self::await_loaded(move |core| {
+            rich_target_id(core, t).and_then(|w| textarea_by_id(core, w)).and_then(|f| f.cast().ok())
+        });
         Self::on_ui_mut(move |core| {
             let Some(widget) = rich_target_id(core, t) else {
                 return Ok(Err("no such target".to_owned()));
@@ -25778,11 +25832,8 @@ impl crate::harness::Stage for WinUiStage {
                     text.len()
                 )));
             };
-            if !field.Focus(FocusState::Programmatic)? {
-                return Ok(Err(format!(
-                    "the textarea would not take the keyboard (loaded {})",
-                    field.IsLoaded()?
-                )));
+            if let Err(why) = take_keyboard(&field, FocusState::Programmatic, waited)? {
+                return Ok(Err(format!("the textarea {why}")));
             }
             field.TextDocument()?.Selection()?.SetRange(a, b)?;
             core.scene.set_text_selection(WidgetId(widget), range.start, range.stop);
@@ -26085,6 +26136,10 @@ impl crate::harness::Stage for WinUiStage {
 
     fn compose(&self, t: crate::harness::Target, text: &str) {
         let marked = text.to_owned();
+        let waited = Self::await_loaded(move |core| {
+            crate::harness::try_resolve(t.index, core.textareas.len())
+                .and_then(|i| core.textareas[i].cast().ok())
+        });
         // The control must have the keyboard focus, or TSF's focused
         // document is somebody else's (or nothing at all).
         let id = Self::on_ui(move |core| {
@@ -26097,7 +26152,9 @@ impl crate::harness::Stage for WinUiStage {
             // parks the caret at the END of its marked text — so the end of
             // the document is where the scene's arithmetic starts
             // (813 bytes + " z" + "nihon" = 820).
-            field.Focus(FocusState::Programmatic)?;
+            if let Err(why) = take_keyboard(&field, FocusState::Programmatic, waited)? {
+                eprintln!("kaya: compose: the textarea {why}");
+            }
             field.TextDocument()?.Selection()?.SetRange(end, end)?;
             Ok(core.textarea_ids[i])
         });
@@ -26148,6 +26205,10 @@ impl crate::harness::Stage for WinUiStage {
         // TextChanged that follows banks through `CORE` — under `on_ui`'s
         // borrow that re-entry aborts the process (see on_ui_bare). So the
         // borrow that resolves the target ENDS before the invoke.
+        let waited = Self::await_loaded(move |core| {
+            crate::harness::try_resolve(t.index, core.searches.len())
+                .and_then(|i| core.searches[i].cast().ok())
+        });
         let told = Self::on_ui_bare(move || {
             let field = CORE.with_borrow(|core| {
                 let core = core.as_ref()?;
@@ -26167,7 +26228,9 @@ impl crate::harness::Stage for WinUiStage {
             // after the clear). A user reaches the button by focusing the
             // field, and so does this.
             if field.FocusState()? == FocusState::Unfocused {
-                let _ = field.Focus(FocusState::Programmatic)?;
+                if let Err(why) = take_keyboard(&field, FocusState::Programmatic, waited)? {
+                    eprintln!("kaya: clear_search: the search field {why}");
+                }
                 field.UpdateLayout()?;
             }
             if search_clear(&field)? {
@@ -26986,41 +27049,42 @@ impl crate::harness::Stage for WinUiStage {
         // THE FIELD TAKES FOCUS WHEN IT HAS LOADED. A click 50-120ms after
         // the scene mounted found the TextBox with IsLoaded false and
         // Focus() answered false — measured on three windows search legs
-        // in one matrix (2026-09-07), and the one-shot click never came
-        // back to it. A control that is not loaded yet takes the focus
-        // from its own Loaded; the harness's expect_focused polls the
-        // result either way.
-        fn focus_told<C>(core: &CoreState, what: &str, i: usize, control: &C) -> windows_core::Result<()>
+        // in one matrix (2026-09-07); the click waits for Loaded first
+        // (await_loaded).
+        let waited = Self::await_loaded(move |core| {
+            use crate::harness::TargetKind as K;
+            let at = |len| crate::harness::try_resolve(t.index, len);
+            match t.kind {
+                K::Entry => at(core.entries.len()).and_then(|i| core.entries[i].cast().ok()),
+                K::Textarea => at(core.textareas.len()).and_then(|i| core.textareas[i].cast().ok()),
+                K::Search => at(core.searches.len()).and_then(|i| core.searches[i].cast().ok()),
+                K::SecureField => {
+                    at(core.secure_fields.len()).and_then(|i| core.secure_fields[i].cast().ok())
+                }
+                K::NumberField => {
+                    at(core.number_fields.len()).and_then(|i| core.number_fields[i].cast().ok())
+                }
+                _ => None,
+            }
+        });
+        fn focus_told<C>(
+            core: &CoreState,
+            what: &str,
+            i: usize,
+            control: &C,
+            waited: LoadWait,
+        ) -> windows_core::Result<()>
         where
             C: windows_core::Interface,
         {
             let control: bindings::Microsoft::UI::Xaml::Controls::Control = control.cast()?;
-            if !control.IsLoaded()? {
-                let token = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
-                let seen = token.clone();
-                let handler = RoutedEventHandler::new(move |sender, _| {
-                    if let Some(sender) = sender.as_ref() {
-                        let loaded: bindings::Microsoft::UI::Xaml::Controls::Control = sender.cast()?;
-                        loaded.RemoveLoaded(seen.load(std::sync::atomic::Ordering::SeqCst))?;
-                        if !loaded.Focus(FocusState::Programmatic)? {
-                            eprintln!("kaya: focus on Loaded answered false");
-                        }
-                    }
-                    Ok(())
-                });
-                token.store(control.Loaded(&handler)?, std::sync::atomic::Ordering::SeqCst);
-                eprintln!("kaya: click {what}#{i}: not loaded yet, focus deferred to Loaded");
+            let Err(why) = take_keyboard(&control, FocusState::Programmatic, waited)? else {
                 return Ok(());
-            }
-            if control.Focus(FocusState::Programmatic)? {
-                return Ok(());
-            }
+            };
             let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
             let hwnd = native.window_handle()?;
             eprintln!(
-                "kaya: click {what}#{i}: Focus(Programmatic) answered false; loaded={} \
-                 enabled={} visibility={:?} foreground={}",
-                control.IsLoaded()?,
+                "kaya: click {what}#{i}: the field {why}; enabled={} visibility={:?} foreground={}",
                 control.IsEnabled()?,
                 control.Visibility()?,
                 unsafe { GetForegroundWindow() } == hwnd
@@ -27036,27 +27100,27 @@ impl crate::harness::Stage for WinUiStage {
             match t.kind {
                 crate::harness::TargetKind::Entry => {
                     let i = crate::harness::resolve(t.index, core.entries.len());
-                    focus_told(core, "entry", i, &core.entries[i])?;
+                    focus_told(core, "entry", i, &core.entries[i], waited)?;
                 }
                 crate::harness::TargetKind::Textarea => {
                     let i = crate::harness::resolve(t.index, core.textareas.len());
-                    focus_told(core, "textarea", i, &core.textareas[i])?;
+                    focus_told(core, "textarea", i, &core.textareas[i], waited)?;
                 }
                 crate::harness::TargetKind::Search => {
                     let i = crate::harness::resolve(t.index, core.searches.len());
-                    focus_told(core, "search", i, &core.searches[i])?;
+                    focus_told(core, "search", i, &core.searches[i], waited)?;
                 }
                 crate::harness::TargetKind::SecureField => {
                     let i = crate::harness::resolve(t.index, core.secure_fields.len());
-                    focus_told(core, "secure_field", i, &core.secure_fields[i])?;
+                    focus_told(core, "secure_field", i, &core.secure_fields[i], waited)?;
                 }
                 // THE BOX'S TEXT BOX, where a user's click lands; before the
                 // template is applied, the box itself, which forwards it.
                 crate::harness::TargetKind::NumberField => {
                     let i = crate::harness::resolve(t.index, core.number_fields.len());
                     match number_input(&core.number_fields[i])? {
-                        Ok(input) => focus_told(core, "number_field", i, &input)?,
-                        Err(_) => focus_told(core, "number_field", i, &core.number_fields[i])?,
+                        Ok(input) => focus_told(core, "number_field", i, &input, waited)?,
+                        Err(_) => focus_told(core, "number_field", i, &core.number_fields[i], waited)?,
                     }
                 }
                 crate::harness::TargetKind::Row | crate::harness::TargetKind::Column => {

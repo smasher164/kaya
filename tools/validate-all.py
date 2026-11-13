@@ -5,6 +5,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT, dev_shell_or_die
+import docker_up
 import exclusive
 import lane_health
 import matrix_args
@@ -454,6 +455,9 @@ print(f"host power at launch: {_power}"
       + ("; ON BATTERY — a matrix drains it, and macOS hibernates at its floor "
          "with every lane frozen mid-leg (docs/traps.md, the matrix that slept "
          "22 hours on battery)" if _on_battery else ""), flush=True)
+# docs/traps.md, a matrix launched with Docker down.
+if not docker_up.ensure(lambda line: print(line, flush=True)):
+    sys.exit(1)
 # THE MATRIX-WIDE EXCLUSIVE TOKEN (tools/lib/exclusive.py): one directory every
 # lane reaches, the container through its flight-recorder mount.
 EXCLUSIVE_DIR = pathlib.Path(

@@ -215,11 +215,18 @@ IOS_RUNNER_POOL = 'POOL = int(os.environ.get("KAYA_IOS_SIMS", "3"))'
 IOS_PROBE_POOL = 'IOS_POOL="${KAYA_IOS_SIMS:-3}"'
 
 
+DOCKER_UP = "if not docker_up.ensure(lambda line: print(line, flush=True)):\n    sys.exit(1)\n"
+
+
 def matrix_parallel_problem(text):
     parallel = re.search(
         r'(?ms)^if MODE == "parallel":\n(.*?)^else:$', text)
     if parallel is None:
         return "tools/validate-all.py's parallel matrix block is missing"
+    # docs/traps.md, a matrix launched with Docker down.
+    if not 0 <= text.find(DOCKER_UP) < parallel.start():
+        return ("tools/validate-all.py must start Docker through docker_up.ensure, and exit on "
+                "its refusal, before any lane or the gates' build launches")
     lines = [line.strip() for line in code_lines(parallel.group(1))
              if line.strip()]
     launches = [line for line in lines if line.startswith("run_lane(")]
@@ -978,6 +985,20 @@ if n != 1:
          "clause is not reading the real launch")
 elif quiet_tail_problem(doctored) is None:
     fail("self-test NQ2: a parallel Android lane with its microphone legs in place passed")
+
+# NK1/NK2 — the Docker start path leads every launch.
+DOCKER_CALL = r"if not docker_up\.ensure\(.*?\n    sys\.exit\(1\)\n"
+for label, pattern, repl in (
+        ("NK1 removed the Docker start", r"(?m)^" + DOCKER_CALL, ""),
+        ("NK2 moved the Docker start after the launches",
+         r"(?ms)^(" + DOCKER_CALL + r")(.*?)(^if MODE == \"parallel\":.*?^else:\n)",
+         "\\2\\3\\1")):
+    doctored, n = re.subn(pattern, repl, matrix_text, count=1)
+    print(f"check-gates: self-test {label}, {n} substitution(s)")
+    if n != 1:
+        fail(f"self-test {label} did not apply — the Docker clause is not reading the real file")
+    elif matrix_parallel_problem(doctored) is None:
+        fail(f"self-test {label}: the matrix passed")
 
 # N5 — every one of the five platform lanes must be queued.
 doctored, n = re.subn(
