@@ -80,3 +80,26 @@ core-build+gates read 30, 27 and 24 s against 49 on the record and 439 on the
 2026-10-06 matrices the revert was about. The linux lane compiled kaya once in
 its container (the core had changed since its last run), and the windows
 build's second invocation compiled nothing.
+
+## The quiet tails, 212b240a (charges: quiet-tail)
+
+linux-quiet now starts once every lane but windows, and the sweep, have
+exited, and android-quiet after it; content_fresh no longer recompiles the
+core for build-script runs of configurations nobody builds (docs/traps.md,
+the core recompiled for a configuration nobody built), and the JVM apk's
+reuse no longer reads its own jniLibs.
+
+| run | tree | wall | verdict | why red |
+|---|---|---:|---|---|
+| 20261113T174539Z | 212b240a | 1927 | red | the Windows VM was unreachable at launch (ssh connected and hung, its QEMU at about 590% CPU) and `utmctl stop` timed out (OSStatus -1712), so the lane died in vm_boot with 0 legs; linux media_formats-rust-x11's leg-end video ink self-test read "the video view snapshotted to nothing at 160x90: no frame yet" at a host load near 200 |
+
+Rows: mac 1073, android 1177, windows 1390 (0 legs), linux 1463, ios 1550
+(1405 net, over its 1350 ceiling at that load), the sweep 571 from about
+1178 to about 1749, linux-quiet 50 (core-build 2 against 17 at 1646df47,
+guest-builds 15, legs 23), android-quiet 112 (build-jvm 5 with the apk
+reused, legs-isolated 67 against 57). The core was unchanged since 1646df47.
+With windows dead at 1390 the tail order bought nothing on this run: the
+saving it was made for needs a windows lane that outlasts the sweep, which
+on a clean core (windows about 1660) it may not. The rebuild cuts took
+linux-quiet from 66 s to 50; the sweep's own libkaya aged the derive once
+(no record yet) and skipped it on its second build.
