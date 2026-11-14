@@ -14940,6 +14940,13 @@ UTM (its sheet says quitting kills running VMs; there were none), opening
 UTM, `utmctl start Windows`, and `DisplaySwitch.exe /internal` as an `/it`
 task for the second 800x600 display the boot brought back.
 
+AND WITH NO REBOOT SEEN (2026-11-14): a filtered run's windows lane refused
+with `\\.\DISPLAY2 primary=True 1280x800; \\.\DISPLAY1 primary=False
+800x600`, cause not read (the host had gone from battery to AC and back in
+the hour before);
+`DisplaySwitch.exe /internal` as an `/it` task cleared it and the next run's
+windows lane passed.
+
 ## A scene negative read green once with its cut in the tree, and the guard that refuses that (measured 2026-10-03)
 
 The capture depth slice's scene cut "the synthetic microphone's rate

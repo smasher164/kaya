@@ -141,3 +141,23 @@ suites 1408, notifypkg_rust 6 s and taskspkg_rust 23 s), the sweep 492,
 linux-quiet 48, android-quiet 99. The guest read "C: 5.0 GB free of 63.0
 GB; EventLog Running; WSearch Running; 1 crash dump" at the start. The wall
 is the start, the windows lane and android-quiet.
+
+
+## The target sweep at the end of every run, 05a684d4 (charges: target-sweep)
+
+validate-all now ends with tools/lib/target_sweep.py over target/ and the
+linux volume (docs/traps.md, cargo's target only ever grows and the host's
+atime is not last use).
+
+| run | tree | wall | verdict | why red |
+|---|---|---:|---|---|
+| 20261114T214042Z | 05a684d4 | 1806 | ALL PASS | |
+
+Rows: mac 1098 (922 net), android 1129 (751 net), linux 1322 (956 net), ios
+1515 (1238 net), windows 1569 (1529 net), the sweep 499, linux-quiet 50,
+android-quiet 108. Thermal pressure read HEAVY at the android, linux, ios and
+windows exits. The sweep itself took 8.4 s on the host and 0.2 s in the
+volume and freed nothing: before it the first sweeps had freed 6.76 GB on the
+host (hashed files whose fingerprint was gone, by hand) and 8.42 GB in the
+volume (604 units, at the end of a filtered run), and the linux lane that
+followed rebuilt what it needed inside a filtered run's 84 s.
