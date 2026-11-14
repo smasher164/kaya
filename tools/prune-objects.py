@@ -3,6 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
+import target_sweep
 from kaya_gate import TARGET, Gate, dev_shell_or_die
 
 dev_shell_or_die()
@@ -23,6 +24,7 @@ MH_MAGIC_64 = 0xFEEDFACF
 LC_SYMTAB = 0x2
 N_OSO = 0x66
 LOCK_WAIT = 5
+NESTED = ("gate-sweep", "nested", "kaya-bindgen", "debug")
 
 
 def debug_map(path):
@@ -82,8 +84,14 @@ def stale(directory):
     return out, kept, len(stems)
 
 
+def profiles(target):
+    """Every `debug` profile target_sweep finds, nested workspaces' targets included."""
+    return [pathlib.Path(p) for p in target_sweep.profiles(str(target))
+            if os.path.basename(p) == "debug"]
+
+
 def object_dirs(target):
-    for profile in sorted(target.glob("debug")) + sorted(target.glob("*/debug")):
+    for profile in profiles(target):
         dirs = [profile / leaf for leaf in ("deps", "examples") if (profile / leaf).is_dir()]
         if dirs:
             yield profile, dirs
@@ -155,6 +163,7 @@ def plant(d):
     single-session proc macro; two non-incremental
     objects; an rlib."""
     d.mkdir(parents=True)
+    (d.parent / ".fingerprint").mkdir()
     lib = {s: [f"kaya.{c:025d}.{s}.rcgu.o" for c in range(256)]
            for s in ("0aaaaaa", "0bbbbbb", "0cccccc")}
     test = {s: [f"kaya-0123456789abcdef.{c:025d}.{s}.rcgu.o" for c in range(8)]
@@ -176,20 +185,21 @@ def plant(d):
     return 256 * 2 + 8 + 8 + 4, left
 
 
-def findings(prune_fn, scratch, label, held=False):
+def findings(prune_fn, scratch, label, held=False, profile=("debug",)):
     target = scratch / label
-    want_gone, want_left = plant(target / "debug" / "deps")
+    deps = target.joinpath(*profile, "deps")
+    want_gone, want_left = plant(deps)
     if held:
-        want_gone, want_left = 0, {p.name for p in (target / "debug" / "deps").iterdir()}
+        want_gone, want_left = 0, {p.name for p in deps.iterdir()}
     said = []
-    blocker = open(target / "debug" / ".cargo-lock", "a", encoding="utf-8")  # noqa: SIM115
+    blocker = open(deps.parent / ".cargo-lock", "a", encoding="utf-8")  # noqa: SIM115
     if held:
         fcntl.flock(blocker, fcntl.LOCK_EX)
     try:
         removed = prune_fn(target, said.append, wait=1)
     finally:
         blocker.close()
-    left = {p.name for p in (target / "debug" / "deps").iterdir()}
+    left = {p.name for p in deps.iterdir()}
     out = []
     if removed != want_gone:
         out.append(f"removed {removed} objects, wanted {want_gone}")
@@ -209,6 +219,8 @@ def selftest(gate):
     for held in (False, True):
         for f in findings(prune, scratch, f"real-{held}", held):
             gate.finding(f"self-test: the prune itself is wrong: {f}")
+    for f in findings(prune, scratch, "real-nested", profile=NESTED):
+        gate.finding(f"self-test: the prune missed a nested workspace's profile: {f}")
     own = gate.read(pathlib.Path(__file__).resolve())
     cuts = (
         ("N1 reads no debug map", r"if ntype == N_OSO:\n", "if ntype == -1:\n",
@@ -224,14 +236,16 @@ def selftest(gate):
          False, "did not say"),
         ("N6 ignores cargo's lock", r"fcntl\.flock\(f, fcntl\.LOCK_EX \| fcntl\.LOCK_NB\)",
          "pass", True, "removed 532 objects"),
+        ("N7 looks one level deep", r"target_sweep\.profiles\(str\(target\)\)",
+         "target_sweep.profiles(str(target), 1)",
+         False, "stale kept", NESTED),
     )
-    for i, (label, pattern, repl, held, want) in enumerate(cuts):
+    for i, (label, pattern, repl, held, want, *where) in enumerate(cuts):
         text = gate.doctor(label, own, pattern, repl)
         space = {"__name__": f"prune_objects_doctored_{i}", "__file__": __file__}
         exec(compile(text, f"<{label}>", "exec"), space)  # noqa: S102
-        gate.negative(label, lambda s=space, n=i, h=held: findings(s["prune"], scratch,
-                                                                  f"neg{n}", h),
-                      want=want)
+        gate.negative(label, lambda s=space, n=i, h=held, w=where: findings(
+            s["prune"], scratch, f"neg{n}", h, *w), want=want)
     gate.negatives_ran(len(cuts))
 
 

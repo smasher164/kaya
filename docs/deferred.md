@@ -24,7 +24,7 @@ it enters its loop, or the quit is posted into the loop), not yet reported
 to GStreamer, taken by the image when it lands, or a kaya stop that cannot
 race a demuxer's READY->PAUSED; neither is done.
 
-## GAP — unhashed incremental objects outside prune-objects' globs: 140,032 `kaya.<cgu>.<session>.rcgu.o` in target/nested/kaya-bindgen/debug/deps (seen 2026-11-14)
+## ~~GAP — unhashed incremental objects outside prune-objects' globs: 140,032 `kaya.<cgu>.<session>.rcgu.o` in target/nested/kaya-bindgen/debug/deps (seen 2026-11-14)~~ RESOLVED 2026-11-14: tools/prune-objects.py walks every `debug` profile target_sweep.profiles finds (16 against the 10 its globs found), its N7 cut watched red; the first run removed 208,457 objects and freed 3.5 GB, 187,175 of them in target/nested/kaya-bindgen/debug/deps, and gen-bindings --check rebuilt through that target after it.
 KEY: prune-objects, object_dirs, nested/kaya-bindgen, rcgu.o, target_sweep, unhashed objects
 
 tools/prune-objects.py globs `debug` and `*/debug` under one target, so the
