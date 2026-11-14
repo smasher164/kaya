@@ -32,8 +32,10 @@ examples carry no hash (the copy2 entry below), so their outputs outlive
 a swept fingerprint and cargo rebuilds them. The first host sweep freed
 6.76 GB, all of it hashed files whose fingerprint was already gone (ios-sim
 4.78, android 1.94). Unhashed `kaya.<cgu>.<session>.rcgu.o` objects are not
-units: 140,032 of them sit in target/nested/kaya-bindgen/debug/deps, outside
-tools/prune-objects.py's globs.
+units and are tools/prune-objects.py's (the stale split-debuginfo entry):
+187,175 of them had piled up in target/nested/kaya-bindgen/debug/deps while
+the prune looked only at `debug` and `*/debug`, and it now walks every
+profile target_sweep.profiles finds.
 
 ## The host's atime is not last use (measured 2026-11-14)
 
@@ -14946,6 +14948,18 @@ with `\\.\DISPLAY2 primary=True 1280x800; \\.\DISPLAY1 primary=False
 the hour before);
 `DisplaySwitch.exe /internal` as an `/it` task cleared it and the next run's
 windows lane passed.
+
+SO THE WARM-UP RUNS IT (2026-11-14, after four sightings, every one cleared by
+the same command): tools/guest/desk-warm.ps1 reads the screens in a child
+powershell (Screen.AllScreens caches its first answer in-process), and when
+there is more than one it runs `DisplaySwitch.exe /internal` and reads again
+every 500 ms for up to 10 s; deploy-win prints the before reading, and a lane
+still left with the wrong screens refuses saying the switch already ran.
+`DisplaySwitch.exe /extend` on a guest with one display does not bring the
+800x600 back, so the branch was proven on the guest with its condition forced
+to one screen (switch, re-read, warm-up OK) and its refusal and print by
+check-exclusive's fixtures; the first boot that brings the display back is
+its real test.
 
 ## A scene negative read green once with its cut in the tree, and the guard that refuses that (measured 2026-10-03)
 

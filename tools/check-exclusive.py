@@ -900,7 +900,23 @@ def census(texts, lanes=None, tools=None):
     if "lane.screens_refusal(out)" not in py_function(texts["tools/deploy-win.py"], "desk_warm"):
         out.append("tools/deploy-win.py: desk_warm never asks lane.screens_refusal(out), so the "
                    "lane runs its legs on whatever screens the interactive session has")
+    if "Start-Process DisplaySwitch.exe -ArgumentList '/internal'" not in texts[DESK_WARM]:
+        out.append(f"{DESK_WARM}: the warm-up no longer switches off an extra display, so a "
+                   f"boot's phantom 800x600 screen refuses the lane until someone runs it by hand")
+    if "lane.displayswitch(out)" not in py_function(texts["tools/deploy-win.py"], "desk_warm"):
+        out.append("tools/deploy-win.py: desk_warm never prints what the warm-up's "
+                   "DisplaySwitch did")
     if win is not None:
+        two = ("deskwarm.displayswitch.before=\\\\.\\DISPLAY2 primary=True 1280x800; "
+               "\\\\.\\DISPLAY1 primary=False 800x600\ndeskwarm.displayswitch.ms=10000\n")
+        got = win.screens_refusal(two + "deskwarm.screen=\\\\.\\DISPLAY2 primary=True 1280x800\n"
+                                  "deskwarm.screen=\\\\.\\DISPLAY1 primary=False 800x600\n")
+        if got is None or "already ran" not in got or "Run `DisplaySwitch" in got:
+            out.append(f"tools/lib/lanes/win.py: screens_refusal, after the warm-up's own "
+                       f"DisplaySwitch left two screens, does not say it already ran ({got!r})")
+        if win.screens_refusal(two + "deskwarm.screen=\\\\.\\DISPLAY2 primary=True 1280x800\n"):
+            out.append("tools/lib/lanes/win.py: screens_refusal refused the one screen a "
+                       "DisplaySwitch left")
         ok = "deskwarm.screen=\\\\.\\DISPLAY2 primary=True 1280x800\n"
         for reading, want in ((ok, None),
                               (ok + "deskwarm.screen=\\\\.\\DISPLAY3 primary=False 800x600\n",
@@ -927,10 +943,11 @@ def census(texts, lanes=None, tools=None):
     return out
 
 
+DESK_WARM = "tools/guest/desk-warm.ps1"
 FILES = [r for _, r, _, _ in LANES] + [LINUX, EXCLUSIVE_PY, EXCLUSIVE_SH, "tools/validate-all.py",
                                         "tools/validate-linux.py", "tools/gates.py",
                                         "tools/lib/flightrec_lane.py", MAC_LANE,
-                                        "tools/run-leg.py", INTERPRETER]
+                                        "tools/run-leg.py", INTERPRETER, DESK_WARM]
 REAL = {rel: gate.read(rel) for rel in FILES}
 MODS = {lane: load_lane(r) for lane, _, _, r in LANES}
 MODS["linux"] = load_lane(ROOT / "tools/lib/lanes/linux.py")
@@ -1278,6 +1295,23 @@ _admits_all_mod.write_text(_admits_all, encoding="utf-8")
 watched("a windows lane admitting the phantom second display", REAL,
         "admitted or misnamed the reading", lanes={**MODS, "windows": load_lane(_admits_all_mod)})
 
+# 23b. THE WARM-UP STOPS SWITCHING OFF THE EXTRA DISPLAY.
+_no_switch = gate.doctor("desk-warm's DisplaySwitch cut", REAL[DESK_WARM],
+                         r"Start-Process DisplaySwitch\.exe -ArgumentList '/internal'",
+                         "Write-Output skipped")
+watched("a windows warm-up that leaves the phantom display up",
+        {**REAL, DESK_WARM: _no_switch}, "no longer switches off an extra display")
+_no_print = gate.doctor("desk_warm's DisplaySwitch line cut", REAL["tools/deploy-win.py"],
+                        r"switched = lane\.displayswitch\(out\)", "switched = None")
+watched("a windows warm-up that switches displays silently",
+        {**REAL, "tools/deploy-win.py": _no_print}, "never prints what the warm-up's")
+_retry = gate.doctor("screens_refusal's already-ran branch cut", gate.read(WIN_LANE),
+                     r"    if switched:\n", "    if False:\n")
+_retry_mod = gate.scratch() / "win-screens-retry.py"
+_retry_mod.write_text(_retry, encoding="utf-8")
+watched("a windows refusal that says to run the switch that already ran", REAL,
+        "does not say it already ran", lanes={**MODS, "windows": load_lane(_retry_mod)})
+
 # 24. THE ANDROID RUNNER STOPS READING KAYA_QUIET.
 _unquiet = gate.doctor("selected_legs' quiet filter cut", REAL["tools/android/run-emulator.py"],
                        r"\n    if QUIET_MODE:\n        legs = \[leg for leg in legs if "
@@ -1413,7 +1447,7 @@ check_catalogue_server_routes(gate)
 from shade_hand_routes import run as check_shade_hand_routes  # noqa: E402
 check_shade_hand_routes(gate)
 
-gate.negatives_ran(97)
+gate.negatives_ran(100)
 
 gate.counted("linux QUIET legs", sorted(MODS["linux"].quiet_legs(REAL[LINUX])), floor=8)
 gate.counted("windows legs whose scene posts a notification",

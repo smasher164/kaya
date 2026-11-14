@@ -2774,6 +2774,11 @@ def desk_warm():
             print(out, file=sys.stderr)
             return False
         time.sleep(0.5)
+    switched = lane.displayswitch(out)
+    if switched:
+        print(f"deploy-win: the interactive session had {switched[0]}; the warm-up ran "
+              f"DisplaySwitch.exe /internal and read again {switched[1]} ms later "
+              f"(docs/traps.md, the UTM entry)", flush=True)
     refused = lane.screens_refusal(out)
     if refused:
         print(f"deploy-win: THE GUEST'S DISPLAY IS NOT THE LANE'S: {refused}", file=sys.stderr)

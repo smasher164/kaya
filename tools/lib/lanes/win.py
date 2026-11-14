@@ -1064,10 +1064,22 @@ def screens_refusal(warmup):
     if len(read) == 1 and (int(read[0][2]), int(read[0][3])) == SCREEN:
         return None
     said = "; ".join(f"{n} primary={p} {w}x{h}" for n, p, w, h in read) or "no screen at all"
-    return (f"the interactive session has {len(read)} screen(s), {said}, where every leg's geometry "
-            f"assumes one {SCREEN[0]}x{SCREEN[1]} screen. Run `DisplaySwitch.exe /internal` as an /it "
-            f"scheduled task in that session (docs/traps.md, the UTM entry), or set the display in "
-            f"UTM, then re-run.")
+    head = (f"the interactive session has {len(read)} screen(s), {said}, where every leg's geometry "
+            f"assumes one {SCREEN[0]}x{SCREEN[1]} screen.")
+    switched = displayswitch(warmup)
+    if switched:
+        return (f"{head} The warm-up already ran `DisplaySwitch.exe /internal` over {switched[0]} and "
+                f"this is what it left, so set the display in UTM (docs/traps.md, the UTM entry), "
+                f"then re-run.")
+    return (f"{head} Run `DisplaySwitch.exe /internal` as an /it scheduled task in that session "
+            f"(docs/traps.md, the UTM entry), or set the display in UTM, then re-run.")
+
+
+def displayswitch(warmup):
+    """(screens before, ms) when tools/guest/desk-warm.ps1 switched off an extra display, else None."""
+    before = re.search(r"^deskwarm\.displayswitch\.before=(.*?)\s*$", warmup, re.M)
+    ms = re.search(r"^deskwarm\.displayswitch\.ms=(\d+)\s*$", warmup, re.M)
+    return (before[1], ms[1] if ms else "?") if before else None
 
 
 def guest_stem(scene):

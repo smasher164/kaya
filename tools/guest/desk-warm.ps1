@@ -49,10 +49,26 @@ Say 'session' ([System.Diagnostics.Process]::GetCurrentProcess().SessionId)
 
 # The interactive session's screens, which ssh cannot see; deploy-win
 # decides (tools/lib/lanes/win.py, screens_refusal; docs/traps.md, the UTM entry).
-Add-Type -AssemblyName System.Windows.Forms
-foreach ($s in [System.Windows.Forms.Screen]::AllScreens) {
-    Say 'screen' ("{0} primary={1} {2}x{3}" -f $s.DeviceName, $s.Primary, $s.Bounds.Width, $s.Bounds.Height)
+# Read in a child process: Screen.AllScreens caches its first answer.
+function Read-Screens {
+    @(powershell -NoProfile -Command {
+        Add-Type -AssemblyName System.Windows.Forms
+        foreach ($s in [System.Windows.Forms.Screen]::AllScreens) {
+            "{0} primary={1} {2}x{3}" -f $s.DeviceName, $s.Primary, $s.Bounds.Width, $s.Bounds.Height
+        }
+    })
 }
+$screens = Read-Screens
+if ($screens.Count -gt 1) {
+    Say 'displayswitch.before' ($screens -join '; ')
+    Start-Process DisplaySwitch.exe -ArgumentList '/internal'
+    for ($i = 0; $i -lt 20 -and $screens.Count -gt 1; $i++) {
+        Start-Sleep -Milliseconds 500
+        $screens = Read-Screens
+    }
+    Say 'displayswitch.ms' ($i * 500)
+}
+foreach ($s in $screens) { Say 'screen' $s }
 
 # 1. THE DESKTOP THE INPUT GOES TO must be the one this task's windows
 # live on — it is not when the console session is LOCKED or a UAC prompt
