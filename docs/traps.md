@@ -4,6 +4,60 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## cargo's target only ever grows (measured 2026-11-13/14)
+
+Cargo adds a unit for every new hash and never removes an old one. target/
+reached 197 GB; its `incremental` directories alone were 58 GB, cleared by
+hand on 2026-11-13. The linux lane's docker volume `kaya-linux-target`
+(tools/lib/lanes/linux.py's TARGET_VOLUME) was 53.5 GB, 17 GB of it
+`incremental`, cleared by hand on 2026-11-14. Files no build had touched in
+14 days by mtime: debug 6.1 GB, gate-sweep 6.6, aarch64-apple-ios-sim 5.7,
+aarch64-pc-windows-msvc 3.0, aarch64-linux-android 2.5. `cargo -Zgc` (1.97)
+covers only ~/.cargo's global cache; cargo-sweep 0.8.0 from nixpkgs would
+have cleaned 9.47 GiB, but it has no linux binary in the lane's image, takes
+no cargo lock, ages incremental caches like units and stops at the one
+target dir `cargo metadata` names.
+
+The wall is tools/lib/target_sweep.py, which tools/validate-all.py runs once
+at the end of every run, after the last join and before the verdict lines
+(tools/check-gates.py holds the place, NS1-NS5), over every profile under
+target/ and over the volume through the lane's own image. A UNIT is a
+`.fingerprint/<name>-<hash>/` with every deps/, build/ and examples/ entry
+carrying the same hash, removed whole, fingerprint first. Deleting one by
+hand (adler2's fingerprint and its four deps files) rebuilt it; deleting
+itoa's deps files and keeping its fingerprint printed `Dirty itoa:
+couldn't read metadata for file .../libitoa-261fa2837967ce1a.rlib` and
+rebuilt it, and `tools/build-id.py --verify` passed after both. Windows
+examples carry no hash (the copy2 entry below), so their outputs outlive
+a swept fingerprint and cargo rebuilds them. The first host sweep freed
+6.76 GB, all of it hashed files whose fingerprint was already gone (ios-sim
+4.78, android 1.94). Unhashed `kaya.<cgu>.<session>.rcgu.o` objects are not
+units: 140,032 of them sit in target/nested/kaya-bindgen/debug/deps, outside
+tools/prune-objects.py's globs.
+
+## The host's atime is not last use (measured 2026-11-14)
+
+APFS here is mounted without `strictatime`, and a read moves a file's atime
+ONLY when it is below the mtime: atime 20 days and mtime 30 days stayed 20
+days after a read, atime 20 days and mtime 0.1 days became now. So on the
+host a fingerprint's atime is the FIRST read after its last write, not the
+last: aged to 20 days, adler2's fingerprint (in kaya's graph) stayed 20 days
+through a `cargo build --locked --lib`. The container's ext4 volume is
+`relatime` and does move it, at most once a day. A directory's atime moves
+whenever anything lists it (du, find, the sweep itself), so it is no signal
+anywhere.
+
+tools/lib/target_sweep.py probes each profile ("every", "lax" or "never" on
+its line) and, where it is lax, ARMS every kept fingerprint file (atime one
+second below mtime) so the next cargo read moves it, keeping each unit's
+last use in `<profile>/.kaya-target-sweep.json`. After arming, a no-op
+`cargo build --locked --lib` moved 131 fingerprints in target/debug. A lax
+profile with no ledger has never been armed, so its units are recorded at
+the sweep's own time and none is judged for 14 days; where atime never
+moves no unit is judged at all. The module's self-test runs on every
+invocation and watches 13 negatives red, the arm, the ledger and the lax
+first sweep among them.
+
 ## The Android provider that keeps the old tail: `w` never truncates, `wt` did everywhere we could reach (measured 2026-11-11)
 
 Reports name providers (Google Drive among them) where a document opened

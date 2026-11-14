@@ -328,6 +328,32 @@ def sweep_target_problem(matrix, hostlib, gates, mac):
     return None
 
 
+# THE TARGET SWEEP (docs/traps.md, cargo's target only ever grows): once, at the
+# top level so a serial run sweeps too, after every lane is joined, before any
+# verdict line.
+TARGET_SWEEP = 'target_sweep.after_matrix(str(ROOT), _linux.TARGET_VOLUME, "kaya-linux")'
+
+
+def target_sweep_problem(text):
+    lines = code_lines(text)
+    at = [i for i, line in enumerate(lines) if TARGET_SWEEP in line]
+    if len(at) != 1 or lines[at[0]] != TARGET_SWEEP:
+        return (f"tools/validate-all.py must call the target sweep exactly once, at the top "
+                f"level so every mode runs it ({len(at)} call(s) found)")
+    late = [line.strip() for line in lines[at[0] + 1:]
+            if re.match(r"\s*(join_lanes|run_lane)\(", line)]
+    if late:
+        return (f"tools/validate-all.py must run the target sweep after the last lane is "
+                f"joined; after it: {late[0]}")
+    verdicts = [i for i, line in enumerate(lines)
+                if re.search(r'for name in lane_names:|print\(f?"(TIMING matrix|validate-all: '
+                             r'(ALL PASS|FAILURES ABOVE))', line)]
+    if not verdicts or min(verdicts) < at[0]:
+        return ("tools/validate-all.py must run the target sweep before the lane rows and "
+                "the verdict lines")
+    return None
+
+
 def quiet_tail_problem(text):
     parallel = re.search(r'(?ms)^if MODE == "parallel":\n(.*?)^else:$', text)
     if parallel is None:
@@ -349,7 +375,7 @@ def quiet_tail_problem(text):
         return ("tools/validate-all.py's join_lanes must join every lane's waiter "
                 "except the ones it is told to leave running")
     rest = text[parallel.end():]
-    tail = re.search(r'(?ms)^if MODE == "parallel":\n(.*?)^    for name in lane_names:', rest)
+    tail = re.search(r'(?ms)^if MODE == "parallel":\n(.*?)^' + re.escape(TARGET_SWEEP), rest)
     if tail is None:
         return "tools/validate-all.py's collection block is missing"
     body = [line.strip() for line in code_lines(tail.group(1)) if line.strip()]
@@ -1278,6 +1304,30 @@ if problem is not None:
 problem = quiet_tail_problem(matrix_text)
 if problem is not None:
     fail(problem)
+problem = target_sweep_problem(matrix_text)
+if problem is not None:
+    fail(problem)
+# NS1-NS5 — the target sweep cut, doubled, moved before a join, after the verdict,
+# or into one mode.
+_SWEEP_LINE = re.escape(TARGET_SWEEP) + r"\n"
+for _label, _pattern, _repl in (
+        ("NS1 removed the target sweep", r"(?m)^" + _SWEEP_LINE, ""),
+        ("NS2 called the target sweep twice", r"(?m)^(" + _SWEEP_LINE + ")", "\\1\\1"),
+        ("NS3 swept before the linux-quiet lane",
+         r'(?m)^(    join_lanes\(but=\{"windows"\}\)\n)', TARGET_SWEEP + "\n\\1"),
+        ("NS4 swept after the verdict",
+         r'(?ms)^(' + _SWEEP_LINE + r')(.*?)'
+         r'(^if status == 0:\n    print\("validate-all: ALL PASS"\))',
+         "\\2\\1\\3"),
+        ("NS5 swept in the parallel mode alone",
+         r"(?m)^(" + _SWEEP_LINE + r")if MODE == \"parallel\":\n",
+         'if MODE == "parallel":\n    ' + TARGET_SWEEP + "\n")):
+    doctored, n = re.subn(_pattern, _repl, matrix_text, count=1)
+    print(f"check-gates: self-test {_label}, {n} substitution(s)")
+    if n != 1:
+        fail(f"self-test {_label} did not apply exactly once")
+    elif target_sweep_problem(doctored) is None:
+        fail(f"self-test: a matrix that {_label} passed")
 gates_text = (root / "tools" / "gates.py").read_text(encoding="utf-8")
 problem = rung1_skip_problem(matrix_text, gates_text)
 if problem is not None:

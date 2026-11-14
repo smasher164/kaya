@@ -9,6 +9,7 @@ import docker_up
 import exclusive
 import lane_health
 import matrix_args
+import target_sweep
 import walls
 from host_lib import SWEEP_TARGET
 from lanes import android as _android, ios as _ios, linux as _linux, mac as _mac, win as _win
@@ -584,6 +585,11 @@ if MODE == "parallel":
         run_lane("android-quiet", ["tools/android/run-emulator.py"],
                  env={"KAYA_QUIET": "only"})
         join_lanes()
+# THE TARGET SWEEP, once, after the last join and before any verdict line (docs/traps.md,
+# cargo's target only ever grows; tools/check-gates.py holds the place). It never moves
+# the verdict.
+target_sweep.after_matrix(str(ROOT), _linux.TARGET_VOLUME, "kaya-linux")
+if MODE == "parallel":
     for name in lane_names:
         verdict, secs = lane_done.get(name, ("FAIL", 0))
         log = LANES_DIR / f"{name}.log"

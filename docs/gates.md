@@ -186,7 +186,13 @@ every ssh call and joins its leg workers through a 1200s wall that names
 where a stuck worker's thread is; each wall is run against a hung
 stand-in on every run. A host sleep fires none of them, since monotonic
 time stops with the Mac, and is named before the verdict instead
-(docs/traps.md, the matrix that slept 22 hours on battery))
+(docs/traps.md, the matrix that slept 22 hours on battery). AND THE TARGET
+SWEEP SINCE 2026-11-14: validate-all calls tools/lib/target_sweep.py's
+after_matrix exactly once, at the top level so a serial run sweeps too, after
+every join_lanes and run_lane and before the lane rows and verdict lines
+(docs/traps.md, cargo's target only ever grows); NS1-NS5 cut it, double it,
+move it before the linux-quiet join, after the verdict and into the parallel
+block alone, counts printed.)
 
 ## tools/check-ledger.py
 

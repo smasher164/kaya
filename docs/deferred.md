@@ -24,6 +24,17 @@ it enters its loop, or the quit is posted into the loop), not yet reported
 to GStreamer, taken by the image when it lands, or a kaya stop that cannot
 race a demuxer's READY->PAUSED; neither is done.
 
+## GAP — unhashed incremental objects outside prune-objects' globs: 140,032 `kaya.<cgu>.<session>.rcgu.o` in target/nested/kaya-bindgen/debug/deps (seen 2026-11-14)
+KEY: prune-objects, object_dirs, nested/kaya-bindgen, rcgu.o, target_sweep, unhashed objects
+
+tools/prune-objects.py globs `debug` and `*/debug` under one target, so the
+nested targets (target/nested/*, target/gate-sweep/nested/*) and the sweep's
+own triples are never pruned, and tools/lib/target_sweep.py leaves these
+objects alone because they carry no unit hash (docs/traps.md, cargo's target
+only ever grows). The nested kaya-bindgen profile is 4.1 GB with 189,091
+entries. The fix is prune-objects walking every profile target_sweep.profiles
+finds, with a cut of its own watched red.
+
 ## OPEN — file the HLS stop hang with GStreamer (needs a GitLab account; 2026-11-13)
 KEY: gstreamer-hls-stop-hang, downloadhelper_stop, gitlab.freedesktop.org, hlsprobe.py
 

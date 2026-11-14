@@ -421,6 +421,14 @@ docs/gates.md.
    row runs its QUIET legs alone after every lane, the sweep and
    linux-quiet (docs/traps.md, the emulator's audio input entry;
    check-gates holds the order, check-exclusive the set).
+   AND EVERY RUN ENDS WITH THE TARGET SWEEP (the maintainer, 2026-11-14),
+   filtered and serial runs too: after the last join and before the
+   verdict lines, tools/lib/target_sweep.py removes the cargo units no
+   build has read in 14 days and the incremental caches idle for 3, under
+   target/ and in the linux lane's volume, one line per profile. A sweep
+   failure prints its reason and never moves the verdict (docs/traps.md,
+   cargo's target only ever grows and the host's atime is not last use;
+   check-gates holds the place).
    `--serial` is for the special cases: single-lane benchmarking,
    debugging under contention, recording mode. The
    lanes remain individually runnable (`tools/validate-linux.py`,

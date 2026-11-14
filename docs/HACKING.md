@@ -107,6 +107,7 @@ afternoon twice, 2026-09-07). The routes:
 | hand-run the taskspersist leg with its plain door on Linux | the same container shape, running `python3 tools/linux/persist-leg.py <guest>` under `KAYA_SELFTEST=taskspersist`: it stages the app's desktop entry into its own XDG home, runs act one, pushes `tools/linux/launch-entry.py <entry>` (never `gio launch`, which loses its Activate under load; docs/traps.md) and joins act two, printing the door record (tools/linux/door_record.py) and act two under `--- act two ---`; `--self-test` watches its six refusals. |
 | hand-run the links leg on a lane | mac: `tools/run-leg.py links rust --build` (the cold door is `open -a` on the leg's own bundle); linux: `python3 tools/linux/link-leg.py <guest>` in the container under `KAYA_SELFTEST=links` (`gio open`, never xdg-open; `--self-test` watches eleven refusals); android: `KAYA_ONLY=links tools/android/run-emulator.py` (the door is `am start -a VIEW -d <url> -p <package>`); windows: `tools/deploy-win.py akhil@192.168.64.2 links_rust` (tools/guest/relaunch-link.ps1 reads the URL from `C:\kaya\legs\<leg>\relaunch-url.txt` and refuses by name when the shell started another exe); iOS: the rust-swiftui suite's links leg, whose device preflight uninstalls every other dev.kaya.* bundle (the sole-claimant rule) and answers SpringBoard's one-time `Open in …?` through the driver. |
 | hand-run one android scene | `KAYA_ONLY=<scene> tools/android/run-emulator.py` on the warm pool takes every suite's leg for that scene — a filter that matches no leg is refused rather than printing a verdict over an empty run; `run-as dev.kaya.rusthost ls shared_prefs` reads the scratch store back, and `check_real_prefs` after every suite refuses the app's REAL domain on any device. |
+| sweep cargo's build caches by hand | `python3 tools/lib/target_sweep.py [--dry-run] target` (stdlib, no dev shell needed): its self-test, then one line per cargo profile under the directory saying what it removed, what it freed, the size after and how that filesystem's atime answers a read. The linux volume: `docker run --rm -v kaya-linux-target:/work/target-linux -v $PWD/tools/lib:/sweep:ro kaya-linux python3 /sweep/target_sweep.py /work/target-linux`. validate-all runs both at the end of every run; deleting a profile's `.kaya-target-sweep.json` restarts its 14 days on the host (docs/traps.md, the host's atime is not last use). |
 | read a matrix's lane logs after the next matrix has run | `target/validate-lanes/runs/<stamp>/<lane>.log`, one directory per validate-all run (newest 20 kept) beside the overwritten `target/validate-lanes/<lane>.log` — a duration anomaly is read PER LEG against the run before it, which the S4 windows reading could not be. |
 | read a two-act leg's second half on Linux | it is in the leg log under `--- act two ---` (the relaunched process's own stdout, kept by tools/linux/act2-exec.sh) with act2.py's join above it; a D-Bus-activated process's stdio is otherwise the bus daemon's and is thrown away. |
 | measure the macOS closed-app relaunch | `tools/mac/notifyprobe/build.sh`, then the executable with `NOTIFYPROBE_PROVISIONAL=1 NOTIFYPROBE_EXIT_AFTER_POST=1`: it posts and exits with the notification delivered, and every launch appends to `/tmp/notifyprobe.log`. Tap the row through the accessibility API on an idle host (docs/traps.md) and the relaunched pid's `ACTIVATED` line is the answer. |
@@ -397,17 +398,13 @@ run, from cache unless the Dockerfile moved.
 
 ROLLING BACK TO TRIXIE (GTK 4.18.6), the maintainer's condition on the
 2026-10-07 move: `git revert` the commit that moved the image, then run
-the lane. Its build comes back from cache because the image
-`kaya-linux:trixie-4.18-backup` (d12861649f0d) still holds those layers:
-measured 2026-10-07, the lane's own `docker build` of the trixie
-Dockerfile took 3.6 s with every step cached and gave the backup's 26
-layers exactly (the image id differs, since buildx's manifest wrapper is
-new on each build). Never delete that tag or prune images: a forky build
-whose image lost its tag was rebuilt from scratch at the next build
-(about 5 minutes against snapshot.debian.org), so an untagged image's
-cache cannot be counted on. The revert also takes back the code changes
-the move needed (docs/deferred.md's ruling entry lists them), which leaves
-the tree that passed on trixie.
+the lane. The backup image `kaya-linux:trixie-4.18-backup` that kept that
+build cached was deleted on 2026-11-14 (the maintainer's ruling, after five
+weeks on forky), so the revert's first lane run rebuilds the trixie image
+from scratch against its pinned snapshot: about 5 minutes, measured for a
+forky build that lost its tag (2026-10-07). The revert also takes back the
+code changes the move needed (docs/deferred.md's ruling entry lists them),
+which leaves the tree that passed on trixie.
 
 ## Reading a failed lane leg (the instruments, 2026-09-06)
 
