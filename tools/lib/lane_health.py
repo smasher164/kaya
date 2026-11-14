@@ -1409,6 +1409,7 @@ GUEST_STATE_SCRIPT = r"""$ErrorActionPreference='Stop'
 try{$d=Get-PSDrive C;"disk="+$d.Free+"|"+($d.Used+$d.Free)}catch{"disk.error="+($_.Exception.Message -replace '\s+',' ')}
 foreach($n in @('EventLog','WSearch')){try{$s=Get-CimInstance Win32_Service -Filter "Name='$n'";$h=@(Get-CimInstance Win32_Service -Filter ("ProcessId="+$s.ProcessId)).Count;"svc="+$n+"|"+$s.State+"|"+$s.ProcessId+"|"+$h+"|"+$s.ExitCode}catch{"svc.error="+$n+"|"+($_.Exception.Message -replace '\s+',' ')}}
 try{foreach($f in @(Get-ChildItem C:\kaya\dumps -Filter *.dmp -ErrorAction SilentlyContinue)){"dump="+$f.Name+"|"+$f.Length+"|"+$f.LastWriteTimeUtc.ToString('o')}}catch{"dump.error="+($_.Exception.Message -replace '\s+',' ')}
+try{"wu="+(Get-ItemProperty 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -ErrorAction Stop).NoAutoUpdate}catch{"wu=absent"}
 """
 DISK_PRUNE_BELOW = 8 << 30
 DISK_FLOOR = 3 << 30
@@ -1423,7 +1424,7 @@ def guest_state_command():
 
 def guest_state(text, problem):
     state = {"problem": None, "disk": None, "disk.error": None, "svc": {}, "svc.error": {},
-             "dumps": [], "dump.error": None}
+             "dumps": [], "dump.error": None, "wu": None}
     for line in (text or "").splitlines():
         key, eq, value = line.partition("=")
         key, value = key.strip(), value.strip()
@@ -1435,7 +1436,7 @@ def guest_state(text, problem):
                 state["disk"] = (int(free), int(total))
             else:
                 state["disk.error"] = f"disk={value!r}"
-        elif key in ("disk.error", "dump.error"):
+        elif key in ("disk.error", "dump.error", "wu"):
             state[key] = value
         elif key == "svc":
             parts = value.split("|")
@@ -1475,6 +1476,10 @@ def guest_state_sentence(state):
     else:
         size = sum(n for _, n, _ in state["dumps"])
         said.append(f"{len(state['dumps'])} crash dump(s) in C:\\kaya\\dumps, {gb(size)}")
+    if state["wu"] == "1":
+        said.append("Windows Update's automatic updates off")
+    else:
+        said.append(f"Windows Update's automatic updates ON (NoAutoUpdate {state['wu'] or 'no line'})")
     return "guest " + "; ".join(said)
 
 
@@ -1493,6 +1498,23 @@ def eventlog_restart(state):
     if st == "Start Pending" and pid not in ("", "0") and shared == "1":
         return f"cmd /c taskkill /f /pid {pid} & sc start EventLog"
     return "cmd /c sc start EventLog"
+
+
+# docs/traps.md, the packaged leg launched eight minutes late: an update's
+# download between matrices took C: to nothing twice.
+WU_POLICY_FIX = (r"cmd /c reg add HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU "
+                 r"/v NoAutoUpdate /t REG_DWORD /d 1 /f & reg add "
+                 r"HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU /v AUOptions "
+                 r"/t REG_DWORD /d 1 /f & reg add "
+                 r"HKLM\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization "
+                 r"/v DODownloadMode /t REG_DWORD /d 0 /f")
+
+
+def wu_policy_fix(state):
+    """The cmd line that turns automatic updates off, or None when they are."""
+    if state["problem"] or state["wu"] == "1":
+        return None
+    return WU_POLICY_FIX
 
 
 def guest_state_refusal(state, after=""):
@@ -2238,6 +2260,19 @@ def drive():
                   "read (ssh did not answer within 60s)",
                   [str(guest_state_refusal(guest_state("", "ssh did not answer within 60s")))]))
     cases.append(("no refusal", "None", [str(guest_state_refusal(well))]))
+    cases.append(("wu unread", "Windows Update's automatic updates ON (NoAutoUpdate no line)",
+                  [guest_state_sentence(well)]))
+    cases.append(("wu absent", "automatic updates ON (NoAutoUpdate absent)",
+                  [guest_state_sentence(guest_state("disk=9663676416|67600641024\nwu=absent\n",
+                                                    None))]))
+    wu_off = guest_state("disk=9663676416|67600641024\nwu=1\n", None)
+    cases.append(("wu off", "Windows Update's automatic updates off",
+                  [guest_state_sentence(wu_off)]))
+    cases.append(("wu fix", "/v NoAutoUpdate /t REG_DWORD /d 1 /f",
+                  [str(wu_policy_fix(guest_state("disk=9663676416|67600641024\nwu=0\n", None)))]))
+    cases.append(("no wu fix", "None", [str(wu_policy_fix(wu_off))]))
+    cases.append(("no wu fix unread", "None",
+                  [str(wu_policy_fix(guest_state("", "ssh exited 255: refused")))]))
 
     seen = _apps_run([(APPS_START, None),
                       (APPS_START + PREVIEW + HIJACK + PY_GUEST + DAEMON + AXAGENT, None),

@@ -20806,6 +20806,16 @@ an update download between matrices can take the disk to nothing; both wedges
 followed a full C:. The host's disk was at 14 GB free at the same time
 (target/ at 197 GB, 58 GB of it cargo incremental caches, cleared).
 
+The third, the next morning (2026-11-14), was Windows Update again: the
+guest's System log showed the 2026-11 security update installed on the
+restart, and C: had gone from 9.8 to 5.6 GB free overnight. The VM is now
+on the policy `HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU`
+NoAutoUpdate=1 (AUOptions=1, DeliveryOptimization DODownloadMode=0), a
+maintainer's ruling of 2026-11-14 for a test-only VM. guest_services reads
+NoAutoUpdate on every lane and sets the policy back when it is not 1
+(lane_health.wu_policy_fix; check-flightrec holds the call, watched red).
+Updates are now taken by hand, between slices, when the VM is meant to move.
+
 ## The HLS stop that waited for a download thread forever (measured 2026-11-13)
 
 linux media_delivery-rust-notsdemux-wayland, matrix 2 of the quiet-tail

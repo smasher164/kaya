@@ -509,6 +509,11 @@ def guest_services():
             time.sleep(10)
         print(f"deploy-win: after {int(time.monotonic() - t0)}s, "
               + lane_health.guest_state_sentence(state), flush=True)
+    wu_fix = lane_health.wu_policy_fix(state)
+    if wu_fix:
+        _, why = lane_health._run([*ssh, wu_fix], timeout=60)
+        print(f"deploy-win: Windows Update's automatic updates were on (NoAutoUpdate "
+              f"{state['wu'] or 'no line'}); set the policy off ({why or 'exit 0'})", flush=True)
     refusal = lane_health.guest_state_refusal(state, " after the lane's repair"
                                               if prune or restart else "")
     if refusal:

@@ -2590,6 +2590,8 @@ def census_lane_health(src):
         found.append(f"{WIN}: the guest's disk and services are read after the native images")
     for needle, what in (("lane_health.dumps_to_prune(", "prunes the crash dumps"),
                          ("lane_health.eventlog_restart(", "restarts a stuck EventLog"),
+                         ("lane_health.wu_policy_fix(",
+                          "turns Windows Update's automatic updates off"),
                          ("lane_health.guest_state_refusal(", "refuses a guest still sick")):
         if needle not in guest:
             found.append(f"{WIN}: guest_services no longer {what} (`{needle}`)")
