@@ -436,6 +436,9 @@ public final class KayaApp {
     // a result whose id has none above (docs/tasks-s9-plan.md R1). A
     // relaunched process never called show().
     private NotificationActivationHandler notificationActivation;
+    /** PROCESS-LEVEL like the one above: a leftover backup arrives before
+     * the app could have asked for anything (RD15 B). */
+    private BiConsumer<Tx, LeftoverBackup> backupLeft;
     // NOT one-shot either: a route declared by link() answers every URL
     // that matches it, for the life of the process
     // (docs/app-links-plan.md §4), and the core owns the pattern table —
@@ -1482,6 +1485,43 @@ public final class KayaApp {
             int[] seekable = new int[1];
             java.io.FileDescriptor fd = KayaRing.openPicked(handle, mode.wire, seekable);
             return new Opened(fd, mode, seekable[0] != 0);
+        }
+
+        /**
+         * THE SAFE SAVE (docs/rich-document-plan.md §4.1): on return the
+         * document holds exactly {@code bytes}; if this throws it holds its
+         * old contents. BLOCKS like {@link #open} and is safe from any
+         * thread. On Android only, a crash inside the save can leave a
+         * backup that the next launch hands to
+         * {@link KayaApp#onBackupLeft}; a rename cannot leave one, so on iOS
+         * and the desktops that never fires.
+         */
+        public void save(byte[] bytes) throws java.io.IOException {
+            KayaRing.savePicked(handle, bytes);
+        }
+    }
+
+    /**
+     * A backup a safe save left that this launch could not prove redundant
+     * (docs/rich-document-plan.md §4.1, RD15 B), handed to
+     * {@link KayaApp#onBackupLeft} before anything else. {@code backupFile}
+     * is the backup, readable and never writable; {@code document} the
+     * document when it still opens, else null; {@code measured} what kaya
+     * read. ANDROID ONLY: a rename cannot leave a backup, so on iOS and the
+     * desktops this never arrives. Unanswered, it comes back at the next
+     * launch.
+     */
+    public record LeftoverBackup(long backup, String name, PickedFile backupFile,
+                                 PickedFile document, String measured) {
+        /** Write the backup back over the document through the safe save,
+         * then delete it. BLOCKS; safe from any thread. */
+        public void restore() throws java.io.IOException {
+            KayaRing.answerBackup(backup, KayaWire.BACKUP_ANSWER_RESTORE);
+        }
+
+        /** Delete the backup and keep the document as it is. */
+        public void discard() throws java.io.IOException {
+            KayaRing.answerBackup(backup, KayaWire.BACKUP_ANSWER_DISCARD);
         }
     }
 
@@ -12311,6 +12351,37 @@ public final class KayaApp {
     }
 
     /**
+     * Register the PROCESS-LEVEL leftover-backup handler
+     * (docs/rich-document-plan.md RD15 B): it receives each backup a safe
+     * save left that this launch could not prove redundant, and answers
+     * {@code restore()} or {@code discard()} (both block, so off the app
+     * thread), or nothing, which keeps it for the next launch. Register it
+     * before the first build. ANDROID ONLY: a rename cannot leave a backup,
+     * so on iOS and the desktops it never fires.
+     */
+    public void onBackupLeft(BiConsumer<Tx, LeftoverBackup> handler) {
+        backupLeft = handler;
+    }
+
+    /** The backup_left arm: the handler, or the announced drop. */
+    void backupLeftArrived(long id, List<?> tail) {
+        long file = tail.get(0) instanceof Long l ? l : 0;
+        long document = tail.get(1) instanceof Long l ? l : 0;
+        String name = tail.get(2) instanceof String s ? s : "";
+        String measured = tail.get(3) instanceof String s ? s : "";
+        LeftoverBackup left = new LeftoverBackup(id, name, new PickedFile(file, name, null),
+                document == 0 ? null : new PickedFile(document, name, null), measured);
+        BiConsumer<Tx, LeftoverBackup> handler = backupLeft;
+        if (handler != null) {
+            dispatch(tx -> handler.accept(tx, left));
+        } else {
+            System.err.println("kaya: a save of " + name + " did not finish and left a backup, "
+                    + "and no handler is registered (KayaApp.onBackupLeft); it stays for the "
+                    + "next launch");
+        }
+    }
+
+    /**
      * Declare a link ROUTE and the handler that answers it
      * (docs/app-links-plan.md §4): {@code link("task/{key}", f)} matches
      * {@code <scheme>://task/t1} and calls f with {@code {"key": "t1"}}.
@@ -14224,6 +14295,8 @@ public final class KayaApp {
                 notificationResult(occ.id, (Integer) occ.payload);
             } else if (occ.kind == KayaWire.OCC_KIND_NOTIFICATION_REPLIED) {
                 notificationReplied(occ.id, (String) occ.payload);
+            } else if (occ.kind == KayaWire.OCC_KIND_BACKUP_LEFT) {
+                backupLeftArrived(occ.id, (List<?>) occ.payload);
             } else if (occ.kind == KayaWire.OCC_KIND_FILE_DIALOG_RESULT) {
                 @SuppressWarnings("unchecked")
                 List<PickedFile> files = (List<PickedFile>) occ.payload;

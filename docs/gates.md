@@ -721,6 +721,23 @@ grows by itself, check-slider-commit's shape: a backend whose
 `depth_stub("search")` goes must take a row. Eight watched negatives,
 counts printed)
 
+## tools/check-safe-save.py
+
+`tools/check-safe-save.py` (THE SAFE SAVE'S ORDER, ARM BY ARM
+(docs/rich-document-plan.md §4.1). Each arm is safe only by the order of
+a few calls, and every scene reads the same bytes back whatever that
+order was, since only a crash between two of them shows it. It reads the
+desktops' arm in crates/kaya/src/safesave.rs for the temporary file's
+fsync before the rename and the directory's after it, Windows' rename
+for MoveFileExW with MOVEFILE_WRITE_THROUGH, Android's five steps for
+the persistable grant before the copy, the backup and record fsynced
+before the overwrite, and the overwrite's fsync and read-back before the
+backup's delete, and the iOS arm in swift/KayaSwiftUI.swift for the
+security scope, coordinate(writingItemAt:options: .forReplacing), the
+item replacement directory and fsync before replaceItemAt, all inside
+the coordinated block. Seven watched negatives, in memory, counts
+printed)
+
 ## tools/check-exclusive.py
 
 `tools/check-exclusive.py` (THE MATRIX-WIDE EXCLUSIVE TOKEN IS WIRED WHERE IT

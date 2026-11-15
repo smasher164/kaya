@@ -466,6 +466,29 @@ let open_picked handle mode =
   in
   (fd, Unsigned.UInt32.to_int (Ctypes.( !@ ) seekable) <> 0)
 
+let kaya_save_picked =
+  foreign ~from:lib ~release_runtime_lock:true "kaya_save_picked"
+    (uint64_t @-> string @-> size_t @-> returning int32_t)
+
+(* The safe save (docs/rich-document-plan.md §4.1); the core's own sentence
+   is on stderr. *)
+let save_picked handle bytes =
+  let rc =
+    kaya_save_picked (Unsigned.UInt64.of_int64 handle) bytes
+      (Unsigned.Size_t.of_int (String.length bytes))
+  in
+  if rc <> 0l then
+    failwith (Printf.sprintf "kaya: saving the picked file failed (code %ld)" rc)
+
+let kaya_answer_backup =
+  foreign ~from:lib ~release_runtime_lock:true "kaya_answer_backup"
+    (uint64_t @-> uint32_t @-> returning int32_t)
+
+let answer_backup backup answer =
+  let rc = kaya_answer_backup (Unsigned.UInt64.of_int64 backup) (Unsigned.UInt32.of_int answer) in
+  if rc <> 0l then
+    failwith (Printf.sprintf "kaya: answering the leftover backup failed (code %ld)" rc)
+
 (* The ordered cursor accesses; see kaya_ml_stubs.c. *)
 external load_acquire_u32 : nativeint -> int = "kaya_ml_load_acquire_u32"
   [@@noalloc]

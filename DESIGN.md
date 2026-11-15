@@ -1982,6 +1982,30 @@ unreleased handle holds a URL and a string rather than anything the
 kernel counts — the resource that made eager opening untenable is
 exactly the one a handle does not consume.
 
+**THE SAFE SAVE (docs/rich-document-plan.md §4.1, RD14 A to RD16 A; built
+2026-11-14).** A picked file also takes `save(bytes)`: the whole new
+contents, blocking and safe from any thread like `open`, after which the
+document holds exactly those bytes, or, if it failed, its old ones. One
+call on every platform, a save-dialog destination included, because a
+phone's picked file has no path a guest could rename over. On the desktops
+kaya writes a temporary file beside the document, fsyncs it and renames it
+over the name (`MoveFileExW` with `MOVEFILE_WRITE_THROUGH` on Windows). On
+iOS it holds the security scope, coordinates the write `.forReplacing`,
+writes into the item replacement directory for the URL, fsyncs and calls
+`replaceItemAt`. Android has no rename, so it takes a persistable grant,
+backs the document up into the app's own storage with a record of both
+lengths and SHA-256s, overwrites through `wt`, reads the document back and
+compares both, and deletes the backup, writing the old bytes back inside
+the call when the overwrite or the check fails. Only there can a crash
+leave a backup, and the next launch classifies it before the app's first
+build: holding the old or the new bytes, it is deleted without a word;
+holding neither, or no longer opening, it becomes one `backup_left`
+occurrence to a process-level handler, which answers restore or discard.
+kaya cannot tell a torn write from another app's edit, so it overwrites
+nothing on its own. The floor is `kaya_save_picked` and
+`kaya_answer_backup`; crates/kaya/src/safesave.rs holds the steps and
+tools/check-safe-save.py their order.
+
 ### Navigation (ratified 2026-07-21)
 
 A stack of scene roots inside one surface, exactly one visible; the

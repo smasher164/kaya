@@ -108,6 +108,9 @@ GATES = [
     # byte (measured 2026-09-04).
     ("check-slider-commit", ["tools/check-slider-commit.py"], True, ""),
     ("check-search", ["tools/check-search.py"], True, ""),
+    # The safe save's arms are safe by the ORDER of a few calls, which no
+    # scene reads: the bytes come back the same in any order.
+    ("check-safe-save", ["tools/check-safe-save.py"], True, ""),
     ("check-submit", ["tools/check-submit.py"], True, ""),
     ("check-scroll-to", ["tools/check-scroll-to.py"], True, ""),
     ("check-exclusive", ["tools/check-exclusive.py"], True, ""),

@@ -57,6 +57,32 @@ fn write_back(file: &kaya::PickedFile, bytes: &str) -> String {
     }
 }
 
+/// What else the directory holds, as the guest's own file API lists it: a
+/// temporary file the save left would show here. The scene's three names
+/// are left out (Android's scoped storage hides `final`, which the
+/// provider made, from this app's listing), and so is the mac panel's
+/// `.DS_Store`.
+fn strays() -> String {
+    let mut names: Vec<String> = std::fs::read_dir(save_dir())
+        .map(|d| d.filter_map(Result::ok).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
+    names.retain(|n| !["decoy", "draft", "final", ".DS_Store"].contains(&n.as_str()));
+    names.sort();
+    if names.is_empty() {
+        "nothing else in the folder".into()
+    } else {
+        format!("also {}", names.join(" "))
+    }
+}
+
+/// The safe save (docs/rich-document-plan.md §4.1), read back.
+fn safe_save(file: &kaya::PickedFile, bytes: &str) -> String {
+    match file.save(bytes.as_bytes()) {
+        Ok(()) => format!("safe saved {}; {}", read_back(file), strays()),
+        Err(e) => format!("safe save failed: {e}"),
+    }
+}
+
 pub(crate) fn app(ctx: kaya::AppCtx) {
     #[derive(Clone)]
     enum Msg {
@@ -64,6 +90,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         SaveBack,
         SaveAs,
         Reopen,
+        SafeSave,
+        SafeSaveAs,
     }
 
     // The decoy the picker needs; guests/rust/filedialog.rs says why.
@@ -87,6 +115,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_click(save_as, Msg::SaveAs);
                 let reopen = tx.button("reopen").id(); // button#3
                 msgs.on_click(reopen, Msg::Reopen);
+                let safe = tx.button("safe save").id(); // button#4
+                msgs.on_click(safe, Msg::SafeSave);
+                let safe_as = tx.button("safe save as").id(); // button#5
+                msgs.on_click(safe_as, Msg::SafeSaveAs);
             })
             .id();
         tx.mount(root);
@@ -149,6 +181,22 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         format!("saved {}", write_back(&file, "third draft"))
                     }));
                 });
+            }
+            // LONGER over the source's "second draft", then SHORTER over
+            // the destination's "third draft".
+            Msg::SafeSave => {
+                let Some(file) = source.borrow().clone() else {
+                    ctx.apply(|tx| tx.write(status, "nothing open to save"));
+                    continue;
+                };
+                work(Box::new(move || safe_save(&file, "the fourth draft, the longest of them")));
+            }
+            Msg::SafeSaveAs => {
+                let Some(file) = destination.borrow().clone() else {
+                    ctx.apply(|tx| tx.write(status, "nothing to reopen"));
+                    continue;
+                };
+                work(Box::new(move || safe_save(&file, "fifth")));
             }
             Msg::Reopen => {
                 // A save-as through the ORIGINAL handle fails only here.

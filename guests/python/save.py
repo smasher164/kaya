@@ -57,6 +57,25 @@ def write_back(picked, text):
     return read_back(picked)
 
 
+def strays():
+    """What else the directory holds, as Python lists it: a temporary file
+    the save left would show here. The scene's three names are left out
+    (Android's scoped storage hides `final`, which the provider made, from
+    this app's listing), and so is the mac panel's `.DS_Store`."""
+    names = sorted(n for n in os.listdir(save_dir)
+                   if n not in ("decoy", "draft", "final", ".DS_Store"))
+    return "also " + " ".join(names) if names else "nothing else in the folder"
+
+
+def safe_save(picked, text):
+    """The safe save (docs/rich-document-plan.md §4.1), read back."""
+    try:
+        picked.save(text.encode())
+    except OSError as e:
+        return f"safe save failed: {e}"
+    return f"safe saved {read_back(picked)}; {strays()}"
+
+
 def work(job):
     """Run one file operation on a thread of the guest's own and post the
     answer back."""
@@ -115,6 +134,24 @@ def reopen():
     work(lambda: f"reopened {read_back(first)} {read_back(second)}")
 
 
+def safe_save_back():
+    # LONGER over the source's "second draft".
+    file = source
+    if file is None:
+        status.set("nothing open to save")
+        return
+    work(lambda: safe_save(file, "the fourth draft, the longest of them"))
+
+
+def safe_save_as():
+    # SHORTER over the destination's "third draft".
+    file = destination
+    if file is None:
+        status.set("nothing to reopen")
+        return
+    work(lambda: safe_save(file, "fifth"))
+
+
 with app.window(title="save"):
     status = kaya.signal("no file")
     with kaya.column():
@@ -123,5 +160,7 @@ with app.window(title="save"):
         kaya.button("save", on_click=save_back)  # button#1
         kaya.button("save as", on_click=save_as)  # button#2
         kaya.button("reopen", on_click=reopen)  # button#3
+        kaya.button("safe save", on_click=safe_save_back)  # button#4
+        kaya.button("safe save as", on_click=safe_save_as)  # button#5
 
 sys.exit(app.run())

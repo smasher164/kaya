@@ -60,6 +60,36 @@ moves no unit is judged at all. The module's self-test runs on every
 invocation and watches 13 negatives red, the arm, the ledger and the lax
 first sweep among them.
 
+## replaceItemAt keeps the Files identity and not the inode (measured 2026-11-14)
+
+docs/rich-document-plan.md §4.1 asked whether the iOS safe save's
+`FileManager.replaceItemAt` on a picked URL reads to the provider as a
+delete and a create. On the iPhone simulator (iOS 26.5), for a document in
+On My iPhone (the app's Documents, picked through UIDocumentPicker), the
+arm's KAYA_DIAG line before and after each save, six saves across three
+legs: the `documentIdentifier` (what the Files app and a File Provider
+track an item by) was the same after every save, while the inode and the
+`fileResourceIdentifier` changed every time, since the bytes are a new
+file swapped in. A reader holding the inode or an open descriptor sees the
+old file, as after any atomic save (DESIGN.md, File dialogs). iCloud Drive
+was not measured: the simulator pool is signed into no Apple account, and
+the device half needs a paired phone with one.
+
+## An Android app cannot list the file its picker's provider made (measured 2026-11-14)
+
+save.steps' safe saves first reported the scene directory as the guest's
+own `std::fs::read_dir` lists it, and the two labels read "decoy draft
+final" on the mac and "decoy draft" on the API 35 emulator
+(save-compose, 2026-11-14): the save-as destination `final` was created by
+ExternalStorageProvider through ACTION_CREATE_DOCUMENT, and scoped storage
+leaves a file another app owns out of this app's own listing of
+/sdcard/Documents/kaya-save-<pid>, while the two files the guest wrote
+itself are there. The handle still reads and writes it. So the scene reports
+only the STRAYS, every name but the scene's three and the mac panel's
+`.DS_Store` ("nothing else in the folder"), which is what "no temporary file
+left" needs on every lane; check-steps holds the two safe saves' lengths and
+that wording (docs/rich-document-plan.md §4.1).
+
 ## The Android provider that keeps the old tail: `w` never truncates, `wt` did everywhere we could reach (measured 2026-11-11)
 
 Reports name providers (Google Drive among them) where a document opened

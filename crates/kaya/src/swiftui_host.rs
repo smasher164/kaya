@@ -34,6 +34,18 @@ pub type PickedOpener = unsafe extern "C" fn(
 /// `PickedSource` when a guest redeems a handle.
 pub(crate) static PICKED_OPENER: std::sync::OnceLock<PickedOpener> = std::sync::OnceLock::new();
 
+/// The backend's safe save of a picked URL (docs/rich-document-plan.md
+/// §4.1, the iOS arm): the coordinated replace inside one call. 0 on
+/// success, an errno otherwise with `out_error` filled.
+pub type PickedSaver = unsafe extern "C" fn(
+    locator: *const c_char,
+    bytes: *const u8,
+    len: usize,
+    out_error: *mut *const c_char,
+) -> i32;
+
+pub(crate) static PICKED_SAVER: std::sync::OnceLock<PickedSaver> = std::sync::OnceLock::new();
+
 /// The capability query's platform half (docs/media-plan.md §8 ruling 1):
 /// AVFoundation's own answer for a MIME type with its codecs, NUL-terminated.
 pub type CanPlay = unsafe extern "C" fn(mime: *const c_char, codecs: *const c_char) -> u8;
@@ -95,6 +107,28 @@ impl crate::protocol::PickedSource for UrlSource {
             return Err(std::io::Error::other(format!("kaya: {why}")));
         }
         Ok((handle, seekable != 0))
+    }
+
+    fn save(&self, bytes: &[u8]) -> std::io::Result<()> {
+        let saver = PICKED_SAVER.get().ok_or_else(|| {
+            std::io::Error::other("kaya: this SwiftUI backend exports no picked-file saver — rebuild it")
+        })?;
+        let locator = CString::new(self.locator.as_str())
+            .map_err(|e| std::io::Error::other(format!("kaya: the locator would not cross: {e}")))?;
+        let mut error: *const c_char = std::ptr::null();
+        let rc = unsafe { saver(locator.as_ptr(), bytes.as_ptr(), bytes.len(), &mut error) };
+        if rc == 0 {
+            return Ok(());
+        }
+        let why = if error.is_null() {
+            "the backend refused the save and gave no reason".to_owned()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(error) }.to_string_lossy().into_owned()
+        };
+        Err(std::io::Error::new(
+            std::io::Error::from_raw_os_error(rc).kind(),
+            format!("kaya: {why} (errno {rc})"),
+        ))
     }
 
     fn name(&self) -> &str {
@@ -636,6 +670,11 @@ pub(crate) fn run() -> i32 {
     if !opener.is_null() {
         let opener: PickedOpener = unsafe { std::mem::transmute(opener) };
         let _ = PICKED_OPENER.set(opener);
+    }
+    let saver = unsafe { dlsym(handle, c"kaya_swiftui_save_picked".as_ptr()) };
+    if !saver.is_null() {
+        let saver: PickedSaver = unsafe { std::mem::transmute(saver) };
+        let _ = PICKED_SAVER.set(saver);
     }
     let can_play = unsafe { dlsym(handle, c"kaya_swiftui_can_play".as_ptr()) };
     if !can_play.is_null() {

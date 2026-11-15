@@ -162,6 +162,11 @@ module KayaApp
     -- to Kaya.Core with the record it is a field of.
     FileMode (..),
     openPicked,
+    savePicked,
+    LeftoverBackup (..),
+    restoreBackup,
+    discardBackup,
+    onBackupLeft,
     pickFiles,
     pickFile,
     pickFilesOf,
@@ -1030,6 +1035,24 @@ fileModeWire mode = case mode of
 -- and post the result back.
 openPicked :: PickedFile -> FileMode -> IO (Handle, Bool)
 openPicked f mode = R.openPicked f.handle (fileModeWire mode)
+
+-- | THE SAFE SAVE (docs\/rich-document-plan.md §4.1): on return the
+-- document holds exactly the bytes; if this throws an 'IOError' it holds
+-- its old contents. BLOCKS like 'openPicked' and is safe from any thread.
+-- On Android only, a crash inside the save can leave a backup that the
+-- next launch hands to 'onBackupLeft'; a rename cannot leave one, so on
+-- iOS and the desktops that never fires.
+savePicked :: PickedFile -> BS.ByteString -> IO ()
+savePicked f = R.savePicked f.handle
+
+-- | Write the backup back over the document through the safe save, then
+-- delete it. BLOCKS; safe from any thread.
+restoreBackup :: LeftoverBackup -> IO ()
+restoreBackup left = R.answerBackup left.backup W.backupAnswerRestore
+
+-- | Delete the backup and keep the document as it is.
+discardBackup :: LeftoverBackup -> IO ()
+discardBackup left = R.answerBackup left.backup W.backupAnswerDiscard
 
 -- | AN ASSET — a file this app's own BUILD put where the running
 -- program can find it (docs\/assets-plan.md).
@@ -2119,6 +2142,42 @@ setBadge count = emitB (W.txSetBadge count)
 onNotificationActivation :: App -> (Word64 -> NotificationOutcome -> IO ()) -> IO ()
 onNotificationActivation app handler =
   writeIORef (app.appNotificationActivation) (Just handler)
+
+-- | Register the PROCESS-LEVEL leftover-backup handler
+-- (docs\/rich-document-plan.md RD15 B): it receives each backup a safe save
+-- left that this launch could not prove redundant, and answers
+-- 'restoreBackup' or 'discardBackup' (both block, so off the app thread),
+-- or nothing, which keeps it for the next launch. Register it before the
+-- first build. ANDROID ONLY: a rename cannot leave a backup, so on iOS and
+-- the desktops it never fires.
+onBackupLeft :: App -> (LeftoverBackup -> IO ()) -> IO ()
+onBackupLeft app handler = writeIORef (app.appBackupLeft) (Just handler)
+
+-- | The backup_left arm: the handler, or the announced drop.
+backupLeftArrived :: App -> Word64 -> [W.Value] -> IO ()
+backupLeftArrived app ident vals = case vals of
+  W.VI64 file : W.VI64 doc : W.VStr name : W.VStr said : _ -> do
+    let named = T.pack name
+        left =
+          LeftoverBackup
+            { backup = ident,
+              backupName = named,
+              backupFile = PickedFile (fromIntegral file) named "",
+              document = if doc == 0 then Nothing else Just (PickedFile (fromIntegral doc) named ""),
+              measured = T.pack said
+            }
+    handler <- readIORef (app.appBackupLeft)
+    case handler of
+      Just f -> dispatch (f left)
+      Nothing ->
+        hPutStrLn
+          stderr
+          ( "kaya: a save of "
+              ++ name
+              ++ " did not finish and left a backup, and no handler is registered"
+              ++ " (KayaApp.onBackupLeft); it stays for the next launch"
+          )
+  _ -> return ()
 
 -- | Declare a link ROUTE and the handler that answers it
 -- (docs/app-links-plan.md §4): @linkRoute app \"task\/{key}\" f@ matches
@@ -6811,6 +6870,7 @@ newApp =
     <*> newIORef Map.empty -- appNotificationHandlers
     <*> newIORef Map.empty -- appToastHandlers
     <*> newIORef Nothing -- appNotificationActivation
+    <*> newIORef Nothing -- appBackupLeft
     <*> newIORef Map.empty -- appLinkHandlers
     <*> newIORef 0 -- appNextLinkRoute
     <*> newIORef [] -- appPendingRoutes
@@ -7310,6 +7370,9 @@ dispatchLoop app = do
           notificationResult app ident $ case payload of
             Just (W.VI64 o) -> fromIntegral o :: Word32
             _ -> 0
+          dispatchLoop app
+      | kind == W.occKindBackupLeft -> do
+          backupLeftArrived app ident askTail
           dispatchLoop app
       | kind == W.occKindNotificationReplied -> do
           notificationAnswer app ident $ NotificationReplied $ case payload of

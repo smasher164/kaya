@@ -96,6 +96,25 @@ public final class Save {
                     work(app, status, () ->
                             "reopened " + readBack(first) + " " + readBack(second));
                 });
+                tx.button("safe save", inner -> { // button#4
+                    // LONGER over the source's "second draft".
+                    KayaApp.PickedFile file = held.source;
+                    if (file == null) {
+                        inner.write(status, "nothing open to save");
+                        return;
+                    }
+                    work(app, status, () ->
+                            safeSave(file, "the fourth draft, the longest of them", dir));
+                });
+                tx.button("safe save as", inner -> { // button#5
+                    // SHORTER over the destination's "third draft".
+                    KayaApp.PickedFile file = held.destination;
+                    if (file == null) {
+                        inner.write(status, "nothing to reopen");
+                        return;
+                    }
+                    work(app, status, () -> safeSave(file, "fifth", dir));
+                });
             }));
         });
 
@@ -133,6 +152,33 @@ public final class Save {
             return "save failed: " + e.getMessage();
         }
         return readBack(file);
+    }
+
+    /** What else the directory holds, as Java lists it: a temporary file the
+     * save left would show here. The scene's three names are left out
+     * (Android's scoped storage hides {@code final}, which the provider made,
+     * from an app's listing), and so is the mac panel's {@code .DS_Store}. */
+    private static String strays(Path dir) {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        try (java.util.stream.Stream<Path> listed = Files.list(dir)) {
+            listed.map(p -> p.getFileName().toString())
+                    .filter(n -> !java.util.Set.of("decoy", "draft", "final", ".DS_Store").contains(n))
+                    .forEach(names::add);
+        } catch (IOException e) {
+            return "listing failed: " + e.getMessage();
+        }
+        java.util.Collections.sort(names);
+        return names.isEmpty() ? "nothing else in the folder" : "also " + String.join(" ", names);
+    }
+
+    /** The safe save (docs/rich-document-plan.md §4.1), read back. */
+    private static String safeSave(KayaApp.PickedFile file, String text, Path dir) {
+        try {
+            file.save(text.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            return "safe save failed: " + e.getMessage();
+        }
+        return "safe saved " + readBack(file) + "; " + strays(dir);
     }
 
     /** Where the scene's files live. TMPDIR FIRST (docs/traps.md,

@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x25d4a59421f21751ULL
+#define KAYA_SPEC_HASH 0xc57cc15dba2334d5ULL
 #define KAYA_VERSION "0.0.0"
 
 
@@ -5177,6 +5177,49 @@ static inline int kaya_parse_voice_changed(const uint8_t *rec, uint64_t *id,
         at += 4;
     }
     at += 4;
+    at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+    (*n_vals)++;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a backup_left occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_backup_left(const uint8_t *rec, uint64_t *id,
+                                          KayaVal *vals, uint32_t max_vals,
+                                          uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_BACKUP_LEFT)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint64_t raw; /* backup_file */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    {
+        uint64_t raw; /* document */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+    (*n_vals)++;
     at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
     (*n_vals)++;
     (void)at;

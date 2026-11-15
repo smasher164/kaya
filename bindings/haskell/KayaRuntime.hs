@@ -56,6 +56,8 @@ module KayaRuntime
     assetBlob,
     assetClose,
     openPicked,
+    savePicked,
+    answerBackup,
     capabilityBits,
     capAuxWindows,
     capNotifications,
@@ -127,6 +129,14 @@ foreign import ccall unsafe "kaya_occurrence_ring"
 -- BLOCKS, possibly for a long time, so the RTS must keep running.
 foreign import ccall safe "kaya_open_picked"
   c_kaya_open_picked :: Word64 -> Word32 -> Ptr Int64 -> Ptr Word32 -> IO Int32
+
+-- | The safe save and the leftover answer (docs\/rich-document-plan.md
+-- §4.1): SAFE, since both block.
+foreign import ccall safe "kaya_save_picked"
+  c_kaya_save_picked :: Word64 -> Ptr Word8 -> CSize -> IO Int32
+
+foreign import ccall safe "kaya_answer_backup"
+  c_kaya_answer_backup :: Word64 -> Word32 -> IO Int32
 
 foreign import ccall safe "kaya_wait_occurrences"
   c_kaya_wait_occurrences :: IO CBool
@@ -1043,6 +1053,23 @@ pollOccurrence = do
               Just occ -> return (Just occ)
               Nothing -> loop hh'
   loop h
+
+-- | The safe save's C entry; the core's own sentence is on stderr.
+savePicked :: Word64 -> BS.ByteString -> IO ()
+savePicked handle bytes = do
+  rc <- unsafeUseAsCStringLen bytes $ \(ptr, len) ->
+    c_kaya_save_picked handle (castPtr ptr) (fromIntegral len)
+  if rc /= 0
+    then ioError (userError ("kaya: saving the picked file failed (code " ++ show rc ++ ")"))
+    else return ()
+
+-- | Restore or discard one leftover backup (kaya_answer_backup).
+answerBackup :: Word64 -> Word32 -> IO ()
+answerBackup backupId answer = do
+  rc <- c_kaya_answer_backup backupId answer
+  if rc /= 0
+    then ioError (userError ("kaya: answering the leftover backup failed (code " ++ show rc ++ ")"))
+    else return ()
 
 -- | Redeem a picked handle for a real 'Handle', plus whether it seeks.
 -- BLOCKS, possibly for a long time, so call it from a thread you chose

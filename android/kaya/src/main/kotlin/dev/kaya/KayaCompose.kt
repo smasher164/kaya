@@ -3752,7 +3752,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x25d4a59421f21751uL
+    private const val SPEC_HASH: ULong = 0xc57cc15dba2334d5uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2

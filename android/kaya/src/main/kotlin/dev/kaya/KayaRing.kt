@@ -198,4 +198,11 @@ object KayaRing {
         mode: Int,
         seekable: IntArray,
     ): java.io.FileDescriptor
+
+    /** The safe save (docs/rich-document-plan.md §4.1): throws IOException
+     * when the document kept its old contents. BLOCKS. */
+    @JvmStatic external fun savePicked(handle: Long, bytes: ByteArray)
+
+    /** Restore or discard one leftover backup (kaya_answer_backup). */
+    @JvmStatic external fun answerBackup(backup: Long, answer: Int)
 }

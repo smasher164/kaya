@@ -2087,6 +2087,9 @@ def run_apk_on(serial, name, apk, component, script, extras,
     # run (docs/tasks-s9-plan.md R6).
     if two_act:
         run_as(serial, package, "rm", "-rf", ACT2_REL)
+        # A safe save's backups belong to the leg that left them, and a
+        # second act counts the ones it is handed (saferestore.steps).
+        run_as(serial, package, "rm", "-rf", "files/kaya-safesave")
     # The ring APPENDS its dump, so a red leg's bundle carried every earlier
     # red's dump on this phone ahead of its own (docs/traps.md, the quick-add
     # field panned above its sheet's top).
@@ -4837,6 +4840,8 @@ def run_suite_legs(suite):
             extras += ["--es", "KAYA_LOCALE", lane.SCENE_LOCALE[scene]]
         if scene in lane.SCENE_TEXT_SCALE:
             extras += ["--es", "KAYA_TEXT_SCALE", lane.SCENE_TEXT_SCALE[scene]]
+        for key, value in lane.SCENE_ENV.get(scene, {}).items():
+            extras += ["--es", key, value]
         if flags.get("orientation"):
             extras += ["--es", "KAYA_ORIENTATION", flags["orientation"]]
         if flags.get("cutout"):

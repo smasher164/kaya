@@ -61,6 +61,37 @@ static class SaveScene
         return ReadBack(file);
     }
 
+    /// What else the directory holds, as .NET lists it: a temporary file the
+    /// save left would show here. The scene's three names are left out
+    /// (Android's scoped storage hides `final`, which the provider made, from
+    /// an app's listing), and so is the mac panel's `.DS_Store`.
+    static string Strays(string dir)
+    {
+        var names = new List<string>();
+        foreach (var path in Directory.EnumerateFileSystemEntries(dir))
+        {
+            string name = Path.GetFileName(path);
+            if (name is not ("decoy" or "draft" or "final" or ".DS_Store"))
+                names.Add(name);
+        }
+        names.Sort(string.CompareOrdinal);
+        return names.Count == 0 ? "nothing else in the folder" : "also " + string.Join(" ", names);
+    }
+
+    /// The safe save (docs/rich-document-plan.md §4.1), read back.
+    static string SafeSave(PickedFile file, string text, string dir)
+    {
+        try
+        {
+            file.Save(Encoding.UTF8.GetBytes(text));
+        }
+        catch (Exception e)
+        {
+            return "safe save failed: " + e.Message;
+        }
+        return $"safe saved {ReadBack(file)}; {Strays(dir)}";
+    }
+
     public static void Run()
     {
         var app = new KayaApp();
@@ -165,6 +196,28 @@ static class SaveScene
                         return;
                     }
                     Work(() => $"reopened {ReadBack(first)} {ReadBack(second)}");
+                });
+
+                tx.Button("safe save", onClick: inner =>  // button#4
+                {
+                    // LONGER over the source's "second draft".
+                    if (source is not PickedFile file)
+                    {
+                        inner.Write(status, "nothing open to save");
+                        return;
+                    }
+                    Work(() => SafeSave(file, "the fourth draft, the longest of them", dir));
+                });
+
+                tx.Button("safe save as", onClick: inner => // button#5
+                {
+                    // SHORTER over the destination's "third draft".
+                    if (destination is not PickedFile file)
+                    {
+                        inner.Write(status, "nothing to reopen");
+                        return;
+                    }
+                    Work(() => SafeSave(file, "fifth", dir));
                 });
                 return root;
             }));

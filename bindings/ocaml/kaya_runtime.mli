@@ -61,6 +61,11 @@ val pref_remove : string -> unit
    the core keeps no claim. *)
 val open_picked : int64 -> int -> Unix.file_descr * bool
 
+(* The safe save and the leftover answer (docs/rich-document-plan.md §4.1);
+   both raise [Failure] naming the code. *)
+val save_picked : int64 -> string -> unit
+val answer_backup : int64 -> int -> unit
+
 (* The host capability word; Kaya_app.capabilities is the surface. *)
 val cap_aux_windows : int64
 val cap_notifications : int64

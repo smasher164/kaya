@@ -76,6 +76,9 @@ type Floor = {
   openPicked(handle: number, mode: number): { raw: number; seekable: boolean };
   pickedRead(handle: number): Uint8Array;
   pickedWrite(handle: number, bytes: Uint8Array): void;
+  // kaya_save_picked and kaya_answer_backup (docs/rich-document-plan.md §4.1).
+  savePicked(handle: number, bytes: Uint8Array): void;
+  answerBackup(backup: number, answer: number): void;
   // The capture worker (docs/capture-plan.md §4; crates/kaya/src/node.rs):
   // a listener per (capture, kind 0 frames / 1 samples), called by kaya's
   // capture thread and waited for; captureDrop forgets both.
@@ -441,6 +444,17 @@ export function readPicked(handle: number): Uint8Array {
 /** Replace the picked file's content, written by the addon. */
 export function writePicked(handle: number, bytes: Uint8Array): void {
   lib.pickedWrite(handle, bytes);
+}
+
+/** The safe save (docs/rich-document-plan.md §4.1); throws when the
+ * document kept its old contents, the core's sentence on stderr. BLOCKS. */
+export function savePicked(handle: number, bytes: Uint8Array): void {
+  lib.savePicked(handle, bytes);
+}
+
+/** Restore or discard one leftover backup (kaya_answer_backup). BLOCKS. */
+export function answerBackup(backup: number, answer: number): void {
+  lib.answerBackup(backup, answer);
 }
 
 /** From the worker, end the PROCESS with a code: process.exit there ends

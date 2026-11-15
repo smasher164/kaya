@@ -322,6 +322,9 @@ type App struct {
 	// a result whose id has none above (docs/tasks-s9-plan.md R1). A
 	// relaunched process never called Show.
 	notificationActivation func(*Tx, uint64, NotificationResult)
+	// PROCESS-LEVEL like notificationActivation: a leftover backup arrives
+	// before the app could have asked for anything (RD15 B).
+	backupLeft func(*Tx, LeftoverBackup)
 	// NOT one-shot either: a route declared by Link answers every URL
 	// that matches it, for the life of the process
 	// (docs/app-links-plan.md §4), and the core owns the pattern table —
@@ -4241,6 +4244,44 @@ func (a *App) notificationResult(id uint64, choice NotificationResult) {
 	}
 }
 
+// OnBackupLeft registers the PROCESS-LEVEL leftover-backup handler
+// (docs/rich-document-plan.md RD15 B): fn receives each backup a safe save
+// left that this launch could not prove redundant, and answers
+// backup.Restore() or backup.Discard() (both block, so off the app
+// goroutine), or nothing, which keeps it for the next launch. Register it
+// before the first build. ANDROID ONLY: a rename cannot leave a backup, so
+// on iOS and the desktops it never fires.
+func (a *App) OnBackupLeft(fn func(*Tx, LeftoverBackup)) {
+	a.backupLeft = fn
+}
+
+// backupLeftOccurred is the backup_left arm, a method so a test can drive
+// it without a ring: the handler, or the announced drop.
+func (a *App) backupLeftOccurred(id uint64, tail []any) {
+	if len(tail) < 4 {
+		return
+	}
+	file, _ := tail[0].(int64)
+	document, _ := tail[1].(int64)
+	name, _ := tail[2].(string)
+	measured, _ := tail[3].(string)
+	left := LeftoverBackup{
+		Backup:     id,
+		Name:       name,
+		BackupFile: PickedFile{Handle: uint64(file), Name: name},
+		Measured:   measured,
+	}
+	if document != 0 {
+		left.Document = &PickedFile{Handle: uint64(document), Name: name}
+	}
+	if fn := a.backupLeft; fn != nil {
+		a.dispatch(func(tx *Tx) { fn(tx, left) })
+		return
+	}
+	fmt.Fprintf(os.Stderr, "kaya: a save of %s did not finish and left a backup, and no "+
+		"handler is registered (App.OnBackupLeft); it stays for the next launch\n", name)
+}
+
 // OnNotificationActivation registers the PROCESS-LEVEL notification
 // handler (docs/tasks-s9-plan.md R1): it receives every result whose id
 // has no one-shot handler bound at Show — which is the whole of a
@@ -7921,6 +7962,8 @@ func (a *App) Serve() {
 			a.captureOccurred(kind, id, payload)
 		case kind == occVoiceChanged:
 			a.voiceOccurred(id, tail)
+		case kind == occBackupLeft:
+			a.backupLeftOccurred(id, tail)
 		case kind == occFontFamilies:
 			listed, _ := payload.([]any)
 			if len(listed) > 0 {

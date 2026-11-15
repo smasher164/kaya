@@ -176,8 +176,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::InstanceDrawRequested { .. }
             | Occurrence::Tick { .. }
             | Occurrence::InstanceTick { .. } => {}
-            // No link route is declared here, and no family list asked for.
+            // No link route is declared here, no family list asked for, and
+            // no save made that could leave a backup.
             Occurrence::LinkOpened { .. }
+            | Occurrence::BackupLeft { .. }
             | Occurrence::FontFamilies { .. }
             | Occurrence::FontFaces { .. }
             | Occurrence::FontDialogResult { .. } => {}

@@ -1838,6 +1838,56 @@ public struct KayaPickedFile: Sendable {
         }
         return (FileHandle(fileDescriptor: Int32(raw), closeOnDealloc: true), seekable != 0)
     }
+
+    /// THE SAFE SAVE (docs/rich-document-plan.md §4.1): on return the
+    /// document holds exactly `bytes`; if this throws it holds its old
+    /// contents. BLOCKS like `open` and is safe from any thread. On Android
+    /// only, a crash inside the save can leave a backup that the next launch
+    /// hands to `onBackupLeft`; a rename cannot leave one, so on iOS and the
+    /// desktops that never fires.
+    public func save(_ bytes: Data) throws {
+        let rc = bytes.withUnsafeBytes { raw in
+            kaya_save_picked(handle, raw.bindMemory(to: UInt8.self).baseAddress, UInt(raw.count))
+        }
+        guard rc == 0 else {
+            throw NSError(
+                domain: "kaya", code: Int(rc),
+                userInfo: [NSLocalizedDescriptionKey:
+                    "kaya: saving the picked file failed (code \(rc))"])
+        }
+    }
+}
+
+/// A backup a safe save left that this launch could not prove redundant
+/// (docs/rich-document-plan.md §4.1, RD15 B), handed to `onBackupLeft`
+/// before anything else. `backupFile` is the backup, readable and never
+/// writable; `document` the document when it still opens; `measured` what
+/// kaya read. ANDROID ONLY: a rename cannot leave a backup, so on iOS and
+/// the desktops this never arrives. Unanswered, it comes back at the next
+/// launch.
+public struct KayaLeftoverBackup: Sendable {
+    public let backup: UInt64
+    public let name: String
+    public let backupFile: KayaPickedFile
+    public let document: KayaPickedFile?
+    public let measured: String
+
+    /// Write the backup back over the document through the safe save, then
+    /// delete it. BLOCKS; safe from any thread.
+    public func restore() throws { try answer(UInt32(KAYA_BACKUP_ANSWER_RESTORE)) }
+
+    /// Delete the backup and keep the document as it is.
+    public func discard() throws { try answer(UInt32(KAYA_BACKUP_ANSWER_DISCARD)) }
+
+    func answer(_ answer: UInt32) throws {
+        let rc = kaya_answer_backup(backup, answer)
+        guard rc == 0 else {
+            throw NSError(
+                domain: "kaya", code: Int(rc),
+                userInfo: [NSLocalizedDescriptionKey:
+                    "kaya: answering the leftover backup failed (code \(rc))"])
+        }
+    }
 }
 
 /// WHAT THIS HOST CAN DO — see crates/kaya/src/app.rs for the canonical
@@ -2973,6 +3023,9 @@ public final class KayaApp {
     // a result whose id has none above (docs/tasks-s9-plan.md R1). A
     // relaunched process never called showNotification.
     private var notificationActivation: ((KayaAppTx, UInt64, KayaNotificationOutcome) throws -> Void)?
+    /// PROCESS-LEVEL like the one above: a leftover backup arrives before
+    /// the app could have asked for anything (RD15 B).
+    private var backupLeft: ((KayaAppTx, KayaLeftoverBackup) throws -> Void)?
     // NOT one-shot either: a route declared by link answers every URL
     // that matches it, for the life of the process
     // (docs/app-links-plan.md §4), and the core owns the pattern table —
@@ -3872,6 +3925,37 @@ public final class KayaApp {
         notificationActivation = handler
     }
 
+    /// Register the PROCESS-LEVEL leftover-backup handler
+    /// (docs/rich-document-plan.md RD15 B): it receives each backup a safe
+    /// save left that this launch could not prove redundant, and answers
+    /// `restore()` or `discard()` (both block, so off the app thread), or
+    /// nothing, which keeps it for the next launch. Register it before the
+    /// first build. ANDROID ONLY: a rename cannot leave a backup, so on iOS
+    /// and the desktops it never fires.
+    func onBackupLeft(_ handler: @escaping (KayaAppTx, KayaLeftoverBackup) throws -> Void) {
+        backupLeft = handler
+    }
+
+    /// The backup_left arm: the handler, or the announced drop.
+    func backupLeftArrived(_ id: UInt64, _ tail: [KayaValue]) {
+        guard tail.count == 4, case .i64(let file) = tail[0], case .i64(let document) = tail[1],
+            case .str(let name) = tail[2], case .str(let measured) = tail[3]
+        else { return }
+        let left = KayaLeftoverBackup(
+            backup: id, name: name,
+            backupFile: KayaPickedFile(handle: UInt64(bitPattern: file), name: name, localPath: ""),
+            document: document == 0
+                ? nil : KayaPickedFile(handle: UInt64(bitPattern: document), name: name, localPath: ""),
+            measured: measured)
+        if let handler = backupLeft {
+            dispatch { try build { tx in try handler(tx, left) } }
+        } else {
+            FileHandle.standardError.write(Data((
+                "kaya: a save of \(name) did not finish and left a backup, and no handler "
+                + "is registered (KayaApp.onBackupLeft); it stays for the next launch\n").utf8))
+        }
+    }
+
     /// Declare a link ROUTE and the handler that answers it
     /// (docs/app-links-plan.md §4): `link("task/{key}", f)` matches
     /// `<scheme>://task/t1` and calls f with `["key": "t1"]`. Segments
@@ -4479,6 +4563,8 @@ public final class KayaApp {
                 notificationResult(id, choice)
             case (UInt16(KAYA_OCCURRENCE_NOTIFICATION_REPLIED), _):
                 notificationAnswer(id, .replied(text ?? ""))
+            case (UInt16(KAYA_OCCURRENCE_BACKUP_LEFT), _):
+                backupLeftArrived(id, tail)
             case (UInt16(KAYA_OCCURRENCE_CLIPBOARD_RESULT), _):
                 clipboardResult(id, kayaRepresentation(clip))
             // A paste rides a click tag verbatim: one record kind, the

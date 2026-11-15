@@ -1703,6 +1703,9 @@ sealed record NotificationAnswered(ulong Id, List<object> Keys, NotificationOutc
 sealed record FilesPicked(ulong Id, List<object> Keys, List<PickedFile> Files)
     : Occurrence(Id, Keys);
 
+sealed record BackupLeft(ulong Id, List<object> Keys, LeftoverBackup Left)
+    : Occurrence(Id, Keys);
+
 sealed record ClipboardRead(ulong Id, List<object> Keys, Representation? Clip)
     : Occurrence(Id, Keys);
 
@@ -2157,6 +2160,18 @@ sealed class KayaApp
         if (fullscreenChanged.TryGetValue(window, out var fn)) Dispatch(tx => fn(tx, on));
     }
 
+    /// The backup_left arm: the process-level handler, or the announced
+    /// drop, and the backup stays for the next launch.
+    internal void BackupLeftArrived(LeftoverBackup left)
+    {
+        if (backupLeft is { } handler)
+            Dispatch(tx => handler(tx, left));
+        else
+            Console.Error.WriteLine(
+                $"kaya: a save of {left.Name} did not finish and left a backup, and no "
+                + "handler is registered (App.OnBackupLeft); it stays for the next launch");
+    }
+
     internal void NotificationResult(ulong id, NotificationOutcome outcome)
     {
         if (notifications.Remove(id, out var fn))
@@ -2380,6 +2395,7 @@ sealed class KayaApp
     // a result whose id has none above (docs/tasks-s9-plan.md R1). A
     // relaunched process never called ShowNotification.
     internal Action<Tx, ulong, NotificationOutcome>? notificationActivation;
+    internal Action<Tx, LeftoverBackup>? backupLeft;
     // NOT one-shot either: a route declared by Link answers every URL
     // that matches it, for the life of the process
     // (docs/app-links-plan.md §4), and the core owns the pattern table —
@@ -2868,6 +2884,15 @@ sealed class KayaApp
     /// handler for the same id still wins.</summary>
     public void OnNotificationActivation(Action<Tx, ulong, NotificationOutcome> handler) =>
         notificationActivation = handler;
+
+    /// <summary>Register the PROCESS-LEVEL leftover-backup handler
+    /// (docs/rich-document-plan.md RD15 B): it receives each backup a safe
+    /// save left that this launch could not prove redundant, and answers
+    /// Restore() or Discard() (both block, so off the app thread), or
+    /// nothing, which keeps it for the next launch. Register it before the
+    /// first build. ANDROID ONLY: a rename cannot leave a backup, so on iOS
+    /// and the desktops it never fires.</summary>
+    public void OnBackupLeft(Action<Tx, LeftoverBackup> handler) => backupLeft = handler;
 
     /// <summary>Declare a link ROUTE and the handler that answers it
     /// (docs/app-links-plan.md §4): Link("task/{key}", f) matches
@@ -4062,6 +4087,16 @@ sealed class KayaApp
             // capture rides as the payload.
             case KayaWire.OccKindCaptureOverrun:
                 return new CaptureOverran(payload is ulong capture ? capture : 0, keys, id);
+            case KayaWire.OccKindBackupLeft:
+            {
+                var tail = FlatTail("backup_left", payload as List<object>, 4);
+                string name = tail[2] as string ?? "";
+                ulong document = (ulong)Int(tail[1]);
+                return new BackupLeft(id, keys, new LeftoverBackup(id, name,
+                    new PickedFile((ulong)Int(tail[0]), name, null),
+                    document == 0 ? null : new PickedFile(document, name, null),
+                    tail[3] as string ?? ""));
+            }
             case KayaWire.OccKindVoiceChanged:
             {
                 var tail = FlatTail("voice_changed", payload as List<object>, 2);
@@ -4428,6 +4463,9 @@ sealed class KayaApp
                     break;
                 case NotificationAnswered notified:
                     NotificationResult(notified.Id, notified.Outcome);
+                    break;
+                case BackupLeft left:
+                    BackupLeftArrived(left.Left);
                     break;
                 // One-shot like the alert, and the id retires with it.
                 // EMPTY IS CANCEL, for a save dialog too (it reaches the

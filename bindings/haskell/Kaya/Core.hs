@@ -116,6 +116,7 @@ module Kaya.Core
     Selection (..),
     Representation (..),
     PickedFile (..),
+    LeftoverBackup (..),
     FontFace (..),
     FontChoice (..),
     Op (..),
@@ -411,6 +412,21 @@ data PickedFile = PickedFile
     -- | A 'FilePath' and not 'Text': this is what @openFile@,
     -- @removeFile@ and @(\<\/\>)@ take.
     localPath :: !FilePath
+  }
+
+-- | A backup a safe save left that this launch could not prove redundant
+-- (docs\/rich-document-plan.md §4.1, RD15 B), handed to 'onBackupLeft'
+-- before anything else. 'backupFile' is the backup, readable and never
+-- writable; 'document' the document when it still opens; 'measured' what
+-- kaya read. ANDROID ONLY: a rename cannot leave a backup, so on iOS and
+-- the desktops this never arrives. Unanswered, it comes back at the next
+-- launch.
+data LeftoverBackup = LeftoverBackup
+  { backup :: !Word64,
+    backupName :: !Text,
+    backupFile :: !PickedFile,
+    document :: !(Maybe PickedFile),
+    measured :: !Text
   }
 
 -- | One face of a family: the OpenType weight class (1 to 1000), the slope,
@@ -2466,6 +2482,9 @@ data App = App
     -- a result whose id has none above (docs/tasks-s9-plan.md R1). A
     -- relaunched process never called showNotification.
     appNotificationActivation :: IORef (Maybe (Word64 -> NotificationOutcome -> IO ())),
+    -- PROCESS-LEVEL like the one above: a leftover backup arrives before
+    -- the app could have asked for anything (RD15 B).
+    appBackupLeft :: IORef (Maybe (LeftoverBackup -> IO ())),
     -- NOT one-shot either: a route declared by 'linkRoute' answers every
     -- URL that matches it, for the life of the process
     -- (docs/app-links-plan.md §4), and the core owns the pattern table —

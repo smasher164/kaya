@@ -2,7 +2,7 @@
 
 Status: RULED 2026-11-11; the build began 2026-11-11 and §11 records it. RD9 RULED A and the safe save
 through a picked file (§4.1) RULED; every other ruling (RD1-RD8, RD10, RD11,
-RD13-RD16) RULED as recommended; RD17 RULED A and RD18 RULED B on
+RD13-RD16) RULED as recommended, the safe save (§4.1) BUILT 2026-11-14; RD17 RULED A and RD18 RULED B on
 2026-11-12 ("I like all the recommendations except rd12") and BUILT the same
 day, RD18 on GTK and Compose; RD19 (the Mac, iOS and WinUI half of RD18) and
 RD20 (a Document kept in a model field) RULED A and B respectively on 2026-11-12 and BUILT
@@ -572,7 +572,7 @@ lanes for the task manager, phones included (docs/tasks-s4-plan.md §2 item
 not change that, since the app owns its library (the rich-text plan §5's
 rule that no CRDT or store appears in kaya's API).
 
-### §4.1 Safe save through a picked file (RULED 2026-11-11)
+### §4.1 Safe save through a picked file (RULED 2026-11-11, BUILT 2026-11-14)
 
 The maintainer, 2026-11-11: "i think your suggestions are fine as well as
 the idea to look into the truncation bug". The suggestions were these: a
@@ -580,8 +580,8 @@ safe save through a picked file is kaya's job, because a guest holds only a
 raw handle; on Android, back up, overwrite, verify, delete the backup, and
 restore or offer a leftover backup at the next launch; on iOS, Apple's
 coordinated safe save; on the desktops, the guest's own temporary file and
-rename, with nothing from kaya. Nothing here is built; it waits for the rich
-document rulings and its own slice. RD14 to RD16 hold what is still open.
+rename, with nothing from kaya. BUILT 2026-11-14 with RD14 A, RD15 B and
+RD16 A, as recommended; "What the build settled" below records the rest.
 
 **The problem, from zero.** A SAFE SAVE is a save that, if the app crashes
 or the power goes halfway through, leaves either the old document or the new
@@ -709,6 +709,47 @@ into):
   delete, the iOS arm inside `coordinate(writingItemAt:options:
   .forReplacing)`, the Android arm's persistable grant taken before the copy.
 - check-sugar-surface's row for the save in all nine bindings.
+
+**What the build settled (2026-11-14).** Code: crates/kaya/src/safesave.rs
+(the desktops' rename, Android's five steps over a `Document` the unit test
+fakes, the next launch's sweep and the answer), `PickedSource::save` on every
+source, the iOS arm `kaya_swiftui_save_picked` in swift/KayaSwiftUI.swift,
+and dev.kaya.KayaSafeSave for the ContentResolver half.
+
+- The C floor is two calls: `kaya_save_picked(handle, bytes, len)` and
+  `kaya_answer_backup(backup, answer)` with the spec enum `backup_answer`
+  (restore, discard), both blocking, safe from any thread, answering an
+  errno (EIO when the failure has no OS code) with the core's sentence on
+  stderr. The leftover is the spec occurrence `backup_left` (kind 72):
+  `backup`, a readable picked handle on the backup, a picked handle on the
+  document or 0, the name and what kaya measured; both handles' local_path
+  is empty. It reaches a PROCESS-LEVEL handler of
+  on_notification_activation's shape in all nine bindings
+  (`Messages::on_backup_left`, `on_backup_left`, `OnBackupLeft`,
+  `onBackupLeft`), and with none registered one sentence names the
+  registrar and the backup stays. Each binding's decode and drop sentence is
+  held by check-sugar-surface; the Python and JS checks drive the decode.
+- The sweep runs at both Android attaches before the app thread exists, and
+  its occurrences wait like an early notification (the ring for a foreign
+  guest, an early list drained into an mpsc sink first).
+- A provider that offers no persistable grant (a pasted or dropped URI)
+  does not refuse the save; the record says so, and a leftover whose
+  document stops opening is reported as one.
+- The grant kaya took is released at step 5 of a save, but NOT when the app
+  answers a leftover: the occurrence's document handle is a picked handle,
+  usable for the life of the process, and in a relaunched process that
+  grant is its only one. The answer leaves a note in
+  `kaya-safesave/grants/` and the next launch releases it, unless a backup
+  still waiting for its answer needs the grant.
+- The second act's knife is `KAYA_SAFE_SAVE_FAULT=tear` (an intent extra on
+  act one only): step 3 writes half the new bytes, fsyncs and holds, so
+  `relaunch launch` ends the process with a torn document, the one state
+  that yields an occurrence.
+- save.steps proves "no temporary file left" with the guest's own directory
+  listing, since `expect_file_dialog` only checks that names are present and
+  a dialog hides a dotfile; Android's scoped storage hides the save-as
+  destination from that listing (docs/traps.md), so the scene's three names
+  are left out and anything else is reported.
 
 ## §5. Colour (RD4, RD5, RD6)
 
@@ -875,7 +916,7 @@ byte on five lanes.
 6. Then, each its own slice: the
    highlight (RD6), the notes app over a SQLite library with Automerge
    behind it (RD9, RD10), and the safe save through a picked file (§4.1,
-   RD14 to RD16).
+   RD14 to RD16; DONE 2026-11-14).
 
 Every guard this plan's build needs is named where it is built: the
 corroboration wall (`expect_runs` fails when an arm's own runs disagree with

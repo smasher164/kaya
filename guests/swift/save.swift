@@ -57,6 +57,26 @@ KayaApp.run { app in
         }
     }
 
+    /// What else the directory holds, as Foundation lists it: a temporary file
+    /// the save left would show here. The scene's three names are left out
+    /// (Android's scoped storage hides `final`, which the provider made, from
+    /// an app's listing), and so is the mac panel's `.DS_Store`.
+    @Sendable func strays() -> String {
+        let listed = (try? FileManager.default.contentsOfDirectory(atPath: saveDir)) ?? []
+        let names = listed.filter { !["decoy", "draft", "final", ".DS_Store"].contains($0) }.sorted()
+        return names.isEmpty ? "nothing else in the folder" : "also " + names.joined(separator: " ")
+    }
+
+    /// The safe save (docs/rich-document-plan.md §4.1), read back.
+    @Sendable func safeSave(_ file: KayaPickedFile, _ text: String) -> String {
+        do {
+            try file.save(Data(text.utf8))
+        } catch {
+            return "safe save failed: \(error)"
+        }
+        return "safe saved \(readBack(file)); \(strays())"
+    }
+
     app.build { tx in
         tx.window(title: "save")
         let status = tx.signal(.str("no file"))
@@ -117,6 +137,22 @@ KayaApp.run { app in
                     return
                 }
                 work { "reopened \(readBack(first)) \(readBack(second))" }
+            }
+            tx.button("safe save") { tx in
+                // LONGER over the source's "second draft".
+                guard let file = source else {
+                    tx.write(status, .str("nothing open to save"))
+                    return
+                }
+                work { safeSave(file, "the fourth draft, the longest of them") }
+            }
+            tx.button("safe save as") { tx in
+                // SHORTER over the destination's "third draft".
+                guard let file = destination else {
+                    tx.write(status, .str("nothing to reopen"))
+                    return
+                }
+                work { safeSave(file, "fifth") }
             }
             return root
         }

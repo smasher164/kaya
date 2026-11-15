@@ -168,6 +168,8 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("openPicked", open_picked),
         ("pickedRead", picked_read),
         ("pickedWrite", picked_write),
+        ("savePicked", save_picked),
+        ("answerBackup", answer_backup),
         // The formatter door and the catalog (docs/compliance-plan.md §3;
         // bindings/js/kaya/runtime.ts's Floor spells the shapes).
         ("fmtDate", fmt_date),
@@ -956,6 +958,31 @@ unsafe extern "C" fn picked_write(env: Env, info: CbInfo) -> Value {
     };
     if let Err(e) = std::io::Write::write_all(&mut file, bytes).and_then(|()| std::io::Write::flush(&mut file)) {
         return unsafe { throw(env, &format!("kaya: writing the picked file failed: {e}")) };
+    }
+    unsafe { undefined(env) }
+}
+
+/// The safe save (docs/rich-document-plan.md §4.1): a throw naming the
+/// code when the document kept its old contents.
+unsafe extern "C" fn save_picked(env: Env, info: CbInfo) -> Value {
+    let [h, b] = unsafe { args::<2>(env, info) };
+    let handle = try_or_throw!(env, unsafe { u64_arg(env, h, "savePicked handle") });
+    let bytes = try_or_throw!(env, unsafe { bytes_arg(env, b, "savePicked bytes") });
+    let rc = capi::kaya_save_picked(handle, bytes.as_ptr(), bytes.len());
+    if rc != 0 {
+        return unsafe { throw(env, &format!("kaya: saving the picked file failed (code {rc})")) };
+    }
+    unsafe { undefined(env) }
+}
+
+/// kaya_answer_backup: restore or discard one leftover backup.
+unsafe extern "C" fn answer_backup(env: Env, info: CbInfo) -> Value {
+    let [b, a] = unsafe { args::<2>(env, info) };
+    let backup = try_or_throw!(env, unsafe { u64_arg(env, b, "answerBackup backup") });
+    let answer = try_or_throw!(env, unsafe { u64_arg(env, a, "answerBackup answer") });
+    let rc = capi::kaya_answer_backup(backup, answer as u32);
+    if rc != 0 {
+        return unsafe { throw(env, &format!("kaya: answering the leftover backup failed (code {rc})")) };
     }
     unsafe { undefined(env) }
 }

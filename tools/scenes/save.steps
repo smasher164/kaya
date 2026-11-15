@@ -66,6 +66,15 @@ expect label#0 "saved third draft"
 click button#3
 expect label#0 "reopened second draft third draft"
 
+# THE SAFE SAVE (docs/rich-document-plan.md §4.1): LONGER over the source,
+# then SHORTER over the destination, each read back, and what else the
+# directory holds as the guest's own file API lists it, so a temporary file
+# the save left fails here (check-steps holds the lengths).
+click button#4
+expect label#0 "safe saved the fourth draft, the longest of them; nothing else in the folder"
+click button#5
+expect label#0 "safe saved fifth; nothing else in the folder"
+
 # One REAL-TREE read at the end: everything above reads kaya's own model
 # and would pass for an arm that ran and drew nothing.
-expect_ax label#0 "label/reopened second draft third draft"
+expect_ax label#0 "label/safe saved fifth; nothing else in the folder"

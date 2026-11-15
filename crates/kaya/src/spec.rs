@@ -4710,6 +4710,32 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   harness's in-process engine; `failed` not playing. \
                   `detail` is what the backend measured, as a Str.",
         },
+        Record {
+            kind: 72,
+            name: "backup_left",
+            fields: &[
+                f("backup", FieldTy::U64),
+                f("backup_file", FieldTy::U64),
+                f("document", FieldTy::U64),
+                f("name", FieldTy::Value),
+                f("measured", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "A safe save that did not finish left a backup this launch \
+                  could not prove redundant (docs/rich-document-plan.md §4.1, \
+                  RD15 B), delivered before the app reads anything else, one \
+                  per backup. `backup` is the id kaya_answer_backup takes; \
+                  `backup_file` a picked handle on the backup, readable and \
+                  never writable; `document` a picked handle on the document \
+                  when it still opens, 0 when it does not; both handles' \
+                  local_path is empty. `name` is the document's display name \
+                  and `measured` what kaya read (\"holds neither ...\", or \
+                  \"does not open ...\"), each a Str. The app answers restore \
+                  or discard (BACKUP_ANSWER), or nothing, and a backup nobody \
+                  answered is delivered again at the next launch. ANDROID \
+                  ONLY: a rename cannot leave a backup, so on iOS and the \
+                  desktops this never fires.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -5034,6 +5060,12 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             // docs/tasks-s3-plan.md N1: activated or refused, nothing else.
             name: "notification_outcome",
             variants: &[("activated", 0), ("refused", 1), ("replied", 2)],
+        },
+        EnumSpec {
+            // kaya_answer_backup's answer to a backup_left
+            // (docs/rich-document-plan.md RD15 B).
+            name: "backup_answer",
+            variants: &[("restore", 0), ("discard", 1)],
         },
         EnumSpec {
             // docs/toast-plan.md T6: named, the platform's own seconds.
@@ -5836,6 +5868,7 @@ mod tests {
                 ("font_dialog_result", crate::ring::REC_FONT_DIALOG_RESULT),
                 ("font_faces", crate::ring::REC_FONT_FACES),
                 ("voice_changed", crate::ring::REC_VOICE_CHANGED),
+                ("backup_left", crate::ring::REC_BACKUP_LEFT),
             ]
         );
     }
@@ -6269,6 +6302,8 @@ mod tests {
                     ("notification_outcome", "activated") => wire::NOTIFICATION_OUTCOME_ACTIVATED,
                     ("notification_outcome", "refused") => wire::NOTIFICATION_OUTCOME_REFUSED,
                     ("notification_outcome", "replied") => wire::NOTIFICATION_OUTCOME_REPLIED,
+                    ("backup_answer", "restore") => wire::BACKUP_ANSWER_RESTORE,
+                    ("backup_answer", "discard") => wire::BACKUP_ANSWER_DISCARD,
                     ("toast_duration", "short") => wire::TOAST_DURATION_SHORT,
                     ("toast_duration", "long") => wire::TOAST_DURATION_LONG,
                     ("toast_action", "none") => wire::TOAST_ACTION_NONE,

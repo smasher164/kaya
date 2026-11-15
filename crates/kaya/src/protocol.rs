@@ -631,6 +631,11 @@ pub struct FileDialogId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PickedId(pub u64);
 
+/// One backup a safe save left (docs/rich-document-plan.md §4.1), named
+/// for [`crate::LeftoverBackup`]'s answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BackupId(pub u64);
+
 /// What a handle is opened for. Writability is DISCOVERABLE on every
 /// platform and REQUESTABLE on none, so the open is fallible in ways
 /// the pick is not.
@@ -685,6 +690,59 @@ impl PickedFile {
             seekable: seekable != 0,
         })
     }
+
+    /// THE SAFE SAVE (docs/rich-document-plan.md §4.1): on success the
+    /// document holds exactly `bytes`, on failure its old contents. BLOCKS
+    /// like [`PickedFile::open`] and is safe from any thread. On Android
+    /// only, a crash inside the save can leave a backup, which the next
+    /// launch hands to [`crate::Messages::on_backup_left`]; a rename
+    /// cannot leave one, so on iOS and the desktops that never fires.
+    pub fn save(&self, bytes: &[u8]) -> std::io::Result<()> {
+        let rc = crate::capi::kaya_save_picked(self.handle.0, bytes.as_ptr(), bytes.len());
+        if rc != 0 {
+            return Err(std::io::Error::from_raw_os_error(rc));
+        }
+        Ok(())
+    }
+}
+
+/// A backup a safe save left behind that the next launch could not prove
+/// redundant (docs/rich-document-plan.md §4.1, RD15 B), handed to
+/// [`crate::Messages::on_backup_left`] before the app reads anything else.
+/// ANDROID ONLY: a rename cannot leave a backup, so on iOS and the desktops
+/// this never arrives. A backup nobody answers comes back at the next launch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LeftoverBackup {
+    pub backup: BackupId,
+    /// The document's display name.
+    pub name: String,
+    /// The backup itself: readable, never writable.
+    pub backup_file: PickedFile,
+    /// The document, when it still opens.
+    pub document: Option<PickedFile>,
+    /// What kaya read: "holds neither ..." or "does not open ...".
+    pub measured: String,
+}
+
+impl LeftoverBackup {
+    /// Write the backup back over the document through the safe save, then
+    /// delete it. Blocking; safe from any thread.
+    pub fn restore(&self) -> std::io::Result<()> {
+        self.answer(crate::wire::BACKUP_ANSWER_RESTORE)
+    }
+
+    /// Delete the backup and keep the document as it is.
+    pub fn discard(&self) -> std::io::Result<()> {
+        self.answer(crate::wire::BACKUP_ANSWER_DISCARD)
+    }
+
+    fn answer(&self, answer: u32) -> std::io::Result<()> {
+        let rc = crate::capi::kaya_answer_backup(self.backup.0, answer);
+        if rc != 0 {
+            return Err(std::io::Error::from_raw_os_error(rc));
+        }
+        Ok(())
+    }
 }
 
 /// What the backend registers for each picked file; the core stores
@@ -701,6 +759,9 @@ pub trait PickedSource: Send + Sync {
     /// valid only inside the CRT that minted it, and Python, Go and the
     /// JVM each bring their own (docs/traps.md).
     fn open(&self, mode: FileMode) -> std::io::Result<(i64, bool)>;
+    /// THE SAFE SAVE (docs/rich-document-plan.md §4.1): the whole new
+    /// contents, or the old ones on failure. Blocks, on the calling thread.
+    fn save(&self, bytes: &[u8]) -> std::io::Result<()>;
     fn name(&self) -> &str;
     /// Empty unless re-opening this name actually works.
     fn local_path(&self) -> &str;
@@ -794,6 +855,10 @@ impl PickedSource for PathSource {
         Ok((raw_handle(file), seekable))
     }
 
+    fn save(&self, bytes: &[u8]) -> std::io::Result<()> {
+        crate::safesave::replace_path(std::path::Path::new(&self.path), bytes)
+    }
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -831,6 +896,11 @@ impl PickedSource for SaveDestination {
         let file = opts.open(&self.path)?;
         let seekable = file.metadata().map(|m| m.is_file()).unwrap_or(false);
         Ok((raw_handle(file), seekable))
+    }
+
+    /// The rename creates a destination nobody has made (save-plan D1).
+    fn save(&self, bytes: &[u8]) -> std::io::Result<()> {
+        crate::safesave::replace_path(std::path::Path::new(&self.path), bytes)
     }
 
     fn name(&self) -> &str {
@@ -1303,6 +1373,14 @@ pub enum Occurrence {
     FileDialogResult {
         dialog: FileDialogId,
         files: Vec<PickedFile>,
+    },
+    /// A backup the next launch could not prove redundant (Android only).
+    BackupLeft {
+        backup: BackupId,
+        name: String,
+        backup_file: PickedId,
+        document: Option<PickedId>,
+        measured: String,
     },
     /// The alert's one answer; the dialog is already gone when this
     /// fires, and the alert id retired with it.
@@ -3592,6 +3670,10 @@ impl OccSink {
                 Occurrence::FileDialogResult { dialog, files } => {
                     let body = crate::wire::file_dialog_result_body(dialog, &files);
                     ring.push_record(crate::ring::REC_FILE_DIALOG_RESULT, &body);
+                }
+                Occurrence::BackupLeft { backup, name, backup_file, document, measured } => {
+                    let body = crate::wire::backup_left_body(backup, backup_file, document, &name, &measured);
+                    ring.push_record(crate::ring::REC_BACKUP_LEFT, &body);
                 }
                 Occurrence::ClipboardResult { request, clip } => {
                     let body = crate::wire::clipboard_result_body(request, clip.as_ref());

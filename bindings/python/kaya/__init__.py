@@ -2831,6 +2831,17 @@ def on_notification_activation(
     _app._notification_activation = f
 
 
+def on_backup_left(f: Callable[[LeftoverBackup], object]) -> None:
+    """Register the PROCESS-LEVEL leftover-backup handler
+    (docs/rich-document-plan.md RD15 B): f(backup) receives each backup a
+    safe save left that this launch could not prove redundant, and answers
+    backup.restore() or backup.discard(), or nothing, which keeps it for
+    the next launch. Register it before the first build. ANDROID ONLY: a
+    rename cannot leave a backup, so on iOS and the desktops it never
+    fires."""
+    _app._backup_left = f
+
+
 def link(pattern: str, f: Callable[[dict[str, str]], object]) -> None:
     """Declare a link ROUTE and the handler that answers it
     (docs/app-links-plan.md §4): `kaya.link("task/{key}", f)` matches
@@ -2966,8 +2977,49 @@ class PickedFile:
         """
         return runtime.open_picked(self.handle, _file_mode_value(mode))
 
+    def save(self, data: bytes) -> None:
+        """THE SAFE SAVE (docs/rich-document-plan.md §4.1): on return the
+        document holds exactly `data`; if this raises OSError it holds its
+        old contents. BLOCKS like open() and is safe from any thread. On
+        Android only, a crash inside the save can leave a backup that the
+        next launch hands to on_backup_left; a rename cannot leave one, so
+        on iOS and the desktops that never fires."""
+        runtime.save_picked(self.handle, data)
+
     def __repr__(self) -> str:
         return f"PickedFile(name={self.name!r}, local_path={self.local_path!r})"
+
+
+class LeftoverBackup:
+    """A backup a safe save left that this launch could not prove redundant
+    (docs/rich-document-plan.md §4.1, RD15 B), handed to on_backup_left
+    before anything else. `backup_file` is the backup, readable and never
+    writable; `document` the document when it still opens, else None;
+    `measured` what kaya read. ANDROID ONLY: a rename cannot leave a backup,
+    so on iOS and the desktops this never arrives. Unanswered, it comes
+    back at the next launch."""
+
+    __slots__ = ("backup", "name", "backup_file", "document", "measured")
+
+    def __init__(self, backup: int, name: str, backup_file: PickedFile,
+                 document: PickedFile | None, measured: str) -> None:
+        self.backup: int = backup
+        self.name: str = name
+        self.backup_file: PickedFile = backup_file
+        self.document: PickedFile | None = document
+        self.measured: str = measured
+
+    def restore(self) -> None:
+        """Write the backup back over the document through the safe save,
+        then delete it. BLOCKS; safe from any thread."""
+        runtime.answer_backup(self.backup, wire.BACKUP_ANSWER_RESTORE)
+
+    def discard(self) -> None:
+        """Delete the backup and keep the document as it is."""
+        runtime.answer_backup(self.backup, wire.BACKUP_ANSWER_DISCARD)
+
+    def __repr__(self) -> str:
+        return f"LeftoverBackup(name={self.name!r}, measured={self.measured!r})"
 
 
 class Swipe(enum.IntEnum):
@@ -8685,6 +8737,9 @@ class App:
         # R1). A relaunched process never called show.
         self._notification_activation: Callable[
             [int, NotificationOutcome | NotificationReply], object] | None = None
+        # PROCESS-LEVEL like the one above: a leftover backup arrives
+        # before the app could have asked for anything (RD15 B).
+        self._backup_left: Callable[[LeftoverBackup], object] | None = None
         # NOT one-shot either: a route declared by link() answers every
         # URL that matches it, for the life of the process
         # (docs/app-links-plan.md §4), and the core owns the pattern
@@ -9527,6 +9582,24 @@ class App:
                     "(kaya.on_notification_activation)",
                     file=sys.stderr,
                 )
+                continue
+            if kind == wire.OCC_BACKUP_LEFT:
+                # ident is the backup; the tail is backup_file, document
+                # (0 for none), name, measured.
+                backup_file, document, name, measured = payload
+                left = LeftoverBackup(
+                    ident, str(name), PickedFile(backup_file, str(name), None),
+                    PickedFile(document, str(name), None) if document else None,
+                    str(measured))
+                if self._backup_left is not None:
+                    self._dispatch(self._backup_left, left)
+                else:
+                    print(
+                        f"kaya: a save of {name} did not finish and left a "
+                        "backup, and no handler is registered "
+                        "(kaya.on_backup_left); it stays for the next launch",
+                        file=sys.stderr,
+                    )
                 continue
             if kind == wire.OCC_FILE_DIALOG_RESULT:
                 # One-shot. payload is the decoder's list of (handle,

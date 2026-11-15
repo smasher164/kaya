@@ -4012,6 +4012,10 @@ unpicked.
   rather than hypothetical. What this is NOT, both refused on their own
   reasons in the same §3: a filesystem API for guests, and a directory
   picker.
+  NOT CLOSED BY THE SAFE SAVE (2026-11-14): Android's arm takes a
+  persistable grant for its own crash path, and a leftover backup's
+  document handle reaches the relaunched process through it
+  (docs/rich-document-plan.md §4.1), but no app can ask for one.
   KEY: bookmark, persistence, security-scoped, persistable URI, recent
   files, reopen across restarts
 

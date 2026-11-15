@@ -3640,6 +3640,66 @@ check("an unclaimed notification_result announces the drop, naming the id",
           "was bound at the show and no process-level handler is registered "
           "(kaya.on_notification_activation)"))
 
+# --- THE LEFTOVER BACKUP (docs/rich-document-plan.md RD15 B) ----------
+# Only Android's second act delivers one, and that lane runs the Rust
+# guest, so this binding's decode and its drop are read here: the
+# process-level handler hears the backup with both handles and what kaya
+# measured, a document that does not open arrives as None, and with no
+# handler the drop is one sentence and nothing else.
+def _str_value(text):
+    raw = text.encode()
+    return (struct.pack("<II", kaya.wire.VALUE_STR, len(raw)) + raw
+            + b"\0" * (-len(raw) % 8))
+
+
+def _packed_backup_left(backup, file, document, name, measured):
+    body = (struct.pack("<QQQ", backup, file, document) + _str_value(name)
+            + _str_value(measured))
+    return struct.pack("<IHH", 8 + len(body), kaya.wire.OCC_BACKUP_LEFT, 0) + body
+
+
+app_left = kaya.App()
+left_seen = []
+kaya.on_backup_left(lambda b: left_seen.append(b))
+with app_left.window():
+    kaya.column()
+_left_occs = [
+    kaya.wire.parse_occurrence(_packed_backup_left(3, 41, 42, "draft", "holds neither")),
+    kaya.wire.parse_occurrence(_packed_backup_left(4, 43, 0, "gone", "does not open")),
+]
+kaya.runtime.next_occurrence = (
+    lambda: _left_occs.pop(0) if _left_occs else None)
+try:
+    app_left._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = _real_next_n
+check("a backup_left reaches the process-level handler with both handles",
+      len(left_seen) == 2 and left_seen[0].backup == 3
+      and left_seen[0].name == "draft" and left_seen[0].backup_file.handle == 41
+      and left_seen[0].document is not None and left_seen[0].document.handle == 42
+      and left_seen[0].measured == "holds neither")
+check("a backup_left whose document does not open carries None",
+      len(left_seen) == 2 and left_seen[1].document is None)
+
+app_left_dropped = kaya.App()
+with app_left_dropped.window():
+    kaya.column()
+_dropped_left = [kaya.wire.parse_occurrence(_packed_backup_left(5, 44, 45, "draft", "x"))]
+kaya.runtime.next_occurrence = (
+    lambda: _dropped_left.pop(0) if _dropped_left else None)
+_said = io.StringIO()
+sys.stderr = _said
+try:
+    app_left_dropped._dispatch_loop()
+finally:
+    sys.stderr = _real_stderr
+    kaya.runtime.next_occurrence = _real_next_n
+check("an unclaimed backup_left announces the drop, naming the document",
+      _said.getvalue().strip() == (
+          "kaya: a save of draft did not finish and left a backup, and no "
+          "handler is registered (kaya.on_backup_left); it stays for the "
+          "next launch"))
+
 # --- APP LINKS (docs/app-links-plan.md §4) ---------------------------
 # A ROUTE is declared with link(pattern, handler); the CORE matches a URL
 # once and hands back the route id with the captures. Four things no lane

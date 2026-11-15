@@ -5,10 +5,12 @@
 import Control.Concurrent (forkIO)
 import Control.Exception (SomeException, try)
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.List (sort)
 import qualified Data.Text as T
 import Data.Text (Text)
+import qualified Data.Text.Encoding as TE
 import KayaApp
-import System.Directory (createDirectoryIfMissing, getTemporaryDirectory)
+import System.Directory (createDirectoryIfMissing, getTemporaryDirectory, listDirectory)
 import System.FilePath ((</>))
 import System.IO (hClose, hGetContents', hPutStr)
 import System.Posix.Process (getProcessID)
@@ -40,6 +42,29 @@ writeBack file text = do
       case wrote of
         Left e -> return ("write failed: " <> tshow (e :: SomeException))
         Right () -> readBack file
+
+-- | What else the directory holds, as GHC lists it: a temporary file the
+-- save left would show here. The scene's three names are left out
+-- (Android's scoped storage hides @final@, which the provider made, from an
+-- app's listing), and so is the mac panel's @.DS_Store@.
+strays :: FilePath -> IO Text
+strays dir = do
+  names <- sort . filter (`notElem` ["decoy", "draft", "final", ".DS_Store"]) <$> listDirectory dir
+  return $
+    if null names
+      then "nothing else in the folder"
+      else "also " <> T.pack (unwords names)
+
+-- | The safe save (docs/rich-document-plan.md §4.1), read back.
+safeSave :: FilePath -> PickedFile -> Text -> IO Text
+safeSave dir file text = do
+  saved <- try (savePicked file (TE.encodeUtf8 text))
+  case saved of
+    Left e -> return ("safe save failed: " <> tshow (e :: SomeException))
+    Right () -> do
+      back <- readBack file
+      rest <- strays dir
+      return ("safe saved " <> back <> "; " <> rest)
 
 -- | The handle a step holds, or Nothing when the dialog never answered. The
 -- caller writes its OWN sentence — never an error, which masks the real
@@ -113,6 +138,26 @@ main = kayaMain $ \app -> do
                     two <- readBack two'
                     return ("reopened " <> one <> " " <> two)
                   _ -> buildTx app (writeSignal status "nothing to reopen")
+            )
+            [],
+          -- LONGER over the source's "second draft".
+          buttonOn -- button#4
+            "safe save"
+            ( do
+                file <- held sourceRef
+                case file of
+                  Nothing -> buildTx app (writeSignal status "nothing open to save")
+                  Just f -> work (safeSave dir f "the fourth draft, the longest of them")
+            )
+            [],
+          -- SHORTER over the destination's "third draft".
+          buttonOn -- button#5
+            "safe save as"
+            ( do
+                file <- held destRef
+                case file of
+                  Nothing -> buildTx app (writeSignal status "nothing to reopen")
+                  Just f -> work (safeSave dir f "fifth")
             )
             []
         ]

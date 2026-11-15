@@ -1481,6 +1481,45 @@ if (isMainThread) {
   check("each window's fullscreen_changed reaches its own handler, persistently", JSON.stringify(screens) === JSON.stringify([[0, false], [1950, true], [0, true]]));
   check("an unclaimed notification_result announces the drop, naming the id", droppedSaid.trim() === "kaya: notification 41 outcome refused reached no handler — none was bound at the show and no process-level handler is registered (kaya.onNotificationActivation)");
 
+  // THE LEFTOVER BACKUP (docs/rich-document-plan.md RD15 B). Only Android's
+  // second act delivers one, and that lane runs the Rust guest, so this
+  // binding's decode and its drop are read here: the process-level handler
+  // hears both handles and what kaya measured, a document that does not
+  // open arrives as null, and with no handler the drop is one sentence.
+  const strValue = (text: string): Uint8Array => {
+    const bytes = new TextEncoder().encode(text);
+    const b = new Uint8Array(8 + ((bytes.length + 7) & ~7));
+    const v = new DataView(b.buffer);
+    v.setUint32(0, wire.VALUE_STR, true);
+    v.setUint32(4, bytes.length, true);
+    b.set(bytes, 8);
+    return b;
+  };
+  const backupBytes = (backup: number, file: number, document: number, name: string, measured: string): Uint8Array => {
+    const n = strValue(name);
+    const m = strValue(measured);
+    const size = 32 + n.length + m.length;
+    const b = new Uint8Array(size);
+    const v = new DataView(b.buffer);
+    v.setUint32(0, size, true);
+    v.setUint16(4, wire.OCC_BACKUP_LEFT, true);
+    v.setBigUint64(8, BigInt(backup), true);
+    v.setBigUint64(16, BigInt(file), true);
+    v.setBigUint64(24, BigInt(document), true);
+    b.set(n, 32);
+    b.set(m, 32 + n.length);
+    return b;
+  };
+  const leftSeen: K.LeftoverBackup[] = [];
+  kaya.onBackupLeft((b) => leftSeen.push(b));
+  fire(wire.parse_occurrence(backupBytes(3, 41, 42, "draft", "holds neither")));
+  fire(wire.parse_occurrence(backupBytes(4, 43, 0, "gone", "does not open")));
+  check("a backup_left reaches the process-level handler with both handles", leftSeen.length === 2 && leftSeen[0]?.backup === 3 && leftSeen[0]?.name === "draft" && leftSeen[0]?.backupFile.handle === 41 && leftSeen[0]?.document?.handle === 42 && leftSeen[0]?.measured === "holds neither");
+  check("a backup_left whose document does not open carries null", leftSeen[1]?.document === null);
+  (app as unknown as { _backupLeft: unknown })._backupLeft = undefined;
+  const leftSaid = captureStderr(() => { fire(wire.parse_occurrence(backupBytes(5, 44, 45, "draft", "x"))); });
+  check("an unclaimed backup_left announces the drop, naming the document", leftSaid.trim() === "kaya: a save of draft did not finish and left a backup, and no handler is registered (kaya.onBackupLeft); it stays for the next launch");
+
   // ------------------------------------------------- app links (§4)
   // A ROUTE is declared with link(pattern, handler); the CORE matches a
   // URL once and hands back the route id with the captures. Four things

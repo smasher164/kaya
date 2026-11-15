@@ -228,6 +228,16 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
                 sig: "(JI[I)Ljava/io/FileDescriptor;".into(),
                 fn_ptr: ring_open_picked as *mut _,
             },
+            NativeMethod {
+                name: "savePicked".into(),
+                sig: "(J[B)V".into(),
+                fn_ptr: ring_save_picked as *mut _,
+            },
+            NativeMethod {
+                name: "answerBackup".into(),
+                sig: "(JI)V".into(),
+                fn_ptr: ring_answer_backup as *mut _,
+            },
         ],
     )
 }
@@ -982,6 +992,41 @@ fn register_desktop_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
 #[cfg(not(target_os = "android"))]
 extern "system" fn ring_run(_env: JNIEnv, _class: JClass) -> jint {
     crate::capi::kaya_run()
+}
+
+/// KayaRing.savePicked: the safe save, an IOException naming the code
+/// when the document kept its old contents.
+extern "system" fn ring_save_picked(
+    mut env: JNIEnv,
+    _class: JClass,
+    handle: jlong,
+    bytes: jni::objects::JByteArray,
+) {
+    let data = match env.convert_byte_array(&bytes) {
+        Ok(d) => d,
+        Err(e) => {
+            let _ = env.throw_new("java/io/IOException", format!("kaya: reading the bytes to save failed: {e}"));
+            return;
+        }
+    };
+    let rc = crate::capi::kaya_save_picked(handle as u64, data.as_ptr(), data.len());
+    if rc != 0 {
+        let _ = env.throw_new(
+            "java/io/IOException",
+            format!("kaya: saving the picked file failed (code {rc})"),
+        );
+    }
+}
+
+/// KayaRing.answerBackup: kaya_answer_backup, an IOException on failure.
+extern "system" fn ring_answer_backup(mut env: JNIEnv, _class: JClass, backup: jlong, answer: jint) {
+    let rc = crate::capi::kaya_answer_backup(backup as u64, answer as u32);
+    if rc != 0 {
+        let _ = env.throw_new(
+            "java/io/IOException",
+            format!("kaya: answering the leftover backup failed (code {rc})"),
+        );
+    }
 }
 
 /// KayaRing.openPicked: redeem a picked handle and hand Java a

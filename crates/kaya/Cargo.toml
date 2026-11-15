@@ -59,6 +59,8 @@ either = { version = "1", features = ["use_std"] }
 flate2 = { version = "1.1", features = ["zlib-rs"] }
 once_cell = { version = "1", features = ["std"] }
 serde_core = { version = "1", features = ["result"] }
+# The safe save's read-back check (docs/rich-document-plan.md RD16 A).
+sha2 = "=0.11.0"
 
 [dev-dependencies]
 # THE EXAMPLES' DEPENDENCIES, never the library's. The task manager's

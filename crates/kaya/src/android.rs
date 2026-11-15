@@ -50,6 +50,12 @@ static APP_CONTEXT: std::sync::OnceLock<jni::objects::GlobalRef> = std::sync::On
 static PREFS_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
     std::sync::OnceLock::new();
 
+/// dev.kaya.KayaSafeSave, the safe save's ContentResolver half
+/// (crates/kaya/src/safesave.rs), resolved beside KayaAssets: a save runs
+/// on a guest thread, and the next launch's sweep runs before any mount.
+static SAFESAVE_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
+    std::sync::OnceLock::new();
+
 /// dev.kaya.KayaFormat, the formatter door's arm (fmt.rs's android
 /// module), resolved beside KayaAssets for the same reason: the door is
 /// called from the APP THREAD.
@@ -147,6 +153,7 @@ pub fn attach(
     // comes from the platform: HOME is not the app's files directory and
     // only a Context knows it.
     arm_state(&mut env, &state_root);
+    sweep_safe_saves();
 
     grant_measured_capabilities(&mut env, &activity);
 
@@ -224,6 +231,7 @@ extern "system" fn Java_dev_kaya_KayaRing_attach(
     // mount's wall on the first breadth matrix, 2026-09-23).
     crate::fmt::install_locale_knob();
     arm_state(&mut env, &state_root);
+    sweep_safe_saves();
     grant_measured_capabilities(&mut env, &activity);
     register_natives(&mut env);
 }
@@ -307,6 +315,20 @@ fn remember_context(env: &mut JNIEnv, activity: &JObject) {
                 let _ = env.exception_clear();
             }
             log::warn!("kaya: dev.kaya.KayaFormat did not resolve ({e}); the formatter door will refuse");
+        }
+    }
+    match env.find_class("dev/kaya/KayaSafeSave") {
+        Ok(class) => {
+            if let Ok(global) = env.new_global_ref(&class) {
+                let _ = SAFESAVE_CLASS.set(global);
+            }
+        }
+        Err(e) => {
+            if env.exception_check().unwrap_or(false) {
+                let _ = env.exception_describe();
+                let _ = env.exception_clear();
+            }
+            log::warn!("kaya: dev.kaya.KayaSafeSave did not resolve ({e}); a picked file's save will refuse");
         }
     }
     match env.find_class("dev/kaya/KayaPrefs") {
@@ -1379,6 +1401,11 @@ impl crate::protocol::PickedSource for UriSource {
         Ok((crate::protocol::raw_handle(file), seekable))
     }
 
+    fn save(&self, bytes: &[u8]) -> std::io::Result<()> {
+        let fault = crate::safesave::fault_from_env()?;
+        crate::safesave::save_document(self, &safesave_store()?, bytes, fault)
+    }
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -1393,6 +1420,149 @@ impl crate::protocol::PickedSource for UriSource {
     fn locator(&self) -> &str {
         &self.uri
     }
+}
+
+impl UriSource {
+    fn safesave_call(
+        &self,
+        method: &str,
+        sig: &str,
+        mode: Option<&str>,
+    ) -> std::io::Result<i32> {
+        let (Some(vm), Some(class), Some(context)) =
+            (JVM.get(), SAFESAVE_CLASS.get(), APP_CONTEXT.get())
+        else {
+            return Err(std::io::Error::other(
+                "kaya: the safe save's JVM half was never resolved at attach",
+            ));
+        };
+        let mut env = vm
+            .attach_current_thread()
+            .map_err(|e| std::io::Error::other(format!("kaya: attaching to the JVM failed: {e}")))?;
+        let uri = env
+            .new_string(&self.uri)
+            .map_err(|e| std::io::Error::other(format!("kaya: the uri would not cross: {e}")))?;
+        let mode = match mode {
+            Some(m) => Some(env.new_string(m).map_err(|e| {
+                std::io::Error::other(format!("kaya: the mode would not cross: {e}"))
+            })?),
+            None => None,
+        };
+        let mut args: Vec<jni::objects::JValue> = vec![context.as_obj().into(), (&uri).into()];
+        if let Some(m) = &mode {
+            args.push(m.into());
+        }
+        let called = env.call_static_method(class, method, sig, &args);
+        if env.exception_check().unwrap_or(false) {
+            // The exception's own sentence is the only description of what
+            // the provider refused; it rides the error.
+            let thrown = env.exception_occurred().ok();
+            let _ = env.exception_clear();
+            let said = thrown
+                .and_then(|t| {
+                    env.call_method(&t, "toString", "()Ljava/lang/String;", &[])
+                        .ok()
+                        .and_then(|v| v.l().ok())
+                })
+                .and_then(|o| env.get_string(&jni::objects::JString::from(o)).ok().map(String::from))
+                .unwrap_or_else(|| "an exception nobody could read".into());
+            let _ = env.exception_clear();
+            return Err(std::io::Error::other(format!("{method} on {} threw {said}", self.uri)));
+        }
+        let value = called
+            .map_err(|e| std::io::Error::other(format!("{method} on {} failed: {e}", self.uri)))?;
+        Ok(value.i().unwrap_or(0))
+    }
+
+    fn open_mode(&self, mode: &str) -> std::io::Result<std::fs::File> {
+        let fd = self
+            .safesave_call("open", "(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;)I", Some(mode))?;
+        if fd < 0 {
+            return Err(std::io::Error::other(format!("the ContentResolver refused {} in mode {mode}", self.uri)));
+        }
+        Ok(unsafe { crate::protocol::file_from_raw(i64::from(fd)) })
+    }
+}
+
+impl crate::safesave::Document for UriSource {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn locator(&self) -> &str {
+        &self.uri
+    }
+
+    fn take_grant(&self) -> crate::safesave::Grant {
+        let sig = "(Landroid/content/Context;Ljava/lang/String;)I";
+        match self.safesave_call("takeGrant", sig, None) {
+            Ok(1) => crate::safesave::Grant::Held,
+            Ok(0) => crate::safesave::Grant::Taken,
+            Ok(_) => crate::safesave::Grant::Unavailable,
+            Err(e) => {
+                log::warn!("kaya: no persistable grant on {}: {e}", self.uri);
+                crate::safesave::Grant::Unavailable
+            }
+        }
+    }
+
+    fn release_grant(&self) {
+        let sig = "(Landroid/content/Context;Ljava/lang/String;)V";
+        if let Err(e) = self.safesave_call("releaseGrant", sig, None) {
+            log::warn!("kaya: releasing the grant on {} failed: {e}", self.uri);
+        }
+    }
+
+    fn read_all(&self) -> std::io::Result<Vec<u8>> {
+        use std::io::Read;
+        let mut file = self.open_mode("r")?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
+
+    fn open_overwrite(&self) -> std::io::Result<(std::fs::File, bool)> {
+        let file = self.open_mode(crate::protocol::android_open_mode(crate::protocol::FileMode::Write))?;
+        let seekable = file.metadata().map(|m| m.is_file()).unwrap_or(false);
+        // The truncation hardening open() carries (docs/traps.md, the
+        // provider that keeps the old tail).
+        if seekable {
+            file.set_len(0)?;
+        }
+        Ok((file, seekable))
+    }
+}
+
+/// Where the backups live: `<files dir>/kaya-safesave`.
+fn safesave_store() -> std::io::Result<std::path::PathBuf> {
+    STATE_ROOT.get().map(|r| r.join("kaya-safesave")).ok_or_else(|| {
+        std::io::Error::other("kaya: attach was handed no files directory, so a safe save has nowhere to keep its backup")
+    })
+}
+
+/// THE NEXT LAUNCH (docs/rich-document-plan.md §4.1, RD15 B): before the
+/// app thread exists, so a leftover is the first thing the app reads.
+fn sweep_safe_saves() {
+    let Ok(store) = safesave_store() else { return };
+    let found = crate::safesave::sweep(&store, &|record| {
+        Box::new(UriSource { name: record.name.clone(), uri: record.uri.clone() })
+    });
+    let mut left = Vec::new();
+    for (dir, classified) in found {
+        match classified {
+            crate::safesave::Classified::Left(l) => left.push(l),
+            other => log::info!("kaya: safe-save sweep: {} {other:?}", dir.display()),
+        }
+    }
+    crate::capi::backups_left(left);
+}
+
+/// The app's restore or discard for one leftover (capi.rs's
+/// kaya_answer_backup).
+pub(crate) fn answer_backup(left: &crate::safesave::Leftover, restore: bool) -> std::io::Result<()> {
+    let store = safesave_store()?;
+    let doc = UriSource { name: left.record.name.clone(), uri: left.record.uri.clone() };
+    crate::safesave::answer(left, restore, &doc, &store)
 }
 
 /// KayaPresent.openPickedUri: `openFileDescriptor(uri, mode)` then

@@ -152,6 +152,21 @@ end
    it actually works (DESIGN.md, File dialogs). *)
 type picked_file = { handle : int64; name : string; local_path : string }
 
+(* A backup a safe save left that this launch could not prove redundant
+   (docs/rich-document-plan.md §4.1, RD15 B), handed to [on_backup_left]
+   before anything else. [backup_file] is the backup, readable and never
+   writable; [document] the document when it still opens; [measured] what
+   kaya read. ANDROID ONLY: a rename cannot leave a backup, so on iOS and
+   the desktops this never arrives. Unanswered, it comes back at the next
+   launch. *)
+type leftover_backup = {
+  backup : int64;
+  backup_name : string;
+  backup_file : picked_file;
+  document : picked_file option;
+  measured : string;
+}
+
 (* AN ASSET — a file this app's own BUILD put where the running program
    can find it. A MISS RAISES [Failure] carrying the core's sentence;
    release is explicit ([asset_close]) and automatic (a finaliser). *)
@@ -2214,6 +2229,13 @@ val notification_result : app -> int64 -> Notification_outcome.t -> unit
 val on_notification_activation :
   app -> f:(int64 -> Notification_outcome.t -> unit) -> unit
 
+(* The PROCESS-LEVEL leftover-backup handler (docs/rich-document-plan.md
+   RD15 B): [f] answers [restore_backup] or [discard_backup] (both block,
+   so off the app thread), or nothing, which keeps it for the next launch.
+   Register it before the first build. ANDROID ONLY: a rename cannot leave
+   a backup, so on iOS and the desktops it never fires. *)
+val on_backup_left : app -> f:(leftover_backup -> unit) -> unit
+
 (* NOT one-shot either: a route declared here answers every URL that
    matches it, for the life of the process. *)
 val link_route : app -> pattern:string -> f:((string * string) list -> unit) -> unit
@@ -2284,6 +2306,20 @@ val set_reorderable : widget -> bool -> unit
    from a thread you chose and post the result back (DESIGN.md, File
    dialogs). THE DESCRIPTOR BECOMES OCAML'S. *)
 val open_picked : picked_file -> File_mode.t -> Unix.file_descr * bool
+
+(* THE SAFE SAVE (docs/rich-document-plan.md §4.1): on return the document
+   holds exactly [bytes]; if this raises [Failure] it holds its old
+   contents. BLOCKS like [open_picked] and is safe from any thread. On
+   Android only, a crash inside the save can leave a backup that the next
+   launch hands to [on_backup_left]; a rename cannot leave one, so on iOS
+   and the desktops that never fires. *)
+val save_picked : picked_file -> string -> unit
+
+(* Write the backup back over the document through the safe save, then
+   delete it; or delete it and keep the document. Both BLOCK and raise
+   [Failure] on failure. *)
+val restore_backup : leftover_backup -> unit
+val discard_backup : leftover_backup -> unit
 
 (* Mount a root into the default window; mounting presents. *)
 val mount : widget -> unit

@@ -24,6 +24,13 @@ public final class KayaRing {
     public static native java.io.FileDescriptor openPicked(
             long handle, int mode, int[] seekable);
 
+    /** The safe save (docs/rich-document-plan.md §4.1): throws IOException
+     * when the document kept its old contents. BLOCKS. */
+    public static native void savePicked(long handle, byte[] bytes);
+
+    /** Restore or discard one leftover backup (kaya_answer_backup). */
+    public static native void answerBackup(long backup, int answer);
+
     /** One transaction as encoded records — kaya_submit's spelling. */
     public static native void submit(byte[] tx);
 

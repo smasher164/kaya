@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x25d4a59421f21751L;
+    public static final long SPEC_HASH = 0xc57cc15dba2334d5L;
     public static final String VERSION = "0.0.0";
 
     public static final int VALUE_BOOL = 1;
@@ -227,6 +227,8 @@ public final class KayaWire {
     public static final int NOTIFICATION_OUTCOME_ACTIVATED = 0;
     public static final int NOTIFICATION_OUTCOME_REFUSED = 1;
     public static final int NOTIFICATION_OUTCOME_REPLIED = 2;
+    public static final int BACKUP_ANSWER_RESTORE = 0;
+    public static final int BACKUP_ANSWER_DISCARD = 1;
     public static final int TOAST_DURATION_SHORT = 0;
     public static final int TOAST_DURATION_LONG = 1;
     public static final int TOAST_ACTION_NONE = 0;
@@ -718,6 +720,7 @@ public final class KayaWire {
     public static final short OCC_KIND_FONT_DIALOG_RESULT = 69;
     public static final short OCC_KIND_FONT_FACES = 70;
     public static final short OCC_KIND_VOICE_CHANGED = 71;
+    public static final short OCC_KIND_BACKUP_LEFT = 72;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -4267,7 +4270,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED && kind != OCC_KIND_ACTIVATED && kind != OCC_KIND_SELECTION_CHANGED && kind != OCC_KIND_FONT_FAMILIES && kind != OCC_KIND_TEXT_SELECTED && kind != OCC_KIND_DOCUMENT_SELECTED && kind != OCC_KIND_DOCUMENT_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENTS_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENT_CLOSED && kind != OCC_KIND_NEW_DOCUMENT_REQUESTED && kind != OCC_KIND_DOCUMENT_MOVED && kind != OCC_KIND_DOCUMENTS_DETACHED && kind != OCC_KIND_FONT_DIALOG_RESULT && kind != OCC_KIND_FONT_FACES && kind != OCC_KIND_VOICE_CHANGED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED && kind != OCC_KIND_ACTIVATED && kind != OCC_KIND_SELECTION_CHANGED && kind != OCC_KIND_FONT_FAMILIES && kind != OCC_KIND_TEXT_SELECTED && kind != OCC_KIND_DOCUMENT_SELECTED && kind != OCC_KIND_DOCUMENT_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENTS_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENT_CLOSED && kind != OCC_KIND_NEW_DOCUMENT_REQUESTED && kind != OCC_KIND_DOCUMENT_MOVED && kind != OCC_KIND_DOCUMENTS_DETACHED && kind != OCC_KIND_FONT_DIALOG_RESULT && kind != OCC_KIND_FONT_FACES && kind != OCC_KIND_VOICE_CHANGED && kind != OCC_KIND_BACKUP_LEFT) {
             return null;
         }
         long id = b.getLong(8);
@@ -4576,6 +4579,19 @@ public final class KayaWire {
             tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
             at[0] += 4;
             at[0] += 4;
+            tail.add(parseValue(rec, b, at));
+            return new Occ(kind, id, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_BACKUP_LEFT) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            tail.add(parseValue(rec, b, at));
             tail.add(parseValue(rec, b, at));
             return new Occ(kind, id, java.util.List.of(), tail);
         }

@@ -21,6 +21,32 @@ public readonly record struct PickedFile(ulong Handle, string Name, string? Loca
     /// you chose and post the result back.
     public (FileStream File, bool Seekable) Open(FileAccess access = FileAccess.Read)
         => Kaya.OpenPicked(Handle, access);
+
+    /// THE SAFE SAVE (docs/rich-document-plan.md §4.1): on return the
+    /// document holds exactly `bytes`; if this throws IOException it holds
+    /// its old contents. BLOCKS like Open and is safe from any thread. On
+    /// Android only, a crash inside the save can leave a backup that the
+    /// next launch hands to App.OnBackupLeft; a rename cannot leave one, so
+    /// on iOS and the desktops that never fires.
+    public void Save(ReadOnlySpan<byte> bytes) => Kaya.SavePicked(Handle, bytes);
+}
+
+/// A backup a safe save left that this launch could not prove redundant
+/// (docs/rich-document-plan.md §4.1, RD15 B), handed to App.OnBackupLeft
+/// before anything else. BackupFile is the backup, readable and never
+/// writable; Document the document when it still opens, else null; Measured
+/// what kaya read. ANDROID ONLY: a rename cannot leave a backup, so on iOS and
+/// the desktops this never arrives. Unanswered, it comes back at the next
+/// launch.
+public readonly record struct LeftoverBackup(
+    ulong Backup, string Name, PickedFile BackupFile, PickedFile? Document, string Measured)
+{
+    /// Write the backup back over the document through the safe save, then
+    /// delete it. BLOCKS; safe from any thread.
+    public void Restore() => Kaya.AnswerBackup(Backup, KayaWire.BackupAnswerRestore);
+
+    /// Delete the backup and keep the document as it is.
+    public void Discard() => Kaya.AnswerBackup(Backup, KayaWire.BackupAnswerDiscard);
 }
 
 /// One of a picture's main colours and the fraction of the picture it stands
@@ -351,6 +377,30 @@ static partial class Kaya
             throw new IOException($"kaya: opening the picked file failed (code {rc})");
         var safe = new SafeFileHandle((IntPtr)raw, ownsHandle: true);
         return (new FileStream(safe, access), seekable != 0);
+    }
+
+    [DllImport("kaya")]
+    static extern unsafe int kaya_save_picked(ulong handle, byte* bytes, UIntPtr len);
+
+    /// The safe save's C entry; the core's own sentence is on stderr.
+    public static unsafe void SavePicked(ulong handle, ReadOnlySpan<byte> bytes)
+    {
+        int rc;
+        fixed (byte* p = bytes)
+            rc = kaya_save_picked(handle, p, (UIntPtr)bytes.Length);
+        if (rc != 0)
+            throw new IOException($"kaya: saving the picked file failed (code {rc})");
+    }
+
+    [DllImport("kaya")]
+    static extern int kaya_answer_backup(ulong backup, uint answer);
+
+    /// Restore or discard one leftover backup (kaya_answer_backup).
+    public static void AnswerBackup(ulong backup, uint answer)
+    {
+        int rc = kaya_answer_backup(backup, answer);
+        if (rc != 0)
+            throw new IOException($"kaya: answering the leftover backup failed (code {rc})");
     }
 
     static RingInfo ring;

@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x25d4a59421f21751
+let kayaSpecHash: UInt64 = 0xc57cc15dba2334d5
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -5599,6 +5599,104 @@ func kayaPresentSaveDialog(
         var info = stat()
         outSeekable.pointee = (fstat(fd, &info) == 0 && (info.st_mode & S_IFMT) == S_IFREG) ? 1 : 0
         return Int64(fd)
+    }
+
+    /// The last save's failure, kaya_swiftui_open_picked's buffer's twin.
+    var kayaPickedSaveError: [CChar] = []
+
+    /// The item's identity as the file system and the Files app name it, for
+    /// the measurement replaceItemAt owes (docs/rich-document-plan.md §4.1).
+    func kayaItemIdentity(_ url: URL) -> String {
+        var info = stat()
+        let inode = stat(url.path, &info) == 0 ? String(info.st_ino) : "none"
+        let values = try? url.resourceValues(forKeys: [.documentIdentifierKey, .fileResourceIdentifierKey])
+        let document = values?.documentIdentifier.map { String($0) } ?? "none"
+        let resource = values?.fileResourceIdentifier.map { "\($0)" } ?? "none"
+        return "inode=\(inode) documentIdentifier=\(document) fileResourceIdentifier=\(resource)"
+    }
+
+    /// THE SAFE SAVE'S iOS ARM (docs/rich-document-plan.md §4.1): the scope,
+    /// a coordinated write `.forReplacing`, the bytes in the item replacement
+    /// directory for the URL, fsync, and `replaceItemAt`. 0 on success, an
+    /// errno with `outError` filled otherwise. The core calls it from whatever
+    /// thread the guest saved on.
+    @_cdecl("kaya_swiftui_save_picked")
+    public func kayaSwiftUISavePicked(
+        _ locator: UnsafePointer<CChar>,
+        _ bytes: UnsafePointer<UInt8>?,
+        _ len: UInt,
+        _ outError: UnsafeMutablePointer<UnsafePointer<CChar>?>
+    ) -> Int32 {
+        func refuse(_ why: String, _ code: Int32) -> Int32 {
+            kayaPickedSaveError = Array(why.utf8CString)
+            kayaPickedSaveError.withUnsafeBufferPointer { outError.pointee = $0.baseAddress }
+            return code
+        }
+        let key = String(cString: locator)
+        guard let url = kayaPickedURLs[key] ?? URL(string: key) else {
+            return refuse("no picked file named \(key)", EINVAL)
+        }
+        let data = (len == 0 || bytes == nil) ? Data() : Data(bytes: bytes!, count: Int(len))
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        var coordinated: NSError?
+        var failure: (String, Int32)?
+        NSFileCoordinator(filePresenter: nil).coordinate(
+            writingItemAt: url, options: .forReplacing, error: &coordinated
+        ) { target in
+            let manager = FileManager.default
+            let before = kayaItemIdentity(target)
+            let scratch: URL
+            do {
+                scratch = try manager.url(
+                    for: .itemReplacementDirectory, in: .userDomainMask,
+                    appropriateFor: target, create: true)
+            } catch {
+                failure = ("no replacement directory for \(target.lastPathComponent): \(error.localizedDescription)", EIO)
+                return
+            }
+            defer { try? manager.removeItem(at: scratch) }
+            let temp = scratch.appendingPathComponent(target.lastPathComponent)
+            let fd = open(temp.path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+            if fd < 0 {
+                failure = ("creating the replacement for \(target.lastPathComponent) failed: \(String(cString: strerror(errno)))", errno)
+                return
+            }
+            var offset = 0
+            let wrote: Bool = data.withUnsafeBytes { raw in
+                while offset < raw.count {
+                    let n = write(fd, raw.baseAddress! + offset, raw.count - offset)
+                    if n <= 0 { return false }
+                    offset += n
+                }
+                return true
+            }
+            let synced = wrote && fsync(fd) == 0
+            let code = errno
+            close(fd)
+            if !synced {
+                failure = ("writing the replacement for \(target.lastPathComponent) failed: \(String(cString: strerror(code)))", code)
+                return
+            }
+            do {
+                if manager.fileExists(atPath: target.path) {
+                    _ = try manager.replaceItemAt(target, withItemAt: temp)
+                } else {
+                    try manager.moveItem(at: temp, to: target)
+                }
+            } catch {
+                failure = ("replacing \(target.lastPathComponent) failed: \(error.localizedDescription)", EIO)
+                return
+            }
+            kayaDiag("safe save \(target.lastPathComponent) \(data.count) bytes: before \(before), after \(kayaItemIdentity(target))")
+        }
+        if let error = coordinated {
+            return refuse("coordinating the write of \(url.lastPathComponent) failed: \(error.localizedDescription)", EIO)
+        }
+        if let (why, code) = failure {
+            return refuse(why, code)
+        }
+        return 0
     }
 #endif
 

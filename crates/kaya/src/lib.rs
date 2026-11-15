@@ -78,6 +78,8 @@ mod ring;
 mod richdoc;
 // The row-windowing band machine (docs/virtualization-plan.md §1-§2).
 mod rowwindow;
+// The safe save through a picked file (docs/rich-document-plan.md §4.1).
+mod safesave;
 mod scene;
 // Not harness-gated (DESIGN.md, Threading model and protocol).
 mod stall;
@@ -181,7 +183,7 @@ pub use protocol::{
     SheetProp, DocumentProp, RegionEdge,
     Appearance, MenuProp, NotificationId, NotificationOutcome, Occurrence, Path, Prop,
     SectionProp, SectionsPresentation, SignalId, TemplateNodeId, WindowProp,
-    FileContent, FileDialogId, FileMode, FontChoice, FontFace, NamedFace, PickedFile, PickedId, Representation, Time, UndoDelta, UndoText, Value,
+    BackupId, FileContent, FileDialogId, FileMode, FontChoice, FontFace, LeftoverBackup, NamedFace, PickedFile, PickedId, Representation, Time, UndoDelta, UndoText, Value,
     ValueType, WidgetId, WidgetKind, WindowId,
     Fit, ImagePhase, MediaFailure, PlaybackState, PlayerId, PlayerState, PlayerTracks, SessionAction, SessionActionKind,
     TrackKind,

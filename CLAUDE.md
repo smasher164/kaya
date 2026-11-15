@@ -289,6 +289,8 @@ docs/gates.md.
      until layout, shares the tiers' park.
    - `tools/check-search.py` — the search field clears one way and reports
      its platform identity.
+   - `tools/check-safe-save.py` — every safe-save arm syncs before its rename,
+     replace or backup delete; iOS inside the coordinated write.
    - `tools/check-exclusive.py` — the matrix-wide exclusive token and the
      idle-host waits are wired at each funnel.
    - `tools/check-flightrec.py` — a red leg's bundle names its cause on

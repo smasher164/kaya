@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
+	"strings"
 
 	kaya "dev.kaya/bindings/go"
 )
@@ -67,6 +69,35 @@ func writeBack(file kaya.PickedFile, text string) string {
 		return "close failed: " + err.Error()
 	}
 	return readBack(file)
+}
+
+// strays is what else the directory holds, as Go lists it: a temporary
+// file the save left would show here. The scene's three names are left
+// out (Android's scoped storage hides `final`, which the provider made,
+// from this app's listing), and so is the mac panel's `.DS_Store`.
+func strays() string {
+	entries, _ := os.ReadDir(saveDir())
+	names := []string{}
+	for _, e := range entries {
+		switch e.Name() {
+		case "decoy", "draft", "final", ".DS_Store":
+		default:
+			names = append(names, e.Name())
+		}
+	}
+	if len(names) == 0 {
+		return "nothing else in the folder"
+	}
+	sort.Strings(names)
+	return "also " + strings.Join(names, " ")
+}
+
+// safeSave is the safe save (docs/rich-document-plan.md §4.1), read back.
+func safeSave(file kaya.PickedFile, text string) string {
+	if err := file.Save([]byte(text)); err != nil {
+		return "safe save failed: " + err.Error()
+	}
+	return "safe saved " + readBack(file) + "; " + strays()
 }
 
 func App() *kaya.App {
@@ -152,6 +183,26 @@ func App() *kaya.App {
 				work(func() string {
 					return fmt.Sprintf("reopened %s %s", readBack(first), readBack(second))
 				})
+			})
+
+			tx.Button("safe save", func(tx *kaya.Tx) { // button#4
+				// LONGER over the source's "second draft".
+				if source == nil {
+					tx.Write(status, "nothing open to save")
+					return
+				}
+				file := *source
+				work(func() string { return safeSave(file, "the fourth draft, the longest of them") })
+			})
+
+			tx.Button("safe save as", func(tx *kaya.Tx) { // button#5
+				// SHORTER over the destination's "third draft".
+				if destination == nil {
+					tx.Write(status, "nothing to reopen")
+					return
+				}
+				file := *destination
+				work(func() string { return safeSave(file, "fifth") })
 			})
 		}))
 	})

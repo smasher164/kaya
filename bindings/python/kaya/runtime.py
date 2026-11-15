@@ -76,6 +76,10 @@ _lib.kaya_open_picked.argtypes = [
     ctypes.POINTER(ctypes.c_uint32),
 ]
 _lib.kaya_open_picked.restype = ctypes.c_int32
+_lib.kaya_save_picked.argtypes = [ctypes.c_uint64, ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_save_picked.restype = ctypes.c_int32
+_lib.kaya_answer_backup.argtypes = [ctypes.c_uint64, ctypes.c_uint32]
+_lib.kaya_answer_backup.restype = ctypes.c_int32
 # The asset table (docs/assets-plan.md).
 _lib.kaya_asset_open.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
 _lib.kaya_asset_open.restype = ctypes.c_uint64
@@ -437,6 +441,22 @@ def open_picked(handle: int, mode: int) -> tuple[IO[bytes], bool]:
         fd = raw.value
     modes = {0: "rb", 1: "wb", 2: "r+b"}
     return os.fdopen(fd, modes[mode]), bool(seekable.value)
+
+
+def save_picked(handle: int, data: bytes) -> None:
+    """The safe save (docs/rich-document-plan.md §4.1): the document holds
+    exactly `data` on return, and its old contents if this raises. BLOCKS
+    like open_picked; the core's own sentence is on stderr."""
+    rc = _lib.kaya_save_picked(ctypes.c_uint64(handle), bytes(data), len(data))
+    if rc != 0:
+        raise OSError(rc, f"kaya: saving the picked file failed (code {rc})")
+
+
+def answer_backup(backup: int, answer: int) -> None:
+    """Restore or discard one leftover backup (kaya_answer_backup)."""
+    rc = _lib.kaya_answer_backup(ctypes.c_uint64(backup), ctypes.c_uint32(answer))
+    if rc != 0:
+        raise OSError(rc, f"kaya: answering the leftover backup failed (code {rc})")
 
 
 def app_data_dir() -> str | None:

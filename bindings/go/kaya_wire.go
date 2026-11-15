@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x25d4a59421f21751
+	SpecHash uint64 = 0xc57cc15dba2334d5
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -228,6 +228,8 @@ const (
 	NotificationOutcomeActivated NotificationOutcome = 0
 	NotificationOutcomeRefused NotificationOutcome = 1
 	NotificationOutcomeReplied NotificationOutcome = 2
+	BackupAnswerRestore = 0
+	BackupAnswerDiscard = 1
 	ToastDurationShort ToastDuration = 0
 	ToastDurationLong ToastDuration = 1
 	ToastActionNone ToastAction = 0
@@ -719,6 +721,7 @@ const (
 	occFontDialogResult = 69
 	occFontFaces = 70
 	occVoiceChanged = 71
+	occBackupLeft = 72
 )
 
 func (d Detent) String() string {
@@ -5421,7 +5424,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun && kind != occToastResult && kind != occImageNeeded && kind != occImageReleased && kind != occActivated && kind != occSelectionChanged && kind != occFontFamilies && kind != occTextSelected && kind != occDocumentSelected && kind != occDocumentCloseRequested && kind != occDocumentsCloseRequested && kind != occDocumentClosed && kind != occNewDocumentRequested && kind != occDocumentMoved && kind != occDocumentsDetached && kind != occFontDialogResult && kind != occFontFaces && kind != occVoiceChanged {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun && kind != occToastResult && kind != occImageNeeded && kind != occImageReleased && kind != occActivated && kind != occSelectionChanged && kind != occFontFamilies && kind != occTextSelected && kind != occDocumentSelected && kind != occDocumentCloseRequested && kind != occDocumentsCloseRequested && kind != occDocumentClosed && kind != occNewDocumentRequested && kind != occDocumentMoved && kind != occDocumentsDetached && kind != occFontDialogResult && kind != occFontFaces && kind != occVoiceChanged && kind != occBackupLeft {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -5794,6 +5797,28 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
 		at += 4
 		at += 4
+		{
+			var v any
+			v, at = parseValue(rec, at)
+			tail = append(tail, v)
+		}
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occBackupLeft {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		{
+			var v any
+			v, at = parseValue(rec, at)
+			tail = append(tail, v)
+		}
 		{
 			var v any
 			v, at = parseValue(rec, at)

@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x25d4a59421f21751
+let kayaSpecHash: UInt64 = 0xc57cc15dba2334d5
 let kayaVersion = "0.0.0"
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -4355,6 +4355,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_FONT_DIALOG_RESULT)
             || kind == UInt16(KAYA_OCCURRENCE_FONT_FACES)
             || kind == UInt16(KAYA_OCCURRENCE_VOICE_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_BACKUP_LEFT)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -4939,6 +4940,33 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
             at += 4
             at += 4
+            tail.append(value())
+            return (kind, id, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_BACKUP_LEFT) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            at += 8
+            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))
+            at += 8
+            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))
+            at += 8
+            tail.append(value())
             tail.append(value())
             return (kind, id, [], nil, [], nil, nil, tail)
         }

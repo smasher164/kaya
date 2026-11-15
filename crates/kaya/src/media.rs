@@ -2295,6 +2295,9 @@ mod tests {
         fn open(&self, _: crate::protocol::FileMode) -> std::io::Result<(i64, bool)> {
             Ok((crate::protocol::raw_handle(std::fs::File::open(&self.bytes)?), true))
         }
+        fn save(&self, _: &[u8]) -> std::io::Result<()> {
+            Err(std::io::Error::other("the media test's reference is read-only"))
+        }
         fn name(&self) -> &str {
             "clip"
         }

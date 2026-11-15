@@ -90,6 +90,8 @@ GATES = {
     # The search field's one clear path and platform identity are lowerings
     # in three files; swift/ because the Mac and iOS arms live there.
     "check-search": ["crates", "swift", "android"],
+    # The safe save's arms: the core's desktop and Android steps, the iOS arm.
+    "check-safe-save": ["crates/kaya/src/safesave.rs", "swift/KayaSwiftUI.swift"],
     "check-submit": ["crates", "swift", "android"],
     "check-scroll-to": ["crates", "swift", "android"],
     # The exclusive token is wired in tools/, which every key already carries;

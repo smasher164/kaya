@@ -106,6 +106,10 @@ LEGS = {
         "grow-compose", "align-compose", "layout-compose",
         "stall-compose", "confirm-compose", "filedialog-compose",
         "save-compose", "nav-compose", "scroll-compose",
+        # The safe save's leftover backup across a relaunch
+        # (docs/rich-document-plan.md §4.1): a RUST guest, since act two
+        # is adopted before the app thread (docs/tasks-s9-plan.md R6a).
+        "saferestore-compose",
         "progress-compose", "select-compose", "radio-compose",
         "grid-compose", "textarea-compose", "sections-compose",
         "menus-compose", "rowmenu-compose", "hiderows-compose", "toolbar-compose", "identity-compose",
@@ -306,6 +310,10 @@ SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
 # forced Configuration's fontScale and the Density every sp reads.
 SCENE_TEXT_SCALE = {"tasksbig": "2", "formatbig": "2", "codesurfacebig": "2"}
 
+# Other knobs a scene's FIRST launch carries as intent extras: the safe
+# save's fault, which act two's plain door leaves off (saferestore.steps).
+SCENE_ENV = {"saferestore": {"KAYA_SAFE_SAVE_FAULT": "tear"}}
+
 # THE PLATFORM'S OWN DOOR FOR A SECOND ACT (docs/tasks-s9-plan.md R6, R7),
 # per scene that carries a `relaunch`: this lane's is a real tap on the
 # notification's row in SystemUI's shade, taken once act one's process is
@@ -314,6 +322,9 @@ SCENE_TEXT_SCALE = {"tasksbig": "2", "formatbig": "2", "codesurfacebig": "2"}
 # runner refuses a scene whose door it does not open, and a door named
 # for a scene with no `relaunch`.
 RELAUNCH_DOOR = {"tasks": "notify_tap", "taskspersist": "launch",
+                 # The safe save's leftover backup (docs/rich-document-plan.md
+                 # §4.1): the plain door, so act two carries no fault knob.
+                 "saferestore": "launch",
                  # The cold link door: `am start -a VIEW -d <url>`,
                  # narrowed to this package (docs/app-links-plan.md
                  # §4; docs/traps.md on the chooser).
@@ -549,7 +560,7 @@ MODS = {
 # verbs: the scenes that leave the app for DocumentsUI or read what an
 # assistive service is handed (the accessibility service), and the one
 # that opens a composing region (the helper IME).
-A11Y_SCENES = ["chat", "filedialog", "save", "editor", "media_picked", "toast"]
+A11Y_SCENES = ["chat", "filedialog", "save", "saferestore", "editor", "media_picked", "toast"]
 IME_SCENES = ["ranges", "richtext"]
 
 # A scene is wired on this lane IF AND ONLY IF a suite lists it, or it

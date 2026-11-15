@@ -527,6 +527,23 @@ pub(crate) fn voice_route_from(raw: u32) -> Option<crate::protocol::VoiceRoute> 
     })
 }
 
+/// BACKUP_LEFT { u64 backup; u64 backup_file; u64 document; Str name; Str measured }.
+pub(crate) fn backup_left_body(
+    backup: crate::protocol::BackupId,
+    backup_file: crate::protocol::PickedId,
+    document: Option<crate::protocol::PickedId>,
+    name: &str,
+    measured: &str,
+) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&backup.0.to_le_bytes());
+    b.extend_from_slice(&backup_file.0.to_le_bytes());
+    b.extend_from_slice(&document.map_or(0, |d| d.0).to_le_bytes());
+    write_value(&mut b, &Value::Str(name.to_owned()), &mut Vec::new());
+    write_value(&mut b, &Value::Str(measured.to_owned()), &mut Vec::new());
+    b
+}
+
 /// VOICE_CHANGED { u64 voice; u32 route; u32 reserved; Str detail }.
 pub(crate) fn voice_changed_body(voice: crate::protocol::VoiceId, route: crate::protocol::VoiceRoute, detail: &str) -> Vec<u8> {
     let mut b = Vec::new();
@@ -1521,6 +1538,10 @@ pub(crate) fn notification_outcome_raw(outcome: &crate::protocol::NotificationOu
 
 /// The toast vocabularies (spec enums "toast_duration", "toast_action",
 /// "toast_outcome"; docs/toast-plan.md T4-T6).
+/// kaya_answer_backup's answer (spec enum "backup_answer").
+pub(crate) const BACKUP_ANSWER_RESTORE: u32 = 0;
+pub(crate) const BACKUP_ANSWER_DISCARD: u32 = 1;
+
 pub(crate) const TOAST_DURATION_SHORT: u32 = 0;
 pub(crate) const TOAST_DURATION_LONG: u32 = 1;
 pub(crate) const TOAST_ACTION_NONE: u32 = 0;

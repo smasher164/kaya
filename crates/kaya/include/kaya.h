@@ -368,6 +368,12 @@
 #define KAYA_OCCURRENCE_VOICE_CHANGED 71
 
 /**
+ * BACKUP_LEFT { u64 backup; u64 backup_file; u64 document; Value name;
+ * Value measured } (docs/rich-document-plan.md §4.1). Android only.
+ */
+#define KAYA_OCCURRENCE_BACKUP_LEFT 72
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -795,6 +801,13 @@
 #define KAYA_FILE_MODE_WRITE 1
 
 #define KAYA_FILE_MODE_READ_WRITE 2
+
+/**
+ * kaya_answer_backup's answer (docs/rich-document-plan.md RD15 B).
+ */
+#define KAYA_BACKUP_ANSWER_RESTORE 0
+
+#define KAYA_BACKUP_ANSWER_DISCARD 1
 
 #define KAYA_FILE_CONTENT_ANY 0
 
@@ -3814,6 +3827,30 @@ int32_t kaya_open_picked(uint64_t handle,
                          uint32_t mode,
                          int64_t *out_handle,
                          uint32_t *out_seekable);
+
+/**
+ * THE SAFE SAVE (docs/rich-document-plan.md §4.1): the whole new contents
+ * of a picked file, `len` bytes at `bytes`. Blocking, and safe from any
+ * thread like kaya_open_picked. 0 when the document holds exactly those
+ * bytes; an errno when it holds its old ones, with the sentence on stderr.
+ * On Android only, a failure kaya could not undo leaves a backup that the
+ * next launch reports as `backup_left`; a rename cannot leave one, so on
+ * iOS and the desktops that occurrence never fires.
+ *
+ * # Safety
+ * `bytes` must be valid for `len` bytes (null only when `len` is 0).
+ */
+int32_t kaya_save_picked(uint64_t handle, const uint8_t *bytes, uintptr_t len);
+
+/**
+ * The app's answer to one `backup_left` (spec enum backup_answer): restore
+ * writes the backup over the document through the safe save and then
+ * deletes it; discard deletes it. Blocking, safe from any thread. 0 on
+ * success; an errno with the sentence on stderr otherwise, the backup then
+ * staying for the next launch. EINVAL for an id no backup_left carried, or
+ * one already answered.
+ */
+int32_t kaya_answer_backup(uint64_t backup, uint32_t answer);
 
 /**
  * Presentation side (interpreter platforms): the font picker's one

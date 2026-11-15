@@ -304,6 +304,16 @@ end
    desktops and neither phone (DESIGN.md, File dialogs). *)
 type picked_file = { handle : int64; name : string; local_path : string }
 
+(* A backup a safe save left that this launch could not prove redundant
+   (docs/rich-document-plan.md §4.1, RD15 B). *)
+type leftover_backup = {
+  backup : int64;
+  backup_name : string;
+  backup_file : picked_file;
+  document : picked_file option;
+  measured : string;
+}
+
 (* AN ASSET — a file this app's own BUILD put where the running program
    can find it (docs/assets-plan.md; tools/check-assets.py refuses a guest
    that resolves one itself). A MISS RAISES [Failure] carrying the core's
@@ -1445,6 +1455,9 @@ type app = {
      result whose id has none above (docs/tasks-s9-plan.md R1). A
      relaunched process never called show_notification. *)
   mutable notification_activation : (int64 -> Notification_outcome.t -> unit) option;
+  (* PROCESS-LEVEL like the one above: a leftover backup arrives before the
+     app could have asked for anything (RD15 B). *)
+  mutable backup_left : (leftover_backup -> unit) option;
   (* NOT one-shot either: a route declared by [link_route] answers every
      URL that matches it, for the life of the process
      (docs/app-links-plan.md §4), and the core owns the pattern table —
@@ -1685,6 +1698,7 @@ let create () =
     next_alert = 0L;
     notification_handlers = Hashtbl.create 8;
     notification_activation = None;
+    backup_left = None;
     link_handlers = Hashtbl.create 4;
     next_link_route = 0L;
     pending_routes = [];
@@ -5080,6 +5094,20 @@ let notification_result app id outcome =
 
 let on_notification_activation app ~f = app.notification_activation <- Some f
 
+(* The backup_left arm: the process-level handler, or the announced drop,
+   and the backup stays for the next launch. *)
+let backup_left_arrived app left =
+  match app.backup_left with
+  | Some f -> dispatch app (fun () -> f left)
+  | None ->
+      prerr_endline
+        (Printf.sprintf
+           "kaya: a save of %s did not finish and left a backup, and no handler \
+            is registered (Kaya_app.on_backup_left); it stays for the next launch"
+           left.backup_name)
+
+let on_backup_left app ~f = app.backup_left <- Some f
+
 (* Declare a link ROUTE and the handler that answers it
    (docs/app-links-plan.md §4): [link app ~pattern:"task/{key}" ~f]
    matches [<scheme>://task/t1] and calls [f [ ("key", "t1") ]].
@@ -5407,6 +5435,12 @@ let set_reorderable (Widget id) enabled =
    from a thread you chose and post the result back. *)
 let open_picked file mode =
   Kaya_runtime.open_picked file.handle (File_mode.wire mode)
+
+(* THE SAFE SAVE (docs/rich-document-plan.md §4.1). *)
+let save_picked file bytes = Kaya_runtime.save_picked file.handle bytes
+
+let restore_backup left = Kaya_runtime.answer_backup left.backup Kaya_wire.backup_answer_restore
+let discard_backup left = Kaya_runtime.answer_backup left.backup Kaya_wire.backup_answer_discard
 
 
 
@@ -8463,6 +8497,21 @@ let dispatch_loop app =
            notification_result app id
              (Notification_outcome.Replied
                 (match payload with Some (Kaya_wire.Str s) -> s | _ -> ""))
+         else if kind = Kaya_wire.occ_kind_backup_left then
+           (match tail with
+           | Kaya_wire.I64 file :: Kaya_wire.I64 document :: Kaya_wire.Str name
+             :: Kaya_wire.Str measured :: _ ->
+               backup_left_arrived app
+                 {
+                   backup = id;
+                   backup_name = name;
+                   backup_file = { handle = file; name; local_path = "" };
+                   document =
+                     (if document = 0L then None
+                      else Some { handle = document; name; local_path = "" });
+                   measured;
+                 }
+           | _ -> ())
          else if kind = Kaya_wire.occ_kind_file_dialog_result then
            (* One-shot like the alert, and the id retires with it. The
               parser flattens three values per file into the values

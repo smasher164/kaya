@@ -1,7 +1,7 @@
 // The save round trip (tools/scenes/save.steps). EVERY STATUS IS A READ-BACK
 // OFF THE DISK, through the HANDLE, and no name carries an extension.
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -43,6 +43,27 @@ function writeBack(picked: kaya.PickedFile, text: string): string {
     return `write failed: ${reason(e)}`;
   }
   return readBack(picked);
+}
+
+/** What else the directory holds, as node lists it: a temporary file the
+ * save left would show here. The scene's three names are left out
+ * (Android's scoped storage hides `final`, which the provider made, from an
+ * app's listing), and so is the mac panel's `.DS_Store`. */
+function strays(): string {
+  const names = readdirSync(saveDir)
+    .filter((n) => !["decoy", "draft", "final", ".DS_Store"].includes(n))
+    .sort();
+  return names.length === 0 ? "nothing else in the folder" : `also ${names.join(" ")}`;
+}
+
+/** The safe save (docs/rich-document-plan.md §4.1), read back. */
+function safeSave(picked: kaya.PickedFile, text: string): string {
+  try {
+    picked.save(text);
+  } catch (e) {
+    return `safe save failed: ${reason(e)}`;
+  }
+  return `safe saved ${readBack(picked)}; ${strays()}`;
 }
 
 /** One file operation, with the ANSWER posted: this worker has no second
@@ -102,6 +123,26 @@ function reopen(): void {
   work(() => `reopened ${readBack(first)} ${readBack(second)}`);
 }
 
+function safeSaveBack(): void {
+  // LONGER over the source's "second draft".
+  const file = source;
+  if (file === null) {
+    status.set("nothing open to save");
+    return;
+  }
+  work(() => safeSave(file, "the fourth draft, the longest of them"));
+}
+
+function safeSaveAs(): void {
+  // SHORTER over the destination's "third draft".
+  const file = destination;
+  if (file === null) {
+    status.set("nothing to reopen");
+    return;
+  }
+  work(() => safeSave(file, "fifth"));
+}
+
 const { status } = app.window({ title: "save" }, () => {
   const status = kaya.signal("no file");
   kaya.column(() => {
@@ -110,6 +151,8 @@ const { status } = app.window({ title: "save" }, () => {
     kaya.button("save", { onClick: saveBack }); // button#1
     kaya.button("save as", { onClick: saveAs }); // button#2
     kaya.button("reopen", { onClick: reopen }); // button#3
+    kaya.button("safe save", { onClick: safeSaveBack }); // button#4
+    kaya.button("safe save as", { onClick: safeSaveAs }); // button#5
   });
   return { status };
 });

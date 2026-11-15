@@ -270,6 +270,8 @@ PAD_EXTRAS = {
 # host rejects by design (DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem"]
 UNWIRED_SCENES = []
+# Off with a reason: the safe save's leftover backup is Android's alone.
+OFF_SCENES = {"saferestore": "a rename cannot leave a backup, so there is no second act to run (docs/rich-document-plan.md §4.1)"}
 
 # The fullscreen scene's app-only way back after the cut, the same steps as
 # tools/lib/lanes/android.py's FULLSCREEN_APP_TAIL: no user change arrives.

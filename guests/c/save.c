@@ -4,6 +4,7 @@
 #include <kaya.h>
 #include <kaya_wire.h>
 
+#include <dirent.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -22,6 +23,8 @@
 #define W_SAVE 4    /* button#1 */
 #define W_SAVE_AS 5 /* button#2 */
 #define W_REOPEN 6  /* button#3 */
+#define W_SAFE 7    /* button#4 */
+#define W_SAFE_AS 8 /* button#5 */
 
 /* `TMPDIR` or "/tmp", never Darwin's per-user directory (docs/traps.md);
  * both halves compute it identically. */
@@ -117,6 +120,58 @@ static void write_back(uint64_t handle, const char *bytes, char *out, size_t cap
     read_back(handle, out, cap);
 }
 
+/* What else the directory holds, as readdir lists it: a temporary file the
+ * save left would show here. The scene's three names are left out
+ * (Android's scoped storage hides `final`, which the provider made, from an
+ * app's listing), and so is the mac panel's `.DS_Store`. */
+static int name_order(const void *a, const void *b) {
+    return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+static void strays(char *out, size_t cap) {
+    char names[16][256];
+    const char *sorted[16];
+    size_t count = 0;
+    DIR *dir = opendir(scene_dir);
+    if (dir == NULL) {
+        snprintf(out, cap, "listing failed: %s", strerror(errno));
+        return;
+    }
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL && count < 16) {
+        const char *n = entry->d_name;
+        if (strcmp(n, ".") == 0 || strcmp(n, "..") == 0 || strcmp(n, "decoy") == 0 ||
+            strcmp(n, "draft") == 0 || strcmp(n, "final") == 0 || strcmp(n, ".DS_Store") == 0)
+            continue;
+        snprintf(names[count], sizeof names[count], "%s", n);
+        sorted[count] = names[count];
+        count++;
+    }
+    closedir(dir);
+    if (count == 0) {
+        snprintf(out, cap, "nothing else in the folder");
+        return;
+    }
+    qsort(sorted, count, sizeof sorted[0], name_order);
+    size_t at = (size_t)snprintf(out, cap, "also");
+    for (size_t i = 0; i < count && at < cap; i++)
+        at += (size_t)snprintf(out + at, cap - at, " %s", sorted[i]);
+}
+
+/* The safe save (docs/rich-document-plan.md §4.1), read back. It answers 0
+ * or an errno, as kaya_open_picked does. */
+static void safe_save(uint64_t handle, const char *bytes, char *out, size_t cap) {
+    int rc = kaya_save_picked(handle, (const uint8_t *)bytes, strlen(bytes));
+    if (rc != 0) {
+        snprintf(out, cap, "safe save failed: %s", strerror(rc));
+        return;
+    }
+    char back[256], rest[300];
+    read_back(handle, back, sizeof back);
+    strays(rest, sizeof rest);
+    snprintf(out, cap, "safe saved %s; %s", back, rest);
+}
+
 /* The post queue; guests/c/background.c is the long version. */
 #define MAX_POSTED 4
 #define STATUS_CAP 600
@@ -155,11 +210,18 @@ typedef struct {
     uint64_t first;
     uint64_t second;
     const char *bytes;
+    int safe;
 } SaveJob;
 
 static void *worker(void *arg) {
     SaveJob *job = arg;
     char first[STATUS_CAP], second[STATUS_CAP], text[STATUS_CAP];
+    if (job->safe) {
+        safe_save(job->first, job->bytes, text, sizeof text);
+        post_status(text);
+        free(job);
+        return NULL;
+    }
     if (job->bytes != NULL)
         write_back(job->first, job->bytes, first, sizeof first);
     else
@@ -176,8 +238,8 @@ static void *worker(void *arg) {
 }
 
 /* Detached: kaya supplies no waiting primitive. */
-static void work(const char *prefix, uint64_t first, uint64_t second,
-                 const char *bytes) {
+static void work_job(const char *prefix, uint64_t first, uint64_t second,
+                     const char *bytes, int safe) {
     SaveJob *job = malloc(sizeof *job);
     if (job == NULL) {
         post_status("out of memory");
@@ -187,6 +249,7 @@ static void work(const char *prefix, uint64_t first, uint64_t second,
     job->first = first;
     job->second = second;
     job->bytes = bytes;
+    job->safe = safe;
     pthread_t thread;
     if (pthread_create(&thread, NULL, worker, job) != 0) {
         free(job);
@@ -194,6 +257,11 @@ static void work(const char *prefix, uint64_t first, uint64_t second,
         return;
     }
     pthread_detach(thread);
+}
+
+static void work(const char *prefix, uint64_t first, uint64_t second,
+                 const char *bytes) {
+    work_job(prefix, first, second, bytes, 0);
 }
 
 /* `file_dialog_result`, three values per file (crates/kaya/src/spec.rs
@@ -259,12 +327,18 @@ static void build_scene(void) {
     kaya_tx_set_text(&tx, W_SAVE_AS, "save as");
     kaya_tx_create_widget(&tx, W_REOPEN, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_REOPEN, "reopen");
+    kaya_tx_create_widget(&tx, W_SAFE, KAYA_KIND_BUTTON);
+    kaya_tx_set_text(&tx, W_SAFE, "safe save");
+    kaya_tx_create_widget(&tx, W_SAFE_AS, KAYA_KIND_BUTTON);
+    kaya_tx_set_text(&tx, W_SAFE_AS, "safe save as");
 
     kaya_tx_add_child(&tx, W_COLUMN, W_STATUS);
     kaya_tx_add_child(&tx, W_COLUMN, W_OPEN);
     kaya_tx_add_child(&tx, W_COLUMN, W_SAVE);
     kaya_tx_add_child(&tx, W_COLUMN, W_SAVE_AS);
     kaya_tx_add_child(&tx, W_COLUMN, W_REOPEN);
+    kaya_tx_add_child(&tx, W_COLUMN, W_SAFE);
+    kaya_tx_add_child(&tx, W_COLUMN, W_SAFE_AS);
     kaya_tx_mount(&tx, 0, W_COLUMN); /* window 0: the default */
 
     kaya_submit(tx.buf, tx.len);
@@ -326,6 +400,19 @@ static void *app(void *arg) {
                     kaya_submit(tx.buf, tx.len);
                 } else {
                     work("reopened", source, destination, NULL);
+                }
+            } else if (id == W_SAFE || id == W_SAFE_AS) {
+                /* LONGER over the source's "second draft", then SHORTER over
+                 * the destination's "third draft". */
+                uint64_t target = id == W_SAFE ? source : destination;
+                if (target == 0) {
+                    kaya_tx_write_signal(&tx, SIG_STATUS,
+                                         kaya_str(id == W_SAFE ? "nothing open to save"
+                                                               : "nothing to reopen"));
+                    kaya_submit(tx.buf, tx.len);
+                } else {
+                    work_job("", target, 0,
+                             id == W_SAFE ? "the fourth draft, the longest of them" : "fifth", 1);
                 }
             }
         } else if (parse_file_dialog_result(rec, &result)) {

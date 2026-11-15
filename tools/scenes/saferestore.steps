@@ -1,0 +1,21 @@
+# THE SAFE SAVE'S SECOND ACT (docs/rich-document-plan.md §4.1, RD15 B),
+# ANDROID ONLY: a rename cannot leave a backup, so no other lane has an
+# act two to run. The leg carries KAYA_SAFE_SAVE_FAULT=tear
+# (tools/lib/lanes/android.py's SCENE_ENV): the save writes half its bytes
+# and holds, `relaunch launch` ends the process between step 3 and step 5,
+# and the relaunched process, started with no extras, is handed the backup.
+expect_title "saferestore"
+expect label#0 "no file"
+file_dialog_goto $TMP/kaya-saferestore-$PID
+click button#0
+expect_file_dialog kaya-saferestore-$PID decoy draft
+file_choose draft
+expect label#0 "opened the first draft"
+click button#1
+expect label#0 "the save stopped at torn halfway"
+relaunch launch
+expect label#0 "left a backup of draft"
+expect label#1 "draft holds neither its contents from before the save (15 bytes) nor the ones the save was writing (24 bytes); it holds 12 bytes. kaya cannot tell a write torn by the crash from another app's edit since, so it overwrote nothing"
+expect label#2 "backup holds the first draft; document holds torn halfway"
+click button#2
+expect label#0 "restored the first draft"

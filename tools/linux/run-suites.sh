@@ -72,7 +72,9 @@ SCENES="background stall milestone2 entry search gallery todos reorder feed grow
 # reads this line): the phone keyboard scripts, since a desktop has no
 # software keyboard (docs/safe-area-plan.md A13); windowmem, since libadwaita's
 # split views have no divider a user can drag (docs/tasks-s4-plan.md P8).
-OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland editorkeyboard windowmem"
+# saferestore: a rename cannot leave a backup, so there is no second act
+# to run (docs/rich-document-plan.md §4.1).
+OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland editorkeyboard windowmem saferestore"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md

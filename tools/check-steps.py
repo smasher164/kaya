@@ -1947,7 +1947,8 @@ def wired():
     # declared-off lists come from the import.
     ios_wired = sorted(ios_lane.wired_scenes())
     ios_declared = sorted(set(ios_lane.DESKTOP_ONLY_SCENES)
-                          | set(ios_lane.UNWIRED_SCENES))
+                          | set(ios_lane.UNWIRED_SCENES)
+                          | set(ios_lane.OFF_SCENES))
     android_wired = sorted(android_lane.wired_scenes())
     android_declared = sorted(set(android_lane.DESKTOP_ONLY_SCENES)
                               | set(android_lane.UNWIRED_SCENES))
@@ -2545,6 +2546,10 @@ def ax_bus(root):
         cwd=ROOT, capture_output=True, text=True, check=False)
     linux_exempt = {line.split("\t")[1] for line in r.stdout.splitlines()
                     if line.startswith("tools/linux/run-suites.sh\t")}
+    # A scene the runner declares off has no linux leg either.
+    off = re.search(r'^OFF_SCENES="([^"]*)"',
+                    (root / "tools/linux/run-suites.sh").read_text(encoding="utf-8"), re.M)
+    linux_exempt |= set(off.group(1).split()) if off else set()
     for scene, verbs in ax_scenes:
         mine = {n: c for n, c in legs.items()
                 if n == scene or n.startswith(scene + "-")}
@@ -3006,6 +3011,17 @@ def save_missing_handles(text):
                    "it opened, or a write that never truncated still reads back "
                    "right (docs/traps.md, the Android provider that keeps the "
                    "old tail)")
+    safe = [re.fullmatch(r'expect label#0 "safe saved (.*); nothing else in the folder"',
+                         line) for line in lines]
+    safe = [m[1] for m in safe if m]
+    backs = [m[2] for m in drafts if m[1] == "saved"]
+    if (len(safe) != 2 or len(backs) < 2 or len(safe[0]) <= len(backs[0])
+            or len(safe[1]) >= len(backs[1])):
+        bad.append("save.steps' two safe saves must write MORE bytes over the "
+                   "source's save-back and then FEWER over the destination's, "
+                   "each reporting nothing else in the folder, or a save that "
+                   "kept the old tail or left its temporary file still reads "
+                   "back right (docs/rich-document-plan.md §4.1)")
     return bad
 
 
@@ -3036,6 +3052,19 @@ print(f"check-steps: save-back no shorter than the draft: {count} substitution(s
       f"{len(findings)} finding(s)")
 if count != 1 or len(findings) != 1:
     selftest_fail("save-back no shorter than the draft: the length clause did not refuse")
+for label, before, after in [
+    ("safe save no longer than the save-back",
+     "safe saved the fourth draft, the longest of them;", "safe saved fourth;"),
+    ("safe save as no shorter than the save as", "safe saved fifth;",
+     "safe saved the fifth and longest draft;"),
+    ("a safe save that left a stray", "safe saved fifth; nothing else in the folder",
+     "safe saved fifth; also .final.kaya-save-1"),
+]:
+    changed, count = sub_count(re.escape(before), after, save_script)
+    findings = [f for f in save_missing_handles(changed) if "two safe saves" in f]
+    print(f"check-steps: {label}: {count} substitution(s), {len(findings)} finding(s)")
+    if count < 1 or len(findings) != 1:
+        selftest_fail(f"{label}: the safe-save clause did not refuse")
 
 
 def java_dialog_coverage(rosters):

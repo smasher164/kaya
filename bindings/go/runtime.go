@@ -502,3 +502,51 @@ func (f PickedFile) Open(mode FileMode) (file *os.File, seekable bool, err error
 	}
 	return os.NewFile(uintptr(raw), f.Name), seeks != 0, nil
 }
+
+// Save is THE SAFE SAVE (docs/rich-document-plan.md §4.1): on a nil error
+// the document holds exactly data, on an error its old contents. It
+// BLOCKS like Open and is safe from any goroutine; the core's own
+// sentence is on stderr. On Android only, a crash inside the save can
+// leave a backup that the next launch hands to App.OnBackupLeft; a rename
+// cannot leave one, so on iOS and the desktops that never fires.
+func (f PickedFile) Save(data []byte) error {
+	var p *C.uint8_t
+	if len(data) > 0 {
+		p = (*C.uint8_t)(unsafe.Pointer(&data[0]))
+	}
+	rc := C.kaya_save_picked(C.uint64_t(f.Handle), p, C.uintptr_t(len(data)))
+	if rc != 0 {
+		return fmt.Errorf("kaya: saving the picked file failed (code %d)", int(rc))
+	}
+	return nil
+}
+
+// LeftoverBackup is a backup a safe save left that this launch could not
+// prove redundant (docs/rich-document-plan.md §4.1, RD15 B), handed to
+// App.OnBackupLeft before anything else. BackupFile is the backup,
+// readable and never writable; Document is the document when it still
+// opens, else nil; Measured is what kaya read. ANDROID ONLY: a rename
+// cannot leave a backup, so on iOS and the desktops this never arrives.
+// Unanswered, it comes back at the next launch.
+type LeftoverBackup struct {
+	Backup     uint64
+	Name       string
+	BackupFile PickedFile
+	Document   *PickedFile
+	Measured   string
+}
+
+// Restore writes the backup back over the document through the safe save,
+// then deletes it. It BLOCKS and is safe from any goroutine.
+func (b LeftoverBackup) Restore() error { return answerBackup(b.Backup, BackupAnswerRestore) }
+
+// Discard deletes the backup and keeps the document as it is.
+func (b LeftoverBackup) Discard() error { return answerBackup(b.Backup, BackupAnswerDiscard) }
+
+func answerBackup(backup uint64, answer uint32) error {
+	rc := C.kaya_answer_backup(C.uint64_t(backup), C.uint32_t(answer))
+	if rc != 0 {
+		return fmt.Errorf("kaya: answering the leftover backup failed (code %d)", int(rc))
+	}
+	return nil
+}

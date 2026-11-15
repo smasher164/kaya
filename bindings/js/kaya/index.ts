@@ -2712,6 +2712,17 @@ export function onNotificationActivation(f: (notification: number, outcome: Noti
   app()._notificationActivation = f;
 }
 
+/** Register the PROCESS-LEVEL leftover-backup handler
+ * (docs/rich-document-plan.md RD15 B): f(backup) receives each backup a
+ * safe save left that this launch could not prove redundant, and answers
+ * backup.restore() or backup.discard() (both block), or nothing, which
+ * keeps it for the next launch. Register it before the first build.
+ * ANDROID ONLY: a rename cannot leave a backup, so on iOS and the desktops
+ * it never fires. */
+export function onBackupLeft(f: (backup: LeftoverBackup) => void): void {
+  app()._backupLeft = f;
+}
+
 /** Declare a link ROUTE and the handler that answers it
  * (docs/app-links-plan.md §4): `kaya.link("task/{key}", f)` matches
  * `<scheme>://task/t1` and calls `f({ key: "t1" })`. Segments split on
@@ -2772,11 +2783,56 @@ export class PickedFile {
     runtime.writePicked(this.handle, typeof bytes === "string" ? new TextEncoder().encode(bytes) : bytes);
   }
 
+  /** THE SAFE SAVE (docs/rich-document-plan.md §4.1): on return the
+   * document holds exactly these bytes; if this throws it holds its old
+   * contents. A string is written as UTF-8. BLOCKS, like read() and
+   * write(). On Android only, a crash inside the save can leave a backup
+   * that the next launch hands to onBackupLeft; a rename cannot leave one,
+   * so on iOS and the desktops that never fires. */
+  save(bytes: Uint8Array | string): void {
+    runtime.savePicked(this.handle, typeof bytes === "string" ? new TextEncoder().encode(bytes) : bytes);
+  }
+
   /** The streaming route: `{fd, seekable}` — a descriptor for node:fs, and
    * whether it supports random access. Unix only (see read/write); close
    * it with fs.closeSync. BLOCKS. */
   open(mode: FileMode = "read"): { fd: number; seekable: boolean } {
     return runtime.openPicked(this.handle, fileMode(mode));
+  }
+}
+
+/** A backup a safe save left that this launch could not prove redundant
+ * (docs/rich-document-plan.md §4.1, RD15 B), handed to onBackupLeft before
+ * anything else. `backupFile` is the backup, readable and never writable;
+ * `document` the document when it still opens, else null; `measured` what
+ * kaya read. ANDROID ONLY: a rename cannot leave a backup, so on iOS and the
+ * desktops this never arrives. Unanswered, it comes back at the next
+ * launch. */
+export class LeftoverBackup {
+  readonly backup: number;
+  readonly name: string;
+  readonly backupFile: PickedFile;
+  readonly document: PickedFile | null;
+  readonly measured: string;
+
+  /** @internal */
+  constructor(backup: number, name: string, backupFile: PickedFile, document: PickedFile | null, measured: string) {
+    this.backup = backup;
+    this.name = name;
+    this.backupFile = backupFile;
+    this.document = document;
+    this.measured = measured;
+  }
+
+  /** Write the backup back over the document through the safe save, then
+   * delete it. BLOCKS. */
+  restore(): void {
+    runtime.answerBackup(this.backup, wire.BACKUP_ANSWER_RESTORE);
+  }
+
+  /** Delete the backup and keep the document as it is. */
+  discard(): void {
+    runtime.answerBackup(this.backup, wire.BACKUP_ANSWER_DISCARD);
   }
 }
 
@@ -7524,6 +7580,9 @@ export class App {
    * (docs/tasks-s9-plan.md R1). A relaunched process never called
    * showNotification. */
   _notificationActivation: ((notification: number, outcome: NotificationOutcome) => void) | undefined;
+  /** @internal PROCESS-LEVEL like the one above: a leftover backup arrives
+   * before the app could have asked for anything (RD15 B). */
+  _backupLeft: ((backup: LeftoverBackup) => void) | undefined;
   /** @internal NOT one-shot either: a route declared by link() answers
    * every URL that matches it, for the life of the process
    * (docs/app-links-plan.md §4), and the core owns the pattern table —
@@ -8211,6 +8270,24 @@ export class App {
       process.stderr.write(
         `kaya: notification ${ident} outcome ${word} reached no handler — none was bound at the show and no process-level handler is registered (kaya.onNotificationActivation)\n`,
       );
+      return;
+    }
+    if (kind === wire.OCC_BACKUP_LEFT) {
+      const [file, document, name, measured] = payload as [number, number, string, string];
+      const left = new LeftoverBackup(
+        Number(ident),
+        String(name),
+        new PickedFile(Number(file), String(name), ""),
+        Number(document) === 0 ? null : new PickedFile(Number(document), String(name), ""),
+        String(measured),
+      );
+      if (this._backupLeft !== undefined) {
+        this._dispatch(this._backupLeft as Handler, left);
+      } else {
+        process.stderr.write(
+          `kaya: a save of ${name} did not finish and left a backup, and no handler is registered (kaya.onBackupLeft); it stays for the next launch\n`,
+        );
+      }
       return;
     }
     if (kind === wire.OCC_FILE_DIALOG_RESULT) {

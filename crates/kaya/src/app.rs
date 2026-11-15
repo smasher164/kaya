@@ -6216,6 +6216,9 @@ pub struct Messages<M> {
             >,
         >,
     >,
+    /// PROCESS-LEVEL like notification_activation: a leftover backup
+    /// arrives before the app could have asked for anything.
+    backup_left: RefCell<Option<Box<dyn Fn(crate::protocol::LeftoverBackup) -> M>>>,
     /// Per-dialog, one-shot like an alert: the registration retires with
     /// the one result, so no guest ever inspects a dialog id.
     dialogs: RefCell<HashMap<u64, Box<dyn Fn(Vec<crate::protocol::PickedFile>) -> M>>>,
@@ -6290,6 +6293,18 @@ fn notification_dropped(
 bound at the show and no process-level handler is registered \
 (Messages::on_notification_activation)\n",
         notification.0
+    );
+    let _ = std::io::stderr().write_all(line.as_bytes());
+}
+
+/// A leftover backup with no handler (docs/rich-document-plan.md RD15 B):
+/// one stderr write, and the backup stays for the next launch. The other
+/// eight bindings print this sentence with their own registrar's name.
+fn backup_dropped(name: &str) {
+    use std::io::Write as _;
+    let line = format!(
+        "kaya: a save of {name} did not finish and left a backup, and no handler \
+is registered (Messages::on_backup_left); it stays for the next launch\n"
     );
     let _ = std::io::stderr().write_all(line.as_bytes());
 }
@@ -6386,6 +6401,7 @@ impl<M> Messages<M> {
             notifications: RefCell::new(HashMap::new()),
             toasts: RefCell::new(HashMap::new()),
             notification_activation: RefCell::new(None),
+            backup_left: RefCell::new(None),
             dialogs: RefCell::new(HashMap::new()),
             clip_reads: RefCell::new(HashMap::new()),
             undone: RefCell::new(HashMap::new()),
@@ -7156,6 +7172,18 @@ impl<M> Messages<M> {
         *self.notification_activation.borrow_mut() = Some(Box::new(f));
     }
 
+    /// Bind the PROCESS-LEVEL leftover-backup handler
+    /// (docs/rich-document-plan.md RD15 B): a safe save a crash interrupted
+    /// left a backup this launch could not prove redundant, and the app
+    /// answers [`crate::LeftoverBackup::restore`] or
+    /// [`crate::LeftoverBackup::discard`], or nothing, which keeps it for
+    /// the next launch. Register it before the app's first build. ANDROID
+    /// ONLY: a rename cannot leave a backup, so on iOS and the desktops it
+    /// never fires.
+    pub fn on_backup_left(&self, f: impl Fn(crate::protocol::LeftoverBackup) -> M + 'static) {
+        *self.backup_left.borrow_mut() = Some(Box::new(f));
+    }
+
     /// Bind a handler to one app-link route (docs/app-links-plan.md L2);
     /// declare routes at startup, before or inside the app's first
     /// transaction.
@@ -7453,6 +7481,30 @@ impl<M> Messages<M> {
                             if *route != 0 {
                                 link_unhandled(url, *route);
                             }
+                            None
+                        }
+                    }
+                }
+                Occurrence::BackupLeft { backup, name, backup_file, document, measured } => {
+                    let left = crate::protocol::LeftoverBackup {
+                        backup: *backup,
+                        name: name.clone(),
+                        backup_file: crate::protocol::PickedFile {
+                            handle: *backup_file,
+                            name: name.clone(),
+                            local_path: String::new(),
+                        },
+                        document: document.map(|handle| crate::protocol::PickedFile {
+                            handle,
+                            name: name.clone(),
+                            local_path: String::new(),
+                        }),
+                        measured: measured.clone(),
+                    };
+                    match self.backup_left.borrow().as_ref() {
+                        Some(f) => Some(f(left)),
+                        None => {
+                            backup_dropped(name);
                             None
                         }
                     }
@@ -11695,7 +11747,7 @@ mod tests {
                     | Occurrence::VoiceChanged { .. } => {}
                     Occurrence::FontFamilies { .. } => {}
                     Occurrence::FontFaces { .. } | Occurrence::FontDialogResult { .. } => {}
-                    Occurrence::LinkOpened { .. } => {}
+                    Occurrence::LinkOpened { .. } | Occurrence::BackupLeft { .. } => {}
                     Occurrence::Shutdown => break,
                 }
             }

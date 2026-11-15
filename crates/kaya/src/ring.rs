@@ -113,6 +113,7 @@ pub(crate) const REC_DOCUMENTS_DETACHED: u16 = 68;
 pub(crate) const REC_FONT_DIALOG_RESULT: u16 = 69;
 pub(crate) const REC_FONT_FACES: u16 = 70;
 pub(crate) const REC_VOICE_CHANGED: u16 = 71;
+pub(crate) const REC_BACKUP_LEFT: u16 = 72;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

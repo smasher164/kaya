@@ -79,6 +79,8 @@ mod clipboard;
 mod background;
 #[path = "save.rs"]
 mod save;
+#[path = "saferestore.rs"]
+mod saferestore;
 
 #[path = "undo.rs"]
 mod undo;
@@ -261,6 +263,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("clipboard") => clipboard::app(ctx),
         Ok("background") => background::app(ctx),
         Ok("save") => save::app(ctx),
+        Ok("saferestore") => saferestore::app(ctx),
         Ok("undo") => undo::app(ctx),
         Ok("dirty") => dirty::app(ctx),
         Ok("ranges") => ranges::app(ctx),

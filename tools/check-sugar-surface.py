@@ -829,6 +829,164 @@ for _lang, _rel, _spelling in NOTIFICATION_SPELLINGS:
             selftest_exit(f"check-sugar-surface: self-test failed — {_rel} "
                           f"changed during the sentence negative")
 
+# --- THE SAFE SAVE AND THE LEFTOVER BACKUP, in all nine -----------
+# docs/rich-document-plan.md §4.1: a picked file's save (RD14 A), the
+# process-level handler a leftover backup reaches (RD15 B), its two
+# answers, the arm that reaches the handler, and the drop sentence, the
+# same in nine bindings once flattened.
+SAFE_SAVE_ROWS = [
+    # (lang, file, save, registrar, restore, discard, arm)
+    ("rust", "crates/kaya/src/protocol.rs",
+     r"pub fn save\(&self, bytes: &\[u8\]\) -> std::io::Result<\(\)>",
+     None, r"pub fn restore\(&self\) -> std::io::Result<\(\)>",
+     r"pub fn discard\(&self\) -> std::io::Result<\(\)>", None),
+    ("python", "bindings/python/kaya/__init__.py",
+     r"    def save\(self, data: bytes\) -> None:", r"^def on_backup_left\(",
+     r"    def restore\(self\) -> None:", r"    def discard\(self\) -> None:",
+     r"if kind == wire\.OCC_BACKUP_LEFT:"),
+    ("go", "bindings/go/runtime.go",
+     r"func \(f PickedFile\) Save\(data \[\]byte\) error", None,
+     r"func \(b LeftoverBackup\) Restore\(\) error",
+     r"func \(b LeftoverBackup\) Discard\(\) error", None),
+    ("csharp", "bindings/csharp/Kaya.cs",
+     r"public void Save\(ReadOnlySpan<byte> bytes\)", None,
+     r"public void Restore\(\)", r"public void Discard\(\)", None),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     r"public void save\(byte\[\] bytes\) throws java\.io\.IOException",
+     r"public void onBackupLeft\(", r"public void restore\(\) throws",
+     r"public void discard\(\) throws",
+     r"occ\.kind == KayaWire\.OCC_KIND_BACKUP_LEFT\) \{\s*backupLeftArrived\("),
+    ("swift", "bindings/swift/KayaApp.swift",
+     r"public func save\(_ bytes: Data\) throws", r"func onBackupLeft\(",
+     r"public func restore\(\) throws", r"public func discard\(\) throws",
+     r"case \(UInt16\(KAYA_OCCURRENCE_BACKUP_LEFT\), _\):\s*backupLeftArrived\("),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     r"^savePicked :: PickedFile -> BS\.ByteString -> IO \(\)", r"^onBackupLeft ::",
+     r"^restoreBackup :: LeftoverBackup -> IO \(\)",
+     r"^discardBackup :: LeftoverBackup -> IO \(\)",
+     r"kind == W\.occKindBackupLeft -> do\s*backupLeftArrived app"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     r"^let save_picked file bytes", r"^let on_backup_left app ",
+     r"^let restore_backup left", r"^let discard_backup left",
+     r"kind = Kaya_wire\.occ_kind_backup_left then"),
+    ("js", "bindings/js/kaya/index.ts",
+     r"  save\(bytes: Uint8Array \| string\): void \{", r"^export function onBackupLeft\(",
+     r"  restore\(\): void \{", r"  discard\(\): void \{",
+     r"if \(kind === wire\.OCC_BACKUP_LEFT\) \{"),
+]
+# The registrar and the arm where the save and its answers do not live.
+SAFE_SAVE_ELSEWHERE = {
+    "rust": ("crates/kaya/src/app.rs", r"pub fn on_backup_left\(",
+             r"Occurrence::BackupLeft \{ backup, name, backup_file, document, measured \} => \{"),
+    "go": ("bindings/go/app.go", r"func \(a \*App\) OnBackupLeft\(",
+           r"case kind == occBackupLeft:\s*a\.backupLeftOccurred\(id, tail\)"),
+    "csharp": ("bindings/csharp/KayaApp.cs", r"public void OnBackupLeft\(",
+               r"case BackupLeft left:\s*BackupLeftArrived\(left\.Left\);"),
+}
+SAFE_SAVE_SPELLINGS = {
+    "rust": ("crates/kaya/src/app.rs", "Messages::on_backup_left"),
+    "python": ("bindings/python/kaya/__init__.py", "kaya.on_backup_left"),
+    "go": ("bindings/go/app.go", "App.OnBackupLeft"),
+    "csharp": ("bindings/csharp/KayaApp.cs", "App.OnBackupLeft"),
+    "java": ("bindings/java/dev/kaya/KayaApp.java", "KayaApp.onBackupLeft"),
+    "swift": ("bindings/swift/KayaApp.swift", "KayaApp.onBackupLeft"),
+    "haskell": ("bindings/haskell/KayaApp.hs", "KayaApp.onBackupLeft"),
+    "ocaml": ("bindings/ocaml/kaya_app.ml", "Kaya_app.on_backup_left"),
+    "js": ("bindings/js/kaya/index.ts", "kaya.onBackupLeft"),
+}
+
+
+def backup_sentence(text, spelling):
+    """The drop sentence sliced from "kaya: a save of" through the
+    registrar's closing paren and the sentence's tail, holes flattened."""
+    opened = text.find("kaya: a save of ")
+    if opened < 0:
+        return None
+    closed = text.find(spelling + ")", opened)
+    if closed < 0 or closed - opened > 400:
+        return None
+    tail = text.find("next launch", closed)
+    if tail < 0 or tail - closed > 120:
+        return None
+    said = text[opened:tail + len("next launch")]
+    for pattern, repl in SENTENCE_FLATTENERS:
+        said = re.sub(pattern, repl, said)
+    said = said.replace("\\", "").replace('"', "")
+    return re.sub(r"\s+", " ", said).strip()
+
+
+def safe_save_findings(text_for):
+    out = []
+    for lang, rel, *patterns in SAFE_SAVE_ROWS:
+        save, registrar, restore, discard, arm = patterns
+        elsewhere = SAFE_SAVE_ELSEWHERE.get(lang)
+        if registrar is None:
+            registrar = elsewhere[1]
+        if arm is None:
+            arm = elsewhere[2]
+        for what, where, pattern in (
+                ("the picked file's save", rel, save),
+                ("the leftover backup's restore", rel, restore),
+                ("the leftover backup's discard", rel, discard),
+                ("the backup_left registrar",
+                 elsewhere[0] if elsewhere and registrar == elsewhere[1] else rel, registrar),
+                ("the backup_left arm",
+                 elsewhere[0] if elsewhere and arm == elsewhere[2] else rel, arm)):
+            if not re.search(pattern, text_for(where), re.M):
+                out.append(f"check-sugar-surface: {lang} has no {what} "
+                           f"(wanted /{pattern}/ in {where}; "
+                           f"docs/rich-document-plan.md §4.1)")
+    said = {}
+    for lang, (rel, spelling) in SAFE_SAVE_SPELLINGS.items():
+        one = backup_sentence(text_for(rel), spelling)
+        if one is None:
+            out.append(f"check-sugar-surface: {lang} prints no backup_left drop "
+                       f"sentence naming {spelling} in {rel}")
+            continue
+        said[lang] = one.replace(spelling, "<registrar>")
+    if said and len(said) == len(SAFE_SAVE_SPELLINGS):
+        agreed = max(set(said.values()), key=list(said.values()).count)
+        for lang, one in said.items():
+            if one != agreed:
+                out.append(f"check-sugar-surface: {lang}'s backup_left drop "
+                           f"sentence says {one!r}, the other bindings say "
+                           f"{agreed!r} (RD15 B; compared flattened)")
+    return out
+
+
+for _msg in safe_save_findings(read_rel):
+    print(_msg)
+    status = 1
+
+# ITS WATCHED NEGATIVES, three per binding on a COPY of the text: the save
+# renamed, the arm cut, and a word taken out of the drop sentence.
+_safe_watched = []
+for _lang, _rel, *_patterns in SAFE_SAVE_ROWS:
+    _else = SAFE_SAVE_ELSEWHERE.get(_lang)
+    _arm_rel = _else[0] if _else and _patterns[4] is None else _rel
+    _arm = _else[2] if _patterns[4] is None else _patterns[4]
+    _sent_rel = SAFE_SAVE_SPELLINGS[_lang][0]
+    for _what, _where, _pattern, _repl in (
+            ("save", _rel, _patterns[0], "kaya_fake_save"),
+            ("arm", _arm_rel, _arm, "kaya_fake_arm"),
+            ("sentence", _sent_rel, r"did not finish", "did finish"),
+    ):
+        _text = read_rel(_where)
+        _doctored, _n = sub_count(_pattern, _repl, _text, re.M)
+        _fired = [m for m in safe_save_findings(
+            lambda rel, _r=_where, _d=_doctored: _d if rel == _r else read_rel(rel))
+            if f" {_lang} " in m or f" {_lang}'s " in m]
+        _safe_watched.append(f"{_lang}-{_what}={_n}/{len(_fired)}")
+        if _n < 1 or len(_fired) != 1:
+            selftest_exit(f"check-sugar-surface: self-test failed — the {_lang} "
+                          f"safe-save {_what} negative applied {_n} time(s) in "
+                          f"{_where} and produced {len(_fired)} finding(s), not 1")
+        if read_rel(_where) != _text:
+            selftest_exit(f"check-sugar-surface: self-test failed — {_where} "
+                          f"changed during the safe-save negative")
+print("check-sugar-surface: safe-save rows watched (applied/named): "
+      + " ".join(_safe_watched), file=sys.stderr)
+
 # --- THE APP-LINK SURFACE, in all nine -----------------------------
 # docs/app-links-plan.md §4: `link(pattern, handler)` declares a ROUTE
 # and the handler that answers it, on the app-level registrar beside

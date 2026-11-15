@@ -192,6 +192,9 @@ pub const KAYA_OCCURRENCE_FONT_FACES: u16 = 70;
 /// VOICE_CHANGED { u64 voice; u32 route; u32 reserved; Value detail }
 /// (docs/capture-plan.md §5).
 pub const KAYA_OCCURRENCE_VOICE_CHANGED: u16 = 71;
+/// BACKUP_LEFT { u64 backup; u64 backup_file; u64 document; Value name;
+/// Value measured } (docs/rich-document-plan.md §4.1). Android only.
+pub const KAYA_OCCURRENCE_BACKUP_LEFT: u16 = 72;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -244,6 +247,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_FONT_DIALOG_RESULT == ring::REC_FONT_DIALOG_RESULT
         && KAYA_OCCURRENCE_FONT_FACES == ring::REC_FONT_FACES
         && KAYA_OCCURRENCE_VOICE_CHANGED == ring::REC_VOICE_CHANGED
+        && KAYA_OCCURRENCE_BACKUP_LEFT == ring::REC_BACKUP_LEFT
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -561,6 +565,11 @@ pub const KAYA_FILE_MODE_READ_WRITE: u32 = 2;
 const _: () = assert!(KAYA_FILE_MODE_READ == wire::FILE_MODE_READ);
 const _: () = assert!(KAYA_FILE_MODE_WRITE == wire::FILE_MODE_WRITE);
 const _: () = assert!(KAYA_FILE_MODE_READ_WRITE == wire::FILE_MODE_READ_WRITE);
+/// kaya_answer_backup's answer (docs/rich-document-plan.md RD15 B).
+pub const KAYA_BACKUP_ANSWER_RESTORE: u32 = 0;
+pub const KAYA_BACKUP_ANSWER_DISCARD: u32 = 1;
+const _: () = assert!(KAYA_BACKUP_ANSWER_RESTORE == wire::BACKUP_ANSWER_RESTORE);
+const _: () = assert!(KAYA_BACKUP_ANSWER_DISCARD == wire::BACKUP_ANSWER_DISCARD);
 pub const KAYA_FILE_CONTENT_ANY: u32 = 0;
 pub const KAYA_FILE_CONTENT_IMAGES: u32 = 1;
 const _: () = assert!(KAYA_FILE_CONTENT_ANY == wire::FILE_CONTENT_ANY);
@@ -1501,7 +1510,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 71,
+    crate::spec::SPEC.occurrence.len() == 72,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -3605,6 +3614,14 @@ pub(crate) fn set_presentation_sink(sink: OccSink) {
     // A link takes the same channel a notification result does
     // (crates/kaya/src/links.rs).
     crate::links::set_sink(sink.clone());
+    // The early lock before the sink's, deliver_early's order, held until
+    // the sink is in place so an emit racing this install is not stranded.
+    let mut early_occurrences = EARLY_OCCURRENCES.lock().unwrap();
+    if let OccSink::Mpsc(_) = &sink {
+        for occurrence in early_occurrences.drain(..) {
+            sink.send(occurrence);
+        }
+    }
     // R3 (docs/tasks-s9-plan.md): a notification result can arrive before
     // the app thread exists, because a TAP can start the process. The
     // ring already holds those records for a foreign guest, which reads
@@ -4086,6 +4103,196 @@ pub extern "C" fn kaya_open_picked(
     }
 }
 
+/// THE SAFE SAVE (docs/rich-document-plan.md §4.1): the whole new contents
+/// of a picked file, `len` bytes at `bytes`. Blocking, and safe from any
+/// thread like kaya_open_picked. 0 when the document holds exactly those
+/// bytes; an errno when it holds its old ones, with the sentence on stderr.
+/// On Android only, a failure kaya could not undo leaves a backup that the
+/// next launch reports as `backup_left`; a rename cannot leave one, so on
+/// iOS and the desktops that occurrence never fires.
+///
+/// # Safety
+/// `bytes` must be valid for `len` bytes (null only when `len` is 0).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_save_picked(handle: u64, bytes: *const u8, len: usize) -> i32 {
+    if bytes.is_null() && len != 0 {
+        return libc_einval();
+    }
+    let source = {
+        let table = picked().lock().unwrap();
+        match table.live.get(&handle) {
+            Some(s) => std::sync::Arc::clone(s),
+            None => return libc_einval(),
+        }
+    };
+    let bytes: &[u8] = if len == 0 { &[] } else { unsafe { std::slice::from_raw_parts(bytes, len) } };
+    match source.save(bytes) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("kaya: saving {} failed: {e}", source.name());
+            e.raw_os_error().unwrap_or(LIBC_EIO)
+        }
+    }
+}
+
+const LIBC_EIO: i32 = 5;
+
+/// THE LEFTOVER BACKUPS the next launch could not prove redundant (RD15 B),
+/// by the id `backup_left` carried. An answered one leaves the table.
+fn leftovers() -> &'static Mutex<std::collections::HashMap<u64, crate::safesave::Leftover>> {
+    static LEFT: std::sync::OnceLock<Mutex<std::collections::HashMap<u64, crate::safesave::Leftover>>> =
+        std::sync::OnceLock::new();
+    LEFT.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+/// The backup itself, readable and never writable: the app reads it to
+/// decide, and answers through kaya_answer_backup.
+struct BackupSource {
+    name: String,
+    path: std::path::PathBuf,
+}
+
+impl crate::protocol::PickedSource for BackupSource {
+    fn open(&self, mode: crate::protocol::FileMode) -> std::io::Result<(i64, bool)> {
+        if mode != crate::protocol::FileMode::Read {
+            return Err(std::io::Error::from_raw_os_error(LIBC_EACCES));
+        }
+        let file = std::fs::File::open(&self.path)?;
+        Ok((crate::protocol::raw_handle(file), true))
+    }
+    fn save(&self, _: &[u8]) -> std::io::Result<()> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("the backup of {} is read-only; answer it with restore or discard", self.name),
+        ))
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn local_path(&self) -> &str {
+        ""
+    }
+    fn locator(&self) -> &str {
+        self.path.to_str().unwrap_or("")
+    }
+}
+
+const LIBC_EACCES: i32 = 13;
+
+/// The next launch's leftovers, each registered and delivered as one
+/// `backup_left` before the app thread reads anything (the early
+/// notification's path, R3).
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+pub(crate) fn backups_left(found: Vec<crate::safesave::Leftover>) {
+    for left in found {
+        deliver_early(register_leftover(left));
+    }
+}
+
+fn register_leftover(left: crate::safesave::Leftover) -> crate::protocol::Occurrence {
+    let backup = NEXT_BACKUP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let name = left.record.name.clone();
+    let backup_file = picked_register(std::sync::Arc::new(BackupSource {
+        name: name.clone(),
+        path: left.backup_path(),
+    }));
+    let document = left.opens.then(|| document_source(&left)).map(picked_register);
+    let occurrence = crate::protocol::Occurrence::BackupLeft {
+        backup: crate::protocol::BackupId(backup),
+        name,
+        backup_file,
+        document,
+        measured: left.measured.clone(),
+    };
+    leftovers().lock().unwrap().insert(backup, left);
+    occurrence
+}
+
+static NEXT_BACKUP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+#[cfg(target_os = "android")]
+fn document_source(left: &crate::safesave::Leftover) -> std::sync::Arc<dyn crate::protocol::PickedSource> {
+    std::sync::Arc::new(crate::android::UriSource {
+        name: left.record.name.clone(),
+        uri: left.record.uri.clone(),
+    })
+}
+
+#[cfg(not(target_os = "android"))]
+fn document_source(left: &crate::safesave::Leftover) -> std::sync::Arc<dyn crate::protocol::PickedSource> {
+    std::sync::Arc::new(crate::protocol::PathSource {
+        name: left.record.name.clone(),
+        path: left.record.uri.clone(),
+    })
+}
+
+/// The app's answer to one `backup_left` (spec enum backup_answer): restore
+/// writes the backup over the document through the safe save and then
+/// deletes it; discard deletes it. Blocking, safe from any thread. 0 on
+/// success; an errno with the sentence on stderr otherwise, the backup then
+/// staying for the next launch. EINVAL for an id no backup_left carried, or
+/// one already answered.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_answer_backup(backup: u64, answer: u32) -> i32 {
+    let restore = match answer {
+        crate::wire::BACKUP_ANSWER_RESTORE => true,
+        crate::wire::BACKUP_ANSWER_DISCARD => false,
+        _ => return libc_einval(),
+    };
+    let Some(left) = leftovers().lock().unwrap().get(&backup).cloned() else {
+        return libc_einval();
+    };
+    match answer_leftover(&left, restore) {
+        Ok(()) => {
+            leftovers().lock().unwrap().remove(&backup);
+            0
+        }
+        Err(e) => {
+            eprintln!(
+                "kaya: {} the backup of {} failed, and it stays for the next launch: {e}",
+                if restore { "restoring" } else { "discarding" },
+                left.record.name
+            );
+            e.raw_os_error().unwrap_or(LIBC_EIO)
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+fn answer_leftover(left: &crate::safesave::Leftover, restore: bool) -> std::io::Result<()> {
+    crate::android::answer_backup(left, restore)
+}
+
+/// Off Android no save leaves a backup; the unit tests answer through the
+/// path source's document twin.
+#[cfg(not(target_os = "android"))]
+fn answer_leftover(left: &crate::safesave::Leftover, restore: bool) -> std::io::Result<()> {
+    let store = left.dir.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    crate::safesave::answer(left, restore, &crate::safesave::PathDocument(left.record.uri.clone()), &store)
+}
+
+/// An occurrence that can arrive before the app thread exists: the ring
+/// holds it for a foreign guest, the early list for an mpsc consumer
+/// (set_presentation_sink drains it first).
+fn deliver_early(occurrence: crate::protocol::Occurrence) {
+    let mut early = EARLY_OCCURRENCES.lock().unwrap();
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(occurrence);
+        return;
+    }
+    if let crate::protocol::Occurrence::BackupLeft { backup, name, backup_file, document, measured } =
+        &occurrence
+    {
+        state().ring.push_record(
+            ring::REC_BACKUP_LEFT,
+            &crate::wire::backup_left_body(*backup, *backup_file, *document, name, measured),
+        );
+    }
+    early.push(occurrence);
+}
+
+static EARLY_OCCURRENCES: Mutex<Vec<crate::protocol::Occurrence>> = Mutex::new(Vec::new());
+
 /// EINVAL without pulling in libc: the value is stable across every
 /// platform kaya targets.
 fn libc_einval() -> i32 {
@@ -4100,6 +4307,80 @@ mod picked_tests {
     use super::*;
     use crate::protocol::{PathSource, SaveDestination};
     use std::io::{Read, Seek, Write};
+
+    /// The safe save through the C entry (docs/rich-document-plan.md §4.1):
+    /// long over short, short over long, a destination nobody made, and the
+    /// two refusals.
+    #[test]
+    fn a_picked_file_saves_through_the_c_entry() {
+        let dir = std::env::temp_dir().join(format!("kaya-saved-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("draft");
+        std::fs::write(&path, b"short").unwrap();
+        let handle = picked_register(std::sync::Arc::new(PathSource {
+            name: "draft".into(),
+            path: path.to_string_lossy().into_owned(),
+        }));
+        let long = b"a draft longer than the first";
+        assert_eq!(kaya_save_picked(handle.0, long.as_ptr(), long.len()), 0);
+        assert_eq!(std::fs::read(&path).unwrap(), long);
+        assert_eq!(kaya_save_picked(handle.0, b"tiny".as_ptr(), 4), 0);
+        assert_eq!(std::fs::read(&path).unwrap(), b"tiny");
+        let fresh = dir.join("final");
+        let destination = picked_register(std::sync::Arc::new(SaveDestination {
+            name: "final".into(),
+            path: fresh.to_string_lossy().into_owned(),
+        }));
+        assert_eq!(kaya_save_picked(destination.0, b"made".as_ptr(), 4), 0);
+        assert_eq!(std::fs::read(&fresh).unwrap(), b"made");
+        let mut names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["draft", "final"], "no temporary file is left");
+        assert_eq!(kaya_save_picked(u64::MAX, b"x".as_ptr(), 1), 22);
+        assert_eq!(kaya_save_picked(handle.0, std::ptr::null(), 1), 22);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A leftover registered as the next launch registers one, answered
+    /// through kaya_answer_backup: restore, then the id is spent.
+    #[test]
+    fn a_leftover_backup_is_answered_through_the_c_entry() {
+        let dir = std::env::temp_dir().join(format!("kaya-left-{}", std::process::id()));
+        let store = dir.join("store");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("draft");
+        std::fs::write(&path, b"the first draft").unwrap();
+        let doc = crate::safesave::PathDocument(path.to_string_lossy().into_owned());
+        let torn = crate::safesave::Fault::Tear { hold: false };
+        assert!(crate::safesave::save_document(&doc, &store, b"the second draft", torn).is_err());
+        let found = crate::safesave::sweep(&store, &|r| {
+            Box::new(crate::safesave::PathDocument(r.uri.clone()))
+        });
+        let Some((_, crate::safesave::Classified::Left(left))) = found.into_iter().next() else {
+            panic!("the torn save left nothing to report");
+        };
+        let crate::protocol::Occurrence::BackupLeft { backup, backup_file, document, .. } =
+            register_leftover(left)
+        else {
+            panic!("register_leftover built another occurrence");
+        };
+        assert!(document.is_some(), "the document still opens");
+        let (mut fd, mut seekable) = (-1i64, 0u32);
+        assert_eq!(kaya_open_picked(backup_file.0, crate::wire::FILE_MODE_READ, &mut fd, &mut seekable), 0);
+        let mut old = String::new();
+        unsafe { crate::protocol::file_from_raw(fd) }.read_to_string(&mut old).unwrap();
+        assert_eq!(old, "the first draft");
+        assert_eq!(kaya_open_picked(backup_file.0, crate::wire::FILE_MODE_WRITE, &mut fd, &mut seekable), 13);
+        assert_eq!(kaya_answer_backup(backup.0, 7), 22);
+        assert_eq!(kaya_answer_backup(backup.0, crate::wire::BACKUP_ANSWER_RESTORE), 0);
+        assert_eq!(std::fs::read(&path).unwrap(), b"the first draft");
+        assert!(std::fs::read_dir(&store).unwrap().all(|e| e.unwrap().file_name() == "grants"));
+        assert_eq!(kaya_answer_backup(backup.0, crate::wire::BACKUP_ANSWER_DISCARD), 22);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// THE CENTRAL CLAIM OF THE FILE-DIALOG DESIGN, at unit level: a
     /// handle redeems for a REAL descriptor, and the caller reads it with
@@ -7797,7 +8078,8 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
             | crate::protocol::Occurrence::ImageNeeded { .. }
             | crate::protocol::Occurrence::ImageReleased { .. }
             | crate::protocol::Occurrence::Undone { .. }
-            | crate::protocol::Occurrence::VoiceChanged { .. }) => {
+            | crate::protocol::Occurrence::VoiceChanged { .. }
+            | crate::protocol::Occurrence::BackupLeft { .. }) => {
                 crate::protocol::OccSink::Ring(state.ring.clone()).send(other)
             }
             // EXHAUSTIVE ON PURPOSE, no wildcard: a new occurrence fails
