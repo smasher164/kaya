@@ -740,7 +740,8 @@ and dev.kaya.KayaSafeSave for the ContentResolver half.
   usable for the life of the process, and in a relaunched process that
   grant is its only one. The answer leaves a note in
   `kaya-safesave/grants/` and the next launch releases it, unless a backup
-  still waiting for its answer needs the grant.
+  still waiting for its answer needs the grant. RULED 2026-11-15 (the
+  maintainer: "im okay with your recommendations").
 - The second act's knife is `KAYA_SAFE_SAVE_FAULT=tear` (an intent extra on
   act one only): step 3 writes half the new bytes, fsyncs and holds, so
   `relaunch launch` ends the process with a torn document, the one state
