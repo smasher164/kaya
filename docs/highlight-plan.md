@@ -3,8 +3,10 @@
 Status: RULED 2026-11-15, H1 to H8 A as recommended, and both assumptions in
 §6's "Beyond these" as the plan assumes them (the maintainer: "i accept your
 rulings there as given"). §5 steps 0 and 1 are built (2026-11-15: the
-measurements under docs/measurements/highlight-*-2026-11-15.md and the root);
-H1's hexes wait on the review page.
+measurements under docs/measurements/highlight-*-2026-11-15.md and the root).
+H1's hexes RULED 2026-11-15 on the review page (the maintainer: "im okay with
+your recommendations"): recipe A as built, A' not taken; and with them the
+selection rule in H3 below.
 
 The maintainer, 2026-11-15: "yes, let's do the highlighter pen." This plan is
 the design pass for RD6 of docs/rich-document-plan.md, which RULED A on
@@ -412,6 +414,13 @@ routes the code ground proved on each platform.
   code run's ground over a quote's tint, on all five.
 - B. The mark over find (the document's own formatting outranks a transient
   decoration).
+
+RULED 2026-11-15, with the hexes (the maintainer: "im okay with your
+recommendations"): where kaya draws the mark itself (the Mac's and iOS's
+fragment, Compose's layer) it is NOT drawn under selected text, so a selection
+reads as it does on the page, matching GTK and RichEdit, whose selections
+replace a background. Measured first: Compose's selection wash over the dark
+mark read 3.21:1 (docs/measurements/highlight-compose-2026-11-15.md).
 
 RECOMMEND A. The user who declared a find set is looking for the match, and
 find's 55% yellow over a pastel still reads; B would hide a match inside a
