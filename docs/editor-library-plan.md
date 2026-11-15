@@ -1,6 +1,6 @@
 # The editor's library: absorbing the notes demo (the design pass, 2026-11-15)
 
-Status: PROPOSED 2026-11-15, rulings open (L1 to L12, §11). Nothing is built.
+Status: NOT TAKEN 2026-11-15 (the maintainer, 2026-11-15: "perhaps we're getting a bit out of scope for our gui library right now. the editor app is not meant to be a definitive editor app. it's just a demo app. let's keep the notes demo and the editor separate things"). L1 to L12 are not ruled and nothing is built; the plan stays for its measurements (§1).
 The feasibility measurements (§1) were made first, in a scratch directory
 outside the repo, and their builds were deleted afterwards.
 

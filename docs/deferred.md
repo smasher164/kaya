@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## RULING — the editor's library, absorbing the notes demo (RD9 and RD10's slice): docs/editor-library-plan.md PROPOSED 2026-11-15, L1 to L12 open
+## ~~RULING — the editor's library, absorbing the notes demo (RD9 and RD10's slice): docs/editor-library-plan.md PROPOSED 2026-11-15, L1 to L12 open~~ CLOSED 2026-11-15, NOT TAKEN (the maintainer, 2026-11-15: "perhaps we're getting a bit out of scope for our gui library right now. the editor app is not meant to be a definitive editor app. it's just a demo app. let's keep the notes demo and the editor separate things"): the Go editor stays a demo of the Go binding, the notes demo (guests/rust/notes.rs) stays its own Rust app, and nothing in the plan is built; the plan is kept for its measurements (automerge-go and automerge-c cannot carry RD10, an app-owned Rust bridge can, modernc.org/sqlite builds for all five targets) and the block marker's width is in docs/traps.md.
 KEY: editor-library-plan, editor library, library.sqlite, note tab, New Note, Import into Library, Export, notes demo, notes.rs, notes.steps, automerge bridge, block marker width, Utf8CodeUnit, modernc.org/sqlite, go.sum, check-pins Go clause, Peer Step, editorlibrary
 
 The maintainer, 2026-11-15: absorb the notes demo into the Go editor "ala
@@ -29,7 +29,7 @@ go.sum pins (L12). The maintainer rules, then the build runs the plan's §10,
 the bridge's tests first. The entry closes when the plan reads BUILT and the
 matrix is green on it.
 
-## RULING — the highlighter pen (RD6's slice): docs/highlight-plan.md PROPOSED 2026-11-15, H1 to H8 open
+## BUILD — the highlighter pen (RD6's slice): docs/highlight-plan.md RULED 2026-11-15, H1 to H8 A as recommended and both assumptions in §6's "Beyond these" (the maintainer: "i accept your rulings there as given")
 KEY: highlight-plan, highlighter pen, highlight mark, highlight_color, HighlightColor, rich_attr 14, ink_on, kaya.draw.mark, nearest_highlight, expect_text_ground, RD6
 
 A user-applied background colour on document text, saved like bold: a

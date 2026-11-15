@@ -1,7 +1,8 @@
 # The highlighter pen: a named background colour on document text (RD6's slice)
 
-Status: PROPOSED 2026-11-15, rulings open (H1 to H8 in §6). Nothing in this
-plan is built.
+Status: RULED 2026-11-15, H1 to H8 A as recommended, and both assumptions in
+§6's "Beyond these" as the plan assumes them (the maintainer: "i accept your
+rulings there as given"). Nothing in this plan is built yet.
 
 The maintainer, 2026-11-15: "yes, let's do the highlighter pen." This plan is
 the design pass for RD6 of docs/rich-document-plan.md, which RULED A on

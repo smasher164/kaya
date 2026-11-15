@@ -915,9 +915,11 @@ byte on five lanes.
 5. **The review page** with captures of a rich tab on every lane, light and
    dark, each viewed before it is published.
 6. Then, each its own slice: the
-   highlight (RD6), the notes app over a SQLite library with Automerge
-   behind it (RD9, RD10), and the safe save through a picked file (§4.1,
-   RD14 to RD16; DONE 2026-11-14).
+   highlight (RD6; docs/highlight-plan.md, RULED 2026-11-15), the notes app
+   over a SQLite library with Automerge behind it (RD9, RD10; NOT TAKEN
+   2026-11-15, docs/editor-library-plan.md: the editor and the notes demo stay
+   separate demos), and the safe save through a picked file (§4.1, RD14 to
+   RD16; DONE 2026-11-14).
 
 Every guard this plan's build needs is named where it is built: the
 corroboration wall (`expect_runs` fails when an arm's own runs disagree with
