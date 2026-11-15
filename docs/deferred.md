@@ -9,6 +9,41 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## RULING — the editor's library, absorbing the notes demo (RD9 and RD10's slice): docs/editor-library-plan.md PROPOSED 2026-11-15, L1 to L12 open
+KEY: editor-library-plan, editor library, library.sqlite, note tab, New Note, Import into Library, Export, notes demo, notes.rs, notes.steps, automerge bridge, ambridge, block marker width, Utf8CodeUnit, modernc.org/sqlite, go.sum, check-pins Go clause, Peer Step, editorlibrary
+
+The maintainer, 2026-11-15: absorb the notes demo into the Go editor "ala
+RD9 and RD10". Measured first (the plan's §1): automerge-go cannot carry it
+(no marks, markers, patches or cursors; no iOS, Android or Windows core) and
+automerge-c has no block markers or patches, while an app-owned Rust bridge
+over automerge 0.11.0 built for the Mac, the iOS simulator, Android and
+Windows and linked beside the static libkaya on iOS with no duplicate
+symbol; modernc.org/sqlite v1.62.0 (FTS5 in) compiled for all five targets.
+A FINDING for rich-document-plan §3 and docs/traps.md: in Utf8CodeUnit a
+block marker is three index units wide, not one. The rulings: the library
+as a leading shared region (L1), autosaved note tabs (L2), launch unchanged
+(L3), the merge proven by a harness-only replayed peer (L4), the bridge (L5),
+modernc (L6), own-edits undo over cursors (L7), the schema (L8), import and
+export (L9), notes.rs folded into the editor (L10), delete asks (L11), and
+go.sum pins (L12). The maintainer rules, then the build runs the plan's §10,
+the bridge's tests first. The entry closes when the plan reads BUILT and the
+matrix is green on it.
+
+## RULING — the highlighter pen (RD6's slice): docs/highlight-plan.md PROPOSED 2026-11-15, H1 to H8 open
+KEY: highlight-plan, highlighter pen, highlight mark, highlight_color, HighlightColor, rich_attr 14, ink_on, kaya.draw.mark, nearest_highlight, expect_text_ground, RD6
+
+A user-applied background colour on document text, saved like bold: a
+`highlight` mark whose value is one of six palette names with designed light
+and dark values (H1), drawn through each platform's kaya-owned ground and
+never the slot find's `highlight_ranges` paints where the two can be told
+apart (H2), find over the mark over code over quote (H3), a `color` run under
+it re-mapped by `brand::ink_on` (H4), the wire and `.kdoc` key (H5), RTF
+`\highlightN\cbN` and HTML `<mark>` both ways with a nearest-name map (H6),
+the sugar in nine bindings and the editor's Highlight submenu (H7), nothing
+new for assistive technology (H8). The maintainer rules, then the build runs
+docs/highlight-plan.md §5, measurements first. The entry closes when the
+plan's status reads BUILT and the matrix is green on it.
+
 ## GAP — GStreamer's adaptive demuxer can lose its own stop and wait forever (docs/traps.md, the HLS stop that waited for a download thread forever; 2026-11-13)
 KEY: downloadhelper_stop, dh_transfer_thread_func, g_main_loop_quit, adaptive-downlo, hlsdemux2, adaptivedemux2, media_delivery, notsdemux, stack-names, dbgsym
 
