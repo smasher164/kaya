@@ -10,7 +10,7 @@ scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
 ## RULING — the editor's library, absorbing the notes demo (RD9 and RD10's slice): docs/editor-library-plan.md PROPOSED 2026-11-15, L1 to L12 open
-KEY: editor-library-plan, editor library, library.sqlite, note tab, New Note, Import into Library, Export, notes demo, notes.rs, notes.steps, automerge bridge, ambridge, block marker width, Utf8CodeUnit, modernc.org/sqlite, go.sum, check-pins Go clause, Peer Step, editorlibrary
+KEY: editor-library-plan, editor library, library.sqlite, note tab, New Note, Import into Library, Export, notes demo, notes.rs, notes.steps, automerge bridge, block marker width, Utf8CodeUnit, modernc.org/sqlite, go.sum, check-pins Go clause, Peer Step, editorlibrary
 
 The maintainer, 2026-11-15: absorb the notes demo into the Go editor "ala
 RD9 and RD10". Measured first (the plan's §1): automerge-go cannot carry it
