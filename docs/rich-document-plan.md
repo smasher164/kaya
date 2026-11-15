@@ -462,7 +462,7 @@ when one does:
 | kaya | Automerge |
 |---|---|
 | the text | the `Text` object; kaya's UTF-8 bytes are Automerge's `Utf8CodeUnit` (measured identity, rich-text plan §6) |
-| a paragraph boundary `"\n"` | a block marker (`splitBlock`); the document's first paragraph is a marker at index 0 that has no `"\n"` in kaya's text, so the bridge adds one to every offset and turns each `"\n"` into a marker one for one |
+| a paragraph boundary `"\n"` | a block marker (`splitBlock`); the document's first paragraph is a marker at index 0 that has no `"\n"` in kaya's text, so the bridge turns each `"\n"` into a marker one for one; the OFFSETS are not one for one, since a marker is three units wide in kaya's unit (docs/traps.md, an Automerge block marker is three index units wide) |
 | `block` | the marker's `type`: `paragraph`, `heading` with `attrs.level`, `code-block`; `quote` is `parents: ["blockquote"]` |
 | `list` | `type` `unordered-list-item` or `ordered-list-item`; `check` is `unordered-list-item` with `attrs.__ext__kaya.check` |
 | `indent` n | the list type repeated n times in `parents` (Automerge's own nesting); a plain paragraph's indent is `attrs.__ext__kaya.indent` |

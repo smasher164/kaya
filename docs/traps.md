@@ -20971,3 +20971,16 @@ under 24 spinners in the docker VM were all green (30 s each). Not
 reproduced; the bundle carries the CPU reading that names starvation, and
 the wedge that caused it is in "The packaged leg launched eight minutes
 late".
+
+## An Automerge block marker is three index units wide in kaya's unit, not one (measured 2026-11-15)
+
+On automerge 0.11.0 and 0.12.0 alike, under `TextEncoding::Utf8CodeUnit` (kaya's
+byte unit) a block marker occupies THREE index units, the UTF-8 width of the
+U+FFFC Automerge reports for it: `"ab"` with `split_block(1)` grows from length
+2 to 5, while under `UnicodeCodePoint` and `Utf16CodeUnit` it grows to 3, and an
+insert at an index inside a marker lands after it. So a bridge from kaya's text
+to RD10's block markers cannot add one per newline: kaya byte `b` with `k`
+newlines before it is Automerge index `3 + b + 2k`, and a patch at index `i`
+with `m` markers before it is kaya byte `i - 2m - 1`. Measured in scratch by the
+library design pass; the full account is docs/editor-library-plan.md §1.2, and
+docs/rich-document-plan.md §3's table points here.
