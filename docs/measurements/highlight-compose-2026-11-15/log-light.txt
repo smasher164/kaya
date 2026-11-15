@@ -1,0 +1,6 @@
+--------- beginning of main
+11-15 11:00:35.806  9348  9348 I HLPROBE : DRAWN word px left=81 top=24 right=178 bottom=52 wash=666750a4 ink=ff1d1b20
+11-15 11:00:37.359  9348  9348 I HLPROBE : A11Y node 4 class=android.widget.EditText text='plain MARKED plain' spans=[]
+11-15 11:00:37.360  9348  9348 I HLPROBE : A11Y node 8 class=android.widget.EditText text='plain MARKED plain' spans=[]
+11-15 11:00:37.361  9348  9348 I HLPROBE : A11Y nodes with the word: 2
+11-15 11:00:37.361  9348  9348 I HLPROBE : READY

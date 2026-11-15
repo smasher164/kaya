@@ -357,6 +357,26 @@ pub fn ink_for_dark(rgb: u32) -> u32 {
     contrast_matched(rgb, INK_DARK_PAGE, target)
 }
 
+/// A run's colour drawn on `ground` (docs/highlight-plan.md H4): RD5's map
+/// with the page made a parameter, so a highlighted run keeps the contrast it
+/// has on the light page, never below 4.5:1. At the two pages it is the old
+/// door exactly: the stored colour on the light page, `ink_for_dark` on the
+/// dark one.
+pub fn ink_on(rgb: u32, ground: u32) -> u32 {
+    let (rgb, ground) = (rgb & 0xFF_FFFF, ground & 0xFF_FFFF);
+    match ground {
+        INK_LIGHT_PAGE => rgb,
+        INK_DARK_PAGE => ink_for_dark(rgb),
+        _ => contrast_matched(rgb, ground, contrast_ratio(rgb, INK_LIGHT_PAGE).max(INK_FLOOR)),
+    }
+}
+
+/// Oklch chroma and hue (degrees, 0 to 360) of a packed sRGB colour.
+pub(crate) fn oklch_chroma_hue(rgb: u32) -> (f64, f64) {
+    let (_, a, b) = oklab(rgb);
+    (a.hypot(b), b.atan2(a).to_degrees().rem_euclid(360.0))
+}
+
 /// The inverse, for a colour picked while the page is dark: exact for a pick
 /// that reads at 4.5:1 or more there, and a pick below that is drawn at the
 /// floor.
@@ -447,6 +467,52 @@ mod tests {
             let light = contrast_ratio(*rgb, INK_LIGHT_PAGE);
             let dark = contrast_ratio(ink_for_dark(*rgb), INK_DARK_PAGE);
             assert!(light >= INK_FLOOR && dark >= INK_FLOOR, "kaya: preset {name} {rgb:06x}: {light:.2}:1 light, {dark:.2}:1 dark");
+        }
+    }
+
+    /// docs/highlight-plan.md §4: every highlighter ground reads under the
+    /// platform's ink with room to spare (7:1 under black on the light page,
+    /// under white on the dark one) and is told apart from its page.
+    #[test]
+    fn the_highlight_palette_holds_its_floors() {
+        for (name, light, dark) in crate::richdoc::HIGHLIGHT_PALETTE {
+            let under_black = contrast_ratio(*light, 0x00_0000);
+            let under_white = contrast_ratio(*dark, 0xFF_FFFF);
+            assert!(under_black >= 7.0, "kaya: highlight {name} light {light:06X} reads {under_black:.2}:1 under black");
+            assert!(under_white >= 7.0, "kaya: highlight {name} dark {dark:06X} reads {under_white:.2}:1 under white");
+            let (lp, dp) = (contrast_ratio(*light, INK_LIGHT_PAGE), contrast_ratio(*dark, INK_DARK_PAGE));
+            assert!(lp >= 1.15 && dp >= 1.15, "kaya: highlight {name} sits {lp:.2}:1 from the light page and {dp:.2}:1 from the dark one");
+        }
+    }
+
+    /// H4: every preset under every highlight in both appearances reads at
+    /// 4.5:1 or better once re-mapped, and at the pages `ink_on` is the old
+    /// door. Over the sweep, a re-mapped colour reaches its light-page
+    /// contrast (or 4.5:1) as far as the ground allows.
+    #[test]
+    fn ink_on_a_highlight_keeps_the_runs_contrast() {
+        for (name, light, dark) in crate::richdoc::HIGHLIGHT_PALETTE {
+            for (preset, rgb) in crate::richdoc::COLOR_PRESETS {
+                for ground in [*light, *dark] {
+                    let drawn = contrast_ratio(ink_on(*rgb, ground), ground);
+                    assert!(drawn >= INK_FLOOR, "kaya: {preset} on {name} {ground:06X} draws at {drawn:.2}:1");
+                }
+            }
+        }
+        for rgb in sweep() {
+            assert_eq!(ink_on(rgb, INK_LIGHT_PAGE), rgb);
+            assert_eq!(ink_on(rgb, INK_DARK_PAGE), ink_for_dark(rgb));
+            for (name, light, dark) in crate::richdoc::HIGHLIGHT_PALETTE {
+                for ground in [*light, *dark] {
+                    let far = if rel_luminance(ground) < 0.5 { 0xFF_FFFF } else { 0x00_0000 };
+                    let want = contrast_ratio(rgb, INK_LIGHT_PAGE).max(INK_FLOOR).min(contrast_ratio(ground, far));
+                    let got = contrast_ratio(ink_on(rgb, ground), ground);
+                    assert!(
+                        got >= want - 0.1,
+                        "kaya: {rgb:06x} on {name} {ground:06X} draws at {got:.2}:1, under {want:.2}:1"
+                    );
+                }
+            }
         }
     }
 

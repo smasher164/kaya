@@ -2087,6 +2087,8 @@
 
 #define KAYA_RICH_ATTR_COLOR 13
 
+#define KAYA_RICH_ATTR_HIGHLIGHT 14
+
 /**
  * One kind per paragraph, the value of a `block` run.
  */
@@ -2123,6 +2125,23 @@
 #define KAYA_PARAGRAPH_ALIGN_END 2
 
 #define KAYA_PARAGRAPH_ALIGN_JUSTIFY 3
+
+/**
+ * A `highlight` run's value (docs/highlight-plan.md H1); `none` is no run.
+ */
+#define KAYA_HIGHLIGHT_NONE 0
+
+#define KAYA_HIGHLIGHT_YELLOW 1
+
+#define KAYA_HIGHLIGHT_ORANGE 2
+
+#define KAYA_HIGHLIGHT_PINK 3
+
+#define KAYA_HIGHLIGHT_PURPLE 4
+
+#define KAYA_HIGHLIGHT_BLUE 5
+
+#define KAYA_HIGHLIGHT_GREEN 6
 
 /**
  * What provoked a text_edited, in its `source` slot.
@@ -2486,6 +2505,12 @@ typedef struct BoolKind BoolKind;
  * class 1 to 9.
  */
 typedef struct FontFace FontFace;
+
+/**
+ * A highlighter colour, the value of a `highlight` run
+ * (docs/highlight-plan.md H1); [`HighlightColor::None`] is the run's absence.
+ */
+typedef struct HighlightColor HighlightColor;
 
 /**
  * Property keys; grows with widgets.
@@ -3181,6 +3206,8 @@ typedef struct KayaHostApi {
   uint32_t (*ink_from_dark)(uint32_t);
   uintptr_t (*text_item_speech)(uint64_t, uint64_t, uint8_t*, uintptr_t);
 } KayaHostApi;
+
+
 
 
 
@@ -4935,6 +4962,20 @@ uint32_t kaya_ink_for_dark(uint32_t rgb);
  * Either side: the inverse, for a colour picked while the page is dark.
  */
 uint32_t kaya_ink_from_dark(uint32_t rgb);
+
+/**
+ * Either side: a document colour drawn on `ground`, a highlight's value or a
+ * page (docs/highlight-plan.md H4); at the two pages it is the stored colour
+ * and kaya_ink_for_dark.
+ */
+uint32_t kaya_ink_on(uint32_t rgb, uint32_t ground);
+
+/**
+ * Either side: a highlight colour's ground (KAYA_HIGHLIGHT_*) on the light
+ * page, or on the dark one when `dark` is nonzero (docs/highlight-plan.md
+ * H1); u32::MAX for `none` or a number outside the palette.
+ */
+uint32_t kaya_highlight_ground(uint32_t color, uint32_t dark);
 
 /**
  * Guest side: a `.kdoc` file's bytes read (docs/rich-document-plan.md §4,

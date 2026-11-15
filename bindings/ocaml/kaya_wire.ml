@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xc57cc15dba2334d5L
+let spec_hash = 0x3ab48ce2d4543eacL
 let version = "0.0.0"
 
 let value_bool = 1
@@ -360,6 +360,7 @@ let rich_attr_checked = 10
 let rich_attr_start = 11
 let rich_attr_align = 12
 let rich_attr_color = 13
+let rich_attr_highlight = 14
 let list_kind_none = 0
 let list_kind_bullet = 1
 let list_kind_numbered = 2
@@ -368,6 +369,13 @@ let paragraph_align_start = 0
 let paragraph_align_center = 1
 let paragraph_align_end = 2
 let paragraph_align_justify = 3
+let highlight_color_none = 0
+let highlight_color_yellow = 1
+let highlight_color_orange = 2
+let highlight_color_pink = 3
+let highlight_color_purple = 4
+let highlight_color_blue = 5
+let highlight_color_green = 6
 let block_kind_body = 0
 let block_kind_heading1 = 1
 let block_kind_heading2 = 2

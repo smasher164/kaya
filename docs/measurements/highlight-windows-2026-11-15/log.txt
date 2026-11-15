@@ -1,0 +1,29 @@
+﻿== R1 RichEdit's RTF reader ==
+  highlight          text=plain MARKED plain MARKED[2]=FFFFEB3B plain[1]=00000001
+    runs: [0,6) bg=00000001 fg=00000001; [6,12) bg=FFFFEB3B fg=00000001; [12,18) bg=00000001 fg=00000001;
+    writes colortbl: {\colortbl ;\red255\green235\blue59;\red0\green0\blue0;}{\*\generator Riched20
+    writes around run:  12.6.0005}\viewkind4\uc1 \pard\f0\fs21 plain \highlight1 MARKED\highlight0  p
+  cb                 text=plain MARKED plain MARKED[2]=00000001 plain[1]=00000001
+    runs: [0,18) bg=00000001 fg=00000001;
+    writes colortbl: <none>
+    writes around run: tor Riched20 12.6.0005}\viewkind4\uc1 \pard\f0\fs21 plain MARKED plain\par
+  chcbpat            text=plain MARKED plain MARKED[2]=FFFFEB3B plain[1]=00000001
+    runs: [0,6) bg=00000001 fg=00000001; [6,12) bg=FFFFEB3B fg=00000001; [12,18) bg=00000001 fg=00000001;
+    writes colortbl: {\colortbl ;\red255\green235\blue59;}{\*\generator Riched20 12.6.0005}\viewkin
+    writes around run:  12.6.0005}\viewkind4\uc1 \pard\f0\fs21 plain \highlight1 MARKED\highlight0  p
+  highlight+cb       text=plain MARKED plain MARKED[2]=FFFFEB3B plain[1]=00000001
+    runs: [0,6) bg=00000001 fg=00000001; [6,12) bg=FFFFEB3B fg=00000001; [12,18) bg=00000001 fg=00000001;
+    writes colortbl: {\colortbl ;\red255\green235\blue59;}{\*\generator Riched20 12.6.0005}\viewkin
+    writes around run:  12.6.0005}\viewkind4\uc1 \pard\f0\fs21 plain \highlight1 MARKED\highlight0  p
+  highlight0-clears  text=plain MARKED plain MARKED[2]=00000001 plain[1]=00000001
+    runs: [0,6) bg=00000001 fg=00000001; [6,8) bg=FFFFEB3B fg=00000001; [8,18) bg=00000001 fg=00000001;
+    writes colortbl: {\colortbl ;\red255\green235\blue59;}{\*\generator Riched20 12.6.0005}\viewkin
+    writes around run: {\rtf1\fbidis\ansi\ansicpg1252\deff0\nouicompat\deflang1033{\fonttbl{\f0\fnil Ar
+== S1 the one slot: mark then find over half ==
+  mark: [0,6) bg=00000001 fg=00000001; [6,16) bg=FFF7E8AF fg=00000001; [16,22) bg=00000001 fg=00000001;
+  mark+find: [0,6) bg=00000001 fg=00000001; [6,12) bg=FFF7E8AF fg=00000001; [12,16) bg=FFFFF18F fg=00000001; [16,22) bg=00000001 fg=00000001;
+== T1 theme switch ==
+  before: [0,6) bg=00000001 fg=00000001; [6,12) bg=FFF7E8AF fg=00000001; [12,16) bg=FFFFF18F fg=00000001; [16,22) bg=00000001 fg=00000001;
+  after-dark: [0,6) bg=00000001 fg=FFFFFFFF; [6,12) bg=FFF7E8AF fg=FFFFFFFF; [12,16) bg=FFFFF18F fg=FFFFFFFF; [16,22) bg=00000001 fg=FFFFFFFF;
+  after-light: [0,6) bg=00000001 fg=FF000000; [6,12) bg=FFF7E8AF fg=FF000000; [12,16) bg=FFFFF18F fg=FF000000; [16,22) bg=00000001 fg=FF000000;
+PROBEDONE

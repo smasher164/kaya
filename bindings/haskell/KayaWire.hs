@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xc57cc15dba2334d5
+specHash = 0x3ab48ce2d4543eac
 kayaVersion :: String
 kayaVersion = "0.0.0"
 
@@ -682,6 +682,8 @@ richAttrAlign :: Word32
 richAttrAlign = 12
 richAttrColor :: Word32
 richAttrColor = 13
+richAttrHighlight :: Word32
+richAttrHighlight = 14
 listKindNone :: Word32
 listKindNone = 0
 listKindBullet :: Word32
@@ -698,6 +700,20 @@ paragraphAlignEnd :: Word32
 paragraphAlignEnd = 2
 paragraphAlignJustify :: Word32
 paragraphAlignJustify = 3
+highlightColorNone :: Word32
+highlightColorNone = 0
+highlightColorYellow :: Word32
+highlightColorYellow = 1
+highlightColorOrange :: Word32
+highlightColorOrange = 2
+highlightColorPink :: Word32
+highlightColorPink = 3
+highlightColorPurple :: Word32
+highlightColorPurple = 4
+highlightColorBlue :: Word32
+highlightColorBlue = 5
+highlightColorGreen :: Word32
+highlightColorGreen = 6
 blockKindBody :: Word32
 blockKindBody = 0
 blockKindHeading1 :: Word32

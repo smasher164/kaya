@@ -1225,6 +1225,7 @@ pub(crate) const RICH_ATTR_CHECKED: i64 = 10;
 pub(crate) const RICH_ATTR_START: i64 = 11;
 pub(crate) const RICH_ATTR_ALIGN: i64 = 12;
 pub(crate) const RICH_ATTR_COLOR: i64 = 13;
+pub(crate) const RICH_ATTR_HIGHLIGHT: i64 = 14;
 
 pub(crate) const RICH_ATTRS: &[(i64, &str)] = &[
     (RICH_ATTR_BOLD, "bold"),
@@ -1240,6 +1241,7 @@ pub(crate) const RICH_ATTRS: &[(i64, &str)] = &[
     (RICH_ATTR_START, "start"),
     (RICH_ATTR_ALIGN, "align"),
     (RICH_ATTR_COLOR, "color"),
+    (RICH_ATTR_HIGHLIGHT, "highlight"),
 ];
 
 pub(crate) const LIST_NONE: i64 = 0;
@@ -1264,6 +1266,24 @@ pub(crate) const PARAGRAPH_ALIGNS: &[(i64, &str)] = &[
     (PARAGRAPH_ALIGN_CENTER, "center"),
     (PARAGRAPH_ALIGN_END, "end"),
     (PARAGRAPH_ALIGN_JUSTIFY, "justify"),
+];
+
+pub(crate) const HIGHLIGHT_NONE: i64 = 0;
+pub(crate) const HIGHLIGHT_YELLOW: i64 = 1;
+pub(crate) const HIGHLIGHT_ORANGE: i64 = 2;
+pub(crate) const HIGHLIGHT_PINK: i64 = 3;
+pub(crate) const HIGHLIGHT_PURPLE: i64 = 4;
+pub(crate) const HIGHLIGHT_BLUE: i64 = 5;
+pub(crate) const HIGHLIGHT_GREEN: i64 = 6;
+
+pub(crate) const HIGHLIGHT_COLORS: &[(i64, &str)] = &[
+    (HIGHLIGHT_NONE, "none"),
+    (HIGHLIGHT_YELLOW, "yellow"),
+    (HIGHLIGHT_ORANGE, "orange"),
+    (HIGHLIGHT_PINK, "pink"),
+    (HIGHLIGHT_PURPLE, "purple"),
+    (HIGHLIGHT_BLUE, "blue"),
+    (HIGHLIGHT_GREEN, "green"),
 ];
 
 pub(crate) const BLOCK_BODY: i64 = 0;

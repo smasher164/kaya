@@ -5269,6 +5269,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("start", 11),
                 ("align", 12),
                 ("color", 13),
+                ("highlight", 14),
             ],
         },
         EnumSpec {
@@ -5280,6 +5281,19 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             // docs/rich-document-plan.md RD1: an `align` run's value.
             name: "paragraph_align",
             variants: &[("start", 0), ("center", 1), ("end", 2), ("justify", 3)],
+        },
+        EnumSpec {
+            // docs/highlight-plan.md H1, H5: a `highlight` run's value.
+            name: "highlight_color",
+            variants: &[
+                ("none", 0),
+                ("yellow", 1),
+                ("orange", 2),
+                ("pink", 3),
+                ("purple", 4),
+                ("blue", 5),
+                ("green", 6),
+            ],
         },
         EnumSpec {
             name: "block_kind",
@@ -6159,6 +6173,7 @@ mod tests {
                     ("block_kind", _) => canvas_pin(wire::BLOCK_KINDS, name),
                     ("list_kind", _) => canvas_pin(wire::LIST_KINDS, name),
                     ("paragraph_align", _) => canvas_pin(wire::PARAGRAPH_ALIGNS, name),
+                    ("highlight_color", _) => canvas_pin(wire::HIGHLIGHT_COLORS, name),
                     ("edit_source", _) => canvas_pin(wire::EDIT_SOURCES, name),
                     ("prop", "text") => wire::PROP_TEXT,
                     ("prop", "checked") => wire::PROP_CHECKED,
@@ -6452,6 +6467,7 @@ mod tests {
             ("block_kind", wire::BLOCK_KINDS),
             ("list_kind", wire::LIST_KINDS),
             ("paragraph_align", wire::PARAGRAPH_ALIGNS),
+            ("highlight_color", wire::HIGHLIGHT_COLORS),
             ("edit_source", wire::EDIT_SOURCES),
             ("player_state", wire::PLAYER_STATES),
             ("media_failure", wire::MEDIA_FAILURES),
@@ -6498,9 +6514,10 @@ mod tests {
             (wire::TEXT_ALIGNS, &[-1, 3, 4]),
             (wire::TEXT_BASELINES, &[-1, 4, 5]),
             (wire::SIZE_POLICIES, &[-1, 4, 5]),
-            (wire::RICH_ATTRS, &[-1, 0, 14]),
+            (wire::RICH_ATTRS, &[-1, 0, 15]),
             (wire::LIST_KINDS, &[-1, 4, 5]),
             (wire::PARAGRAPH_ALIGNS, &[-1, 4, 5]),
+            (wire::HIGHLIGHT_COLORS, &[-1, 7, 8]),
             (wire::BLOCK_KINDS, &[-1, 6, 7]),
             (wire::EDIT_SOURCES, &[-1, 5, 6]),
         ] {

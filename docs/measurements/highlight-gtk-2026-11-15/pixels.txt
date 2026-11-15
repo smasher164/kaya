@@ -1,0 +1,8 @@
+priorities code=0 find=2 mark=1 late=3
+MARKONLY      glyphbox commonest=[('F7E8AF', 935), ('000000', 47)]  above-line gap=FFFFFF
+FINDONLY      glyphbox commonest=[('FFE066', 883), ('000000', 40)]  above-line gap=FFFFFF
+FINDOVERMARK  glyphbox commonest=[('FFE066', 1391), ('000000', 94)]  above-line gap=FFFFFF
+MARKOVERCODE  glyphbox commonest=[('F7E8AF', 1418), ('000000', 85)]  above-line gap=FFFFFF
+LATEMARK      glyphbox commonest=[('D5EBFF', 922), ('000000', 59)]  above-line gap=FFFFFF
+CODEONLY      glyphbox commonest=[('C8C8C8', 930), ('000000', 47)]  above-line gap=FFFFFF
+DONE

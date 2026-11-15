@@ -82,14 +82,21 @@ fn rtf_list_table(out: &mut String) {
 }
 
 /// The document as RTF 1.9: automatic ink is `\cf0`, colours a `\colortbl`,
+/// a highlight `\highlightN\cbN` over its light value (RichEdit reads only the
+/// first and Cocoa only the second, docs/measurements/highlight-windows-2026-11-15.md),
 /// lists `\listtable` with each item's `\listtext`, a link a HYPERLINK field.
 /// A quote or code block rides a `{\*\kayablock}` group other readers skip.
 pub(crate) fn rtf_write(text: &str, runs: &[TextRun]) -> String {
     let runs = normalize_runs(runs.to_vec());
     let state = final_state(text, &runs);
     let mut colors: Vec<u32> = Vec::new();
-    for run in runs.iter().filter(|r| r.name == "color") {
-        if let Ok(rgb) = super::parse_color(&run.value) {
+    for run in runs.iter() {
+        let rgb = match run.name.as_str() {
+            "color" => super::parse_color(&run.value).ok(),
+            "highlight" => super::highlight_ground(&run.value, false),
+            _ => None,
+        };
+        if let Some(rgb) = rgb {
             if !colors.contains(&rgb) {
                 colors.push(rgb);
             }
@@ -171,6 +178,10 @@ pub(crate) fn rtf_write(text: &str, runs: &[TextRun]) -> String {
                 let index = colors.iter().position(|c| *c == rgb).expect("collected") + 1;
                 words.push_str(&format!("\\cf{index}"));
             }
+            if let Some(rgb) = marks.get("highlight").and_then(|v| super::highlight_ground(v, false)) {
+                let index = colors.iter().position(|c| *c == rgb).expect("collected") + 1;
+                words.push_str(&format!("\\highlight{index}\\cb{index}"));
+            }
             let mut group = if words.is_empty() { "{".to_owned() } else { format!("{{{words} ") };
             rtf_text(&mut group, &piece);
             group.push('}');
@@ -206,7 +217,8 @@ fn html_escape(out: &mut String, s: &str) {
 }
 
 /// The document as an HTML fragment: headings, quotes, code blocks, nested
-/// lists, a checklist item's box as a disabled checkbox, colour as a span.
+/// lists, a checklist item's box as a disabled checkbox, colour as a span, a
+/// highlight as a `<mark>` naming its palette name.
 pub(crate) fn html_write(text: &str, runs: &[TextRun]) -> String {
     let runs = normalize_runs(runs.to_vec());
     let state = final_state(text, &runs);
@@ -294,6 +306,10 @@ pub(crate) fn html_write(text: &str, runs: &[TextRun]) -> String {
             if let Some(color) = marks.get("color") {
                 open.push_str(&format!("<span style=\"color:{color}\">"));
                 close.push("</span>");
+            }
+            if let Some((name, rgb)) = marks.get("highlight").and_then(|v| super::highlight_ground(v, false).map(|rgb| (v, rgb))) {
+                open.push_str(&format!("<mark data-kaya-highlight=\"{name}\" style=\"background-color:#{rgb:06X}\">"));
+                close.push("</mark>");
             }
             for (name, tag) in [("bold", "b"), ("italic", "i"), ("underline", "u"), ("strike", "s"), ("code", "code")] {
                 if marks.contains_key(name) {
@@ -461,6 +477,7 @@ struct Group {
     strike: bool,
     font: i32,
     color: i32,
+    back: i32,
     uc: i32,
     field_result: bool,
 }
@@ -559,13 +576,14 @@ fn is_mono_font(name: &str, family_modern: bool) -> bool {
 
 /// RTF in, kaya's vocabulary out: bold, italic, underline, strike, a
 /// monospace face as code, a colour (black and Apple's text colours are
-/// automatic), a HYPERLINK field as a link; paragraphs with lists (`\ls` and
+/// automatic), a background from `\highlight`, `\cb` or `\chcbpat` as the
+/// nearest highlight name, a HYPERLINK field as a link; paragraphs with lists (`\ls` and
 /// `\ilvl` through the list table, a checklist through its box), an indent
 /// from `\li`, alignment, a heading from `\outlinelevel`, and kaya's own
 /// `{\*\kayablock}`. Everything else is dropped.
 pub(crate) fn rtf_read(bytes: &[u8]) -> (String, Vec<TextRun>) {
     let toks = rtf_tokens(bytes);
-    let base = Group { dest: Dest::Text, bold: false, italic: false, underline: false, strike: false, font: -1, color: 0, uc: 1, field_result: false };
+    let base = Group { dest: Dest::Text, bold: false, italic: false, underline: false, strike: false, font: -1, color: 0, back: 0, uc: 1, field_result: false };
     let mut stack: Vec<Group> = Vec::new();
     let mut g = base.clone();
     let mut b = Builder::default();
@@ -605,6 +623,9 @@ pub(crate) fn rtf_read(bytes: &[u8]) -> (String, Vec<TextRun>) {
         }
         if fonts.get(&g.font).copied().unwrap_or(false) {
             m.insert("code".to_owned(), flag.clone());
+        }
+        if let Some(name) = colors.get(g.back as usize).copied().flatten().and_then(super::nearest_highlight) {
+            m.insert("highlight".to_owned(), name.to_owned());
         }
         match (g.field_result, link) {
             (true, Some(url)) => {
@@ -798,6 +819,7 @@ pub(crate) fn rtf_read(bytes: &[u8]) -> (String, Vec<TextRun>) {
                         g.strike = false;
                         g.font = -1;
                         g.color = 0;
+                        g.back = 0;
                     }
                     (_, "b") => g.bold = on,
                     (_, "i") => g.italic = on,
@@ -806,6 +828,7 @@ pub(crate) fn rtf_read(bytes: &[u8]) -> (String, Vec<TextRun>) {
                     (_, "strike" | "striked") => g.strike = on,
                     (_, "f") => g.font = p.unwrap_or(0),
                     (_, "cf") => g.color = p.unwrap_or(0),
+                    (_, "highlight" | "cb" | "chcbpat") => g.back = p.unwrap_or(0),
                     (_, "uc") => g.uc = p.unwrap_or(1),
                     (_, "li") => para.li = p.unwrap_or(0),
                     (_, "ql") => para.align = None,
@@ -1074,7 +1097,8 @@ struct HtmlStyle {
 }
 
 /// HTML in, kaya's vocabulary out; the Windows clipboard's CF_HTML header is
-/// read for its fragment first. Paragraphs come from block elements and
+/// read for its fragment first. A `<mark>` is a highlight (yellow when bare),
+/// and a span's, font's or mark's background the nearest highlight name. Paragraphs come from block elements and
 /// `<br>`, lists from `<ul>`/`<ol>` nesting (a checkbox makes a checklist
 /// item), headings from `<h1>`-`<h6>`, a quote from `<blockquote>`, a code
 /// block from `<pre>`; marks from the tags and the `style` they carry.
@@ -1279,7 +1303,26 @@ pub(crate) fn html_read(source: &str) -> (String, Vec<TextRun>) {
                         };
                     }
                 }
+                "mark" => {
+                    m.insert("highlight".to_owned(), "yellow".to_owned());
+                }
                 _ => {}
+            }
+            if matches!(name.as_str(), "span" | "font" | "mark") {
+                let back = ["background-color", "background"]
+                    .iter()
+                    .find_map(|k| css.get(*k).and_then(|v| v.split_whitespace().find_map(css_color)));
+                if let Some(rgb) = back {
+                    match super::nearest_highlight(rgb) {
+                        Some(n) => m.insert("highlight".to_owned(), n.to_owned()),
+                        None => m.remove("highlight"),
+                    };
+                }
+                let named = attr(attrs, "data-kaya-highlight")
+                    .filter(|v| super::canonical_value("highlight", v).is_ok_and(|c| c.is_some()));
+                if let Some(n) = named {
+                    m.insert("highlight".to_owned(), n);
+                }
             }
             if let Some(w) = css.get("font-weight") {
                 if w == "bold" || w == "bolder" || w.parse::<u32>().is_ok_and(|n| n >= 600) {
@@ -1402,6 +1445,7 @@ mod tests {
             run(32, 41, "list", "bullet"),
             run(36, 41, "indent", "1"),
             run(38, 41, "color", "#C4554D"),
+            run(36, 40, "highlight", "green"),
             run(42, 46, "list", "check"),
             run(42, 46, "checked", "true"),
             run(47, 52, "block", "quote"),
@@ -1490,6 +1534,58 @@ mod tests {
         let (text, runs) = html_read(html);
         assert_eq!(text, "Hi there\none\ntwo");
         assert_eq!(spelled(&runs), "0:2 bold=true|9:16 list=bullet");
+    }
+
+    /// docs/highlight-plan.md H6 over each writer's own spelling: Cocoa's
+    /// `\cb` (textutil, macOS 26.6.2), RichEdit's `\highlight` and `\chcbpat`
+    /// (docs/measurements/highlight-windows-2026-11-15.md), `\highlight0`
+    /// ending a run, and a grey shading dropped.
+    #[test]
+    fn every_rtf_background_spelling_reads_as_a_highlight() {
+        let cocoa = br#"{\rtf1\ansi\ansicpg1252\cocoartf2870
+{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;\red255\green235\blue59;}
+{\*\expandedcolortbl;;\cssrgb\c100000\c92157\c23137;}
+\pard\f0\fs24 \cf0 plain \cb2 marked\cb1  plain}"#;
+        let (text, runs) = rtf_read(cocoa);
+        assert_eq!((text.as_str(), spelled(&runs)), ("plain marked plain", "6:12 highlight=yellow".to_owned()));
+        let head = r"{\rtf1\ansi{\fonttbl{\f0 Arial;}}{\colortbl;\red255\green235\blue59;\red192\green192\blue192;\red0\green0\blue128;}\f0 plain ";
+        for (body, want) in [
+            (r"{\highlight1 MARKED}", "6:12 highlight=yellow"),
+            (r"{\chshdng0\chcbpat1 MARKED}", "6:12 highlight=yellow"),
+            (r"{\highlight1\cb1 MARKED}", "6:12 highlight=yellow"),
+            (r"\highlight1 MA\highlight0 RKED", "6:8 highlight=yellow"),
+            (r"{\highlight3 MARKED}", "6:12 highlight=blue"),
+            (r"{\highlight2 MARKED}", ""),
+        ] {
+            let (text, runs) = rtf_read(format!("{head}{body} plain\\par}}").as_bytes());
+            assert_eq!((text.as_str(), spelled(&runs).as_str()), ("plain MARKED plain", want), "{body}");
+        }
+        let written = rtf_write("ab", &[run(0, 2, "highlight", "pink"), run(0, 2, "color", "#DD1F24")]);
+        assert!(written.contains(r"\red221\green31\blue36;\red255\green221\blue236;"), "{written}");
+        assert!(written.contains(r"{\cf1\highlight2\cb2 ab}"), "{written}");
+    }
+
+    /// `<mark>` bare and named, a Google Docs span's background, a Word or
+    /// Notion grey dropped, and `transparent` leaving the mark alone.
+    #[test]
+    fn every_html_background_reads_as_a_highlight() {
+        for (html, want) in [
+            ("<p>a <mark>bc</mark> d</p>", "2:4 highlight=yellow"),
+            (r#"<p>a <mark data-kaya-highlight="purple" style="background-color:#EEE1FF">bc</mark> d</p>"#, "2:4 highlight=purple"),
+            (r#"<p>a <mark data-kaya-highlight="mint">bc</mark> d</p>"#, "2:4 highlight=yellow"),
+            (r#"<p>a <span style="background-color:#ffff00;color:#000000">bc</span> d</p>"#, "2:4 highlight=yellow"),
+            (r#"<p>a <span style="background: #00ffff">bc</span> d</p>"#, "2:4 highlight=green"),
+            (r#"<p>a <span style="background-color:#c0c0c0">bc</span> d</p>"#, ""),
+            (r#"<p><mark>a <span style="background-color:#ffffff">bc</span></mark> d</p>"#, "0:2 highlight=yellow"),
+            (r#"<p>a <span style="background-color:transparent">bc</span> d</p>"#, ""),
+            (r#"<p style="background-color:#ffff00">a bc d</p>"#, ""),
+        ] {
+            let (text, runs) = html_read(html);
+            assert_eq!((text.as_str(), spelled(&runs).as_str()), ("a bc d", want), "{html}");
+        }
+        let written = html_write("ab", &[run(0, 2, "highlight", "orange")]);
+        assert!(written.contains(r#"<mark data-kaya-highlight="orange" style="background-color:#FFE2CB">ab</mark>"#), "{written}");
     }
 
     #[test]

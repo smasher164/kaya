@@ -15,7 +15,7 @@ pub(crate) const VERSION: u64 = 1;
 pub(crate) const MEDIA_TYPE: &str = "application/vnd.kaya.document+json";
 
 /// The inline marks in the order a file spells them; extensions follow by name.
-const INLINE_ORDER: &[&str] = &["bold", "italic", "underline", "strike", "code", "link", "color"];
+const INLINE_ORDER: &[&str] = &["bold", "italic", "underline", "strike", "code", "link", "color", "highlight"];
 const FLAGS: &[&str] = &["bold", "italic", "underline", "strike", "code"];
 
 /// A document read from a file: its text and runs, and why it may only be
@@ -262,7 +262,7 @@ fn mark_from(name: &str, v: &Json, index: usize) -> Result<Option<String>, Strin
     let raw = match (name, v) {
         (n, Json::Bool(true)) if FLAGS.contains(&n) => crate::protocol::FLAG_VALUE.to_owned(),
         (n, Json::Bool(false)) if FLAGS.contains(&n) => return Ok(None),
-        ("link" | "color", Json::String(s)) => s.clone(),
+        ("link" | "color" | "highlight", Json::String(s)) => s.clone(),
         (_, other) => return Err(format!("paragraph {index}'s {name} mark is {}, which is not how a file spells it", kind_name(other))),
     };
     canonical_value(name, &raw).map_err(|why| format!("paragraph {index}: {why}"))
@@ -460,6 +460,7 @@ mod tests {
             run(26, 41, "list", "bullet"),
             run(30, 41, "indent", "1"),
             run(37, 41, "color", "#C4554D"),
+            run(35, 41, "highlight", "yellow"),
             run(42, 46, "list", "check"),
             run(42, 46, "checked", "true"),
             run(47, 50, "strike", "true"),
@@ -515,8 +516,8 @@ mod tests {
         let got = read(br#"{"kaya": "document", "version": 1, "paragraphs": [{"spans": [["hi", {"com.example.note": "x", "bold": true}]]}]}"#).unwrap();
         assert_eq!(got.read_only, None);
         assert_eq!(spelled(&got.runs), "0:2 bold=true|0:2 com.example.note=x");
-        let newer = read(br#"{"kaya": "document", "version": 1, "paragraphs": [{"spans": [["hi", {"highlight": "mint"}]]}]}"#).unwrap();
-        assert!(newer.read_only.unwrap().contains("the mark \"highlight\""));
+        let newer = read(br#"{"kaya": "document", "version": 1, "paragraphs": [{"spans": [["hi", {"superscript": true}]]}]}"#).unwrap();
+        assert!(newer.read_only.unwrap().contains("the mark \"superscript\""));
         let history = read(br#"{"kaya": "document", "version": 1, "history": "AAAA", "paragraphs": [{"spans": []}]}"#).unwrap();
         assert_eq!((history.read_only, history.extra.as_str()), (None, ""));
         let stray = read(br#"{"kaya": "document", "version": 1, "paragraphs": [{"spans": [["hi", {"para:x.y": true}]]}]}"#).unwrap();
@@ -551,5 +552,26 @@ mod tests {
         assert!(read(br#"{"kaya": "document", "version": 1, "paragraphs": [{"indent": 9, "spans": []}]}"#).unwrap_err().contains("not an indent"));
         assert!(write("ab", &[run(0, 1, "list", "bullet")], "").unwrap_err().contains("does not cover paragraph 0"));
         assert!(write("ab", &[run(0, 2, "color", "#abcdef")], "").unwrap_err().contains("#ABCDEF"));
+    }
+
+    /// docs/highlight-plan.md H5: the mark is spelled after `color` by its
+    /// palette name, and a name outside the palette is refused in one
+    /// sentence naming the vocabulary.
+    #[test]
+    fn a_highlight_is_written_after_color_by_name() {
+        let runs = normalize_runs(vec![
+            run(0, 4, "color", "#C4554D"),
+            run(0, 4, "highlight", "blue"),
+            run(0, 4, "bold", "true"),
+            run(0, 4, "com.example.note", "n"),
+        ]);
+        let file = write("word", &runs, "").unwrap();
+        assert!(file.contains(r##"[["word", {"bold": true, "color": "#C4554D", "highlight": "blue", "com.example.note": "n"}]]"##), "{file}");
+        let why = read(br#"{"kaya": "document", "version": 1, "paragraphs": [{"spans": [["hi", {"highlight": "mint"}]]}]}"#).unwrap_err();
+        assert_eq!(why, "paragraph 0: \"mint\" is not a highlight colour — the vocabulary is none, yellow, orange, pink, purple, blue, green");
+        assert!(read(br#"{"kaya": "document", "version": 1, "paragraphs": [{"spans": [["hi", {"highlight": true}]]}]}"#)
+            .unwrap_err()
+            .contains("highlight mark is a boolean"));
+        assert!(write("ab", &[run(0, 2, "highlight", "#FFFF00")], "").unwrap_err().contains("not a highlight colour"));
     }
 }

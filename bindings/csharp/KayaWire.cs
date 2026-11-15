@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xc57cc15dba2334d5;
+    public const ulong SpecHash = 0x3ab48ce2d4543eac;
     public const string Version = "0.0.0";
 
     public const uint ValueBool = 1;
@@ -342,6 +342,7 @@ static class KayaWire
     public const uint RichAttrStart = 11;
     public const uint RichAttrAlign = 12;
     public const uint RichAttrColor = 13;
+    public const uint RichAttrHighlight = 14;
     public const uint ListKindNone = 0;
     public const uint ListKindBullet = 1;
     public const uint ListKindNumbered = 2;
@@ -350,6 +351,13 @@ static class KayaWire
     public const uint ParagraphAlignCenter = 1;
     public const uint ParagraphAlignEnd = 2;
     public const uint ParagraphAlignJustify = 3;
+    public const uint HighlightColorNone = 0;
+    public const uint HighlightColorYellow = 1;
+    public const uint HighlightColorOrange = 2;
+    public const uint HighlightColorPink = 3;
+    public const uint HighlightColorPurple = 4;
+    public const uint HighlightColorBlue = 5;
+    public const uint HighlightColorGreen = 6;
     public const uint BlockKindBody = 0;
     public const uint BlockKindHeading1 = 1;
     public const uint BlockKindHeading2 = 2;

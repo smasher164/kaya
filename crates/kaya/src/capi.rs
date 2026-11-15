@@ -1927,6 +1927,7 @@ pub const KAYA_RICH_ATTR_CHECKED: u32 = 10;
 pub const KAYA_RICH_ATTR_START: u32 = 11;
 pub const KAYA_RICH_ATTR_ALIGN: u32 = 12;
 pub const KAYA_RICH_ATTR_COLOR: u32 = 13;
+pub const KAYA_RICH_ATTR_HIGHLIGHT: u32 = 14;
 /// One kind per paragraph, the value of a `block` run.
 pub const KAYA_BLOCK_BODY: u32 = 0;
 pub const KAYA_BLOCK_HEADING1: u32 = 1;
@@ -1944,6 +1945,14 @@ pub const KAYA_PARAGRAPH_ALIGN_START: u32 = 0;
 pub const KAYA_PARAGRAPH_ALIGN_CENTER: u32 = 1;
 pub const KAYA_PARAGRAPH_ALIGN_END: u32 = 2;
 pub const KAYA_PARAGRAPH_ALIGN_JUSTIFY: u32 = 3;
+/// A `highlight` run's value (docs/highlight-plan.md H1); `none` is no run.
+pub const KAYA_HIGHLIGHT_NONE: u32 = 0;
+pub const KAYA_HIGHLIGHT_YELLOW: u32 = 1;
+pub const KAYA_HIGHLIGHT_ORANGE: u32 = 2;
+pub const KAYA_HIGHLIGHT_PINK: u32 = 3;
+pub const KAYA_HIGHLIGHT_PURPLE: u32 = 4;
+pub const KAYA_HIGHLIGHT_BLUE: u32 = 5;
+pub const KAYA_HIGHLIGHT_GREEN: u32 = 6;
 /// What provoked a text_edited, in its `source` slot.
 pub const KAYA_EDIT_SOURCE_USER: u32 = 0;
 pub const KAYA_EDIT_SOURCE_IME_COMMIT: u32 = 1;
@@ -1964,6 +1973,7 @@ const _: () = assert!(
         && KAYA_RICH_ATTR_START as i64 == wire::RICH_ATTR_START
         && KAYA_RICH_ATTR_ALIGN as i64 == wire::RICH_ATTR_ALIGN
         && KAYA_RICH_ATTR_COLOR as i64 == wire::RICH_ATTR_COLOR
+        && KAYA_RICH_ATTR_HIGHLIGHT as i64 == wire::RICH_ATTR_HIGHLIGHT
         && KAYA_LIST_NONE as i64 == wire::LIST_NONE
         && KAYA_LIST_BULLET as i64 == wire::LIST_BULLET
         && KAYA_LIST_NUMBERED as i64 == wire::LIST_NUMBERED
@@ -1972,6 +1982,13 @@ const _: () = assert!(
         && KAYA_PARAGRAPH_ALIGN_CENTER as i64 == wire::PARAGRAPH_ALIGN_CENTER
         && KAYA_PARAGRAPH_ALIGN_END as i64 == wire::PARAGRAPH_ALIGN_END
         && KAYA_PARAGRAPH_ALIGN_JUSTIFY as i64 == wire::PARAGRAPH_ALIGN_JUSTIFY
+        && KAYA_HIGHLIGHT_NONE as i64 == wire::HIGHLIGHT_NONE
+        && KAYA_HIGHLIGHT_YELLOW as i64 == wire::HIGHLIGHT_YELLOW
+        && KAYA_HIGHLIGHT_ORANGE as i64 == wire::HIGHLIGHT_ORANGE
+        && KAYA_HIGHLIGHT_PINK as i64 == wire::HIGHLIGHT_PINK
+        && KAYA_HIGHLIGHT_PURPLE as i64 == wire::HIGHLIGHT_PURPLE
+        && KAYA_HIGHLIGHT_BLUE as i64 == wire::HIGHLIGHT_BLUE
+        && KAYA_HIGHLIGHT_GREEN as i64 == wire::HIGHLIGHT_GREEN
         && KAYA_BLOCK_BODY as i64 == wire::BLOCK_BODY
         && KAYA_BLOCK_HEADING1 as i64 == wire::BLOCK_HEADING1
         && KAYA_BLOCK_HEADING2 as i64 == wire::BLOCK_HEADING2
@@ -1999,7 +2016,7 @@ const fn spec_enum_variants(want: &str) -> usize {
 }
 const _: () = {
     assert!(
-        spec_enum_variants("rich_attr") == 13,
+        spec_enum_variants("rich_attr") == 14,
         "the spec rich_attr enum grew: export the new KAYA_RICH_ATTR_* above, extend the \
          pin, and bump this count"
     );
@@ -2017,6 +2034,11 @@ const _: () = {
         spec_enum_variants("paragraph_align") == 4,
         "the spec paragraph_align enum grew: export the new KAYA_PARAGRAPH_ALIGN_* above, \
          extend the pin, and bump this count"
+    );
+    assert!(
+        spec_enum_variants("highlight_color") == 7,
+        "the spec highlight_color enum grew: export the new KAYA_HIGHLIGHT_* above, extend \
+         the pin, and bump this count"
     );
     assert!(
         spec_enum_variants("edit_source") == 5,
@@ -7342,6 +7364,24 @@ pub extern "C" fn kaya_ink_for_dark(rgb: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_ink_from_dark(rgb: u32) -> u32 {
     crate::brand::ink_from_dark(rgb)
+}
+
+/// Either side: a document colour drawn on `ground`, a highlight's value or a
+/// page (docs/highlight-plan.md H4); at the two pages it is the stored colour
+/// and kaya_ink_for_dark.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_ink_on(rgb: u32, ground: u32) -> u32 {
+    crate::brand::ink_on(rgb, ground)
+}
+
+/// Either side: a highlight colour's ground (KAYA_HIGHLIGHT_*) on the light
+/// page, or on the dark one when `dark` is nonzero (docs/highlight-plan.md
+/// H1); u32::MAX for `none` or a number outside the palette.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_highlight_ground(color: u32, dark: u32) -> u32 {
+    crate::wire::vocab_name(crate::wire::HIGHLIGHT_COLORS, i64::from(color))
+        .and_then(|name| crate::richdoc::highlight_ground(name, dark != 0))
+        .unwrap_or(u32::MAX)
 }
 
 /// Guest side: a `.kdoc` file's bytes read (docs/rich-document-plan.md §4,

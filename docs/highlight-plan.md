@@ -2,7 +2,9 @@
 
 Status: RULED 2026-11-15, H1 to H8 A as recommended, and both assumptions in
 §6's "Beyond these" as the plan assumes them (the maintainer: "i accept your
-rulings there as given"). Nothing in this plan is built yet.
+rulings there as given"). §5 steps 0 and 1 are built (2026-11-15: the
+measurements under docs/measurements/highlight-*-2026-11-15.md and the root);
+H1's hexes wait on the review page.
 
 The maintainer, 2026-11-15: "yes, let's do the highlighter pen." This plan is
 the design pass for RD6 of docs/rich-document-plan.md, which RULED A on

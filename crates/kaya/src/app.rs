@@ -1058,6 +1058,43 @@ impl ParagraphAlign {
     }
 }
 
+/// A highlighter colour, the value of a `highlight` run
+/// (docs/highlight-plan.md H1); [`HighlightColor::None`] is the run's absence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HighlightColor {
+    None,
+    Yellow,
+    Orange,
+    Pink,
+    Purple,
+    Blue,
+    Green,
+}
+
+impl HighlightColor {
+    pub fn name(self) -> &'static str {
+        match self {
+            HighlightColor::None => "none",
+            HighlightColor::Yellow => "yellow",
+            HighlightColor::Orange => "orange",
+            HighlightColor::Pink => "pink",
+            HighlightColor::Purple => "purple",
+            HighlightColor::Blue => "blue",
+            HighlightColor::Green => "green",
+        }
+    }
+
+    /// Every colour of the palette, in the spec's order.
+    pub const ALL: [HighlightColor; 6] = [
+        HighlightColor::Yellow,
+        HighlightColor::Orange,
+        HighlightColor::Pink,
+        HighlightColor::Purple,
+        HighlightColor::Blue,
+        HighlightColor::Green,
+    ];
+}
+
 /// A `.kdoc` file read (docs/rich-document-plan.md §4): the document, and
 /// why it may only be read when it carries a name this kaya cannot keep
 /// through an edit (RD8).
@@ -1191,6 +1228,11 @@ impl Document {
     /// A text colour, `#RRGGBB` as it reads on a light page (RD4, RD5).
     pub fn color(self, range: std::ops::Range<usize>, rgb: &str) -> Self {
         self.mark(range, "color", rgb.to_ascii_uppercase())
+    }
+
+    /// A highlighter's ground behind the range (docs/highlight-plan.md H7).
+    pub fn highlight(self, range: std::ops::Range<usize>, color: HighlightColor) -> Self {
+        self.mark(range, "highlight", color.name())
     }
 
     /// A `.kdoc` file's bytes read; refused in one sentence when they are not
@@ -1388,6 +1430,12 @@ impl Selection {
     /// The colour holding over the whole selection, `#RRGGBB`.
     pub fn color(&self) -> Option<&str> {
         self.attrs.iter().find(|(n, _)| n == "color").map(|(_, v)| v.as_str())
+    }
+
+    /// The highlight holding over the whole selection; None otherwise.
+    pub fn highlight(&self) -> HighlightColor {
+        let name = self.attrs.iter().find(|(n, _)| n == "highlight").map(|(_, v)| v.as_str());
+        HighlightColor::ALL.into_iter().find(|c| Some(c.name()) == name).unwrap_or(HighlightColor::None)
     }
 
     /// The paragraph kind every touched paragraph shares; Body for body text
@@ -4167,6 +4215,12 @@ impl<'a> Tx<'a> {
     /// page; automatic ink is [`Tx::unformat`] of `color` (RD4).
     pub fn color(&mut self, widget: WidgetId, rgb: &str) {
         self.format(widget, "color", rgb.to_ascii_uppercase().as_str());
+    }
+
+    /// The selection highlighted in `color`; removal is [`Tx::unformat`] of
+    /// `highlight`, as automatic ink is of `color` (docs/highlight-plan.md H7).
+    pub fn highlight(&mut self, widget: WidgetId, color: HighlightColor) {
+        self.format(widget, "highlight", color.name());
     }
 
     /// Present the platform's own colour picker over the selection; each

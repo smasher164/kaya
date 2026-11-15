@@ -1,0 +1,6 @@
+MARKONLY      run [0,8) {'bg-color': '0,0,0', 'bg-full-height': 'false'}
+FINDONLY      run [9,17) {'bg-color': '65535,0,0', 'bg-full-height': 'true'}
+FINDOVERMARK  run [18,30) {'bg-color': '65535,0,0', 'bg-full-height': 'true'}
+MARKOVERCODE  run [31,43) {'bg-color': '0,0,0', 'bg-full-height': 'false'}
+LATEMARK      run [44,52) {'bg-color': '0,0,65535', 'bg-full-height': 'false'}
+CODEONLY      run [53,61) {'bg-color': '0,0,0'}

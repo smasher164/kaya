@@ -3752,7 +3752,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xc57cc15dba2334d5uL
+    private const val SPEC_HASH: ULong = 0x3ab48ce2d4543eacuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -4390,6 +4390,7 @@ object KayaCompose {
     private const val RICH_ATTR_START = 11L
     private const val RICH_ATTR_ALIGN = 12L
     private const val RICH_ATTR_COLOR = 13L
+    private const val RICH_ATTR_HIGHLIGHT = 14L
     private const val BLOCK_BODY = 0L
     private const val BLOCK_HEADING1 = 1L
     private const val BLOCK_HEADING2 = 2L
@@ -4419,7 +4420,7 @@ object KayaCompose {
         RICH_ATTR_BOLD, RICH_ATTR_ITALIC, RICH_ATTR_UNDERLINE, RICH_ATTR_STRIKE,
         RICH_ATTR_CODE, RICH_ATTR_LINK, RICH_ATTR_BLOCK,
         RICH_ATTR_LIST, RICH_ATTR_INDENT, RICH_ATTR_CHECKED, RICH_ATTR_START,
-        RICH_ATTR_ALIGN, RICH_ATTR_COLOR,
+        RICH_ATTR_ALIGN, RICH_ATTR_COLOR, RICH_ATTR_HIGHLIGHT,
         BLOCK_BODY, BLOCK_HEADING1, BLOCK_HEADING2, BLOCK_HEADING3, BLOCK_QUOTE,
         BLOCK_CODE_BLOCK,
         EDIT_SOURCE_USER, EDIT_SOURCE_IME_COMMIT, EDIT_SOURCE_PASTE,

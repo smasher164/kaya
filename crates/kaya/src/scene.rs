@@ -21180,6 +21180,40 @@ body", vec![run(0, 5, "block", "heading1")])]);
         assert_eq!(spell_runs(&edit.runs), "0:1 color=#016FEF");
     }
 
+    /// docs/highlight-plan.md §4: a highlight act over a run, typing at its
+    /// end grows it (RD7), the act refuses a spelling outside the palette,
+    /// `none` takes it off, and a copy pasted back keeps it.
+    #[test]
+    fn a_highlight_grows_at_its_end_and_round_trips_the_clipboard() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        let w = WidgetId(1);
+        scene.apply(vec![set_document("ab cd", vec![])]);
+        scene.apply(vec![TxOp::FormatText { widget: w, name: "highlight".into(), value: Some("yellow".into()), range: Some(TextRange::new(0, 2)) }]);
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some("0:2 highlight=yellow"));
+        scene.set_text_selection(w, 2, 2);
+        let edit = scene.note_rich_text(w, "abX cd").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "0:1 highlight=yellow");
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some("0:3 highlight=yellow"));
+        let html = scene.rich_copy(w, 0, 3, true).unwrap();
+        assert!(html.contains("<mark data-kaya-highlight=\"yellow\""), "{html}");
+        assert_eq!(scene.rich_paste(w, None, Some(&html)).as_deref(), Some("abX"));
+        scene.set_text_edit_source(w, crate::wire::EDIT_SOURCE_PASTE as u32);
+        scene.set_text_selection(w, 6, 6);
+        let edit = scene.note_rich_text(w, "abX cdabX").unwrap();
+        assert_eq!(spell_runs(&edit.runs), "0:3 highlight=yellow");
+        scene.apply(vec![TxOp::FormatText { widget: w, name: "highlight".into(), value: Some("none".into()), range: Some(TextRange::new(0, 9)) }]);
+        assert_eq!(scene.rich_runs_string(w).as_deref(), Some(""));
+    }
+
+    #[test]
+    #[should_panic(expected = "not a highlight colour")]
+    fn a_highlight_outside_the_palette_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("ab", vec![run(0, 2, "highlight", "#FFFF00")])]);
+    }
+
     /// docs/rich-document-plan.md §7: a paste's runs are its own, and the
     /// copy writes both flavours from the mirror.
     #[test]

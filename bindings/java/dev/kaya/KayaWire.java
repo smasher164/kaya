@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xc57cc15dba2334d5L;
+    public static final long SPEC_HASH = 0x3ab48ce2d4543eacL;
     public static final String VERSION = "0.0.0";
 
     public static final int VALUE_BOOL = 1;
@@ -343,6 +343,7 @@ public final class KayaWire {
     public static final int RICH_ATTR_START = 11;
     public static final int RICH_ATTR_ALIGN = 12;
     public static final int RICH_ATTR_COLOR = 13;
+    public static final int RICH_ATTR_HIGHLIGHT = 14;
     public static final int LIST_KIND_NONE = 0;
     public static final int LIST_KIND_BULLET = 1;
     public static final int LIST_KIND_NUMBERED = 2;
@@ -351,6 +352,13 @@ public final class KayaWire {
     public static final int PARAGRAPH_ALIGN_CENTER = 1;
     public static final int PARAGRAPH_ALIGN_END = 2;
     public static final int PARAGRAPH_ALIGN_JUSTIFY = 3;
+    public static final int HIGHLIGHT_COLOR_NONE = 0;
+    public static final int HIGHLIGHT_COLOR_YELLOW = 1;
+    public static final int HIGHLIGHT_COLOR_ORANGE = 2;
+    public static final int HIGHLIGHT_COLOR_PINK = 3;
+    public static final int HIGHLIGHT_COLOR_PURPLE = 4;
+    public static final int HIGHLIGHT_COLOR_BLUE = 5;
+    public static final int HIGHLIGHT_COLOR_GREEN = 6;
     public static final int BLOCK_KIND_BODY = 0;
     public static final int BLOCK_KIND_HEADING1 = 1;
     public static final int BLOCK_KIND_HEADING2 = 2;

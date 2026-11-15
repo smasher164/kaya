@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xc57cc15dba2334d5
+	SpecHash uint64 = 0x3ab48ce2d4543eac
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -344,6 +344,7 @@ const (
 	RichAttrStart = 11
 	RichAttrAlign = 12
 	RichAttrColor = 13
+	RichAttrHighlight = 14
 	ListKindNone = 0
 	ListKindBullet = 1
 	ListKindNumbered = 2
@@ -352,6 +353,13 @@ const (
 	ParagraphAlignCenter = 1
 	ParagraphAlignEnd = 2
 	ParagraphAlignJustify = 3
+	HighlightColorNone = 0
+	HighlightColorYellow = 1
+	HighlightColorOrange = 2
+	HighlightColorPink = 3
+	HighlightColorPurple = 4
+	HighlightColorBlue = 5
+	HighlightColorGreen = 6
 	BlockKindBody = 0
 	BlockKindHeading1 = 1
 	BlockKindHeading2 = 2

@@ -46,7 +46,7 @@ pub(crate) fn paragraph_names(runs: &[TextRun]) -> Vec<String> {
 
 /// RD7's table: the marks that grow over text typed at their end.
 pub(crate) fn expands_at_end(name: &str) -> bool {
-    matches!(name, "bold" | "italic" | "underline" | "strike" | "color")
+    matches!(name, "bold" | "italic" | "underline" | "strike" | "color" | "highlight")
 }
 
 /// The Format menu's eight colours (docs/rich-document-plan.md §11): each
@@ -63,6 +63,46 @@ pub(crate) const COLOR_PRESETS: &[(&str, u32)] = &[
     ("pink", 0xD12387),
 ];
 
+/// The highlighter's palette (docs/highlight-plan.md H1): each name's ground
+/// on the light page and on the dark one, in the spec's `highlight_color`
+/// order. brand.rs's tests hold the floors, not these values.
+pub(crate) const HIGHLIGHT_PALETTE: &[(&str, u32, u32)] = &[
+    ("yellow", 0xF7E8AF, 0x594C1A),
+    ("orange", 0xFFE2CB, 0x694323),
+    ("pink", 0xFFDDEC, 0x6A3C52),
+    ("purple", 0xEEE1FF, 0x56436C),
+    ("blue", 0xD5EBFF, 0x295171),
+    ("green", 0xBDF8D7, 0x255940),
+];
+
+/// A palette name's ground for one appearance, or None for a name outside it.
+pub(crate) fn highlight_ground(name: &str, dark: bool) -> Option<u32> {
+    HIGHLIGHT_PALETTE.iter().find(|(n, _, _)| *n == name).map(|(_, light, night)| if dark { *night } else { *light })
+}
+
+/// A pasted background's palette name (docs/highlight-plan.md H6): kaya's own
+/// light or dark value as itself, any other colour the name nearest in Oklab
+/// hue, and None for a grey (chroma under 0.012), which is not a highlighter.
+pub(crate) fn nearest_highlight(rgb: u32) -> Option<&'static str> {
+    let rgb = rgb & 0xFF_FFFF;
+    if let Some((name, _, _)) = HIGHLIGHT_PALETTE.iter().find(|(_, l, d)| *l == rgb || *d == rgb) {
+        return Some(name);
+    }
+    let (chroma, hue) = crate::brand::oklch_chroma_hue(rgb);
+    if chroma < 0.012 {
+        return None;
+    }
+    let distance = |h: f64| {
+        let d = (h - hue).rem_euclid(360.0);
+        d.min(360.0 - d)
+    };
+    HIGHLIGHT_PALETTE
+        .iter()
+        .map(|(name, light, _)| (*name, distance(crate::brand::oklch_chroma_hue(*light).1)))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(name, _)| name)
+}
+
 pub(crate) const MAX_INDENT: u32 = 8;
 
 /// A value's canonical spelling, or why it is refused. A removal spelling
@@ -78,6 +118,7 @@ pub(crate) fn canonical_value(name: &str, value: &str) -> Result<Option<String>,
             let noun = match name {
                 "block" => "block kind",
                 "list" => "list kind",
+                "highlight" => "highlight colour",
                 _ => "paragraph alignment",
             };
             Err(format!(
@@ -90,6 +131,7 @@ pub(crate) fn canonical_value(name: &str, value: &str) -> Result<Option<String>,
         "block" => one_of(crate::wire::BLOCK_KINDS, "body"),
         "list" => one_of(crate::wire::LIST_KINDS, "none"),
         "align" => one_of(crate::wire::PARAGRAPH_ALIGNS, "start"),
+        "highlight" => one_of(crate::wire::HIGHLIGHT_COLORS, "none"),
         "indent" => match value.parse::<u32>() {
             Ok(0) => Ok(None),
             Ok(n) if n <= MAX_INDENT && value == n.to_string() => Ok(Some(value.to_owned())),
@@ -596,5 +638,84 @@ mod tests {
         assert!(canonical_value("start", "0").is_err());
         assert_eq!(canonical_value("align", "start"), Ok(None));
         assert_eq!(canonical_value("com.example.note", "x"), Ok(Some("x".to_owned())));
+    }
+
+    /// docs/highlight-plan.md §4: the six names, `none` as the mark's
+    /// absence, and any other spelling refused naming the vocabulary.
+    #[test]
+    fn a_highlight_is_a_palette_name() {
+        for name in ["yellow", "orange", "pink", "purple", "blue", "green"] {
+            assert_eq!(canonical_value("highlight", name), Ok(Some(name.to_owned())));
+        }
+        assert_eq!(canonical_value("highlight", "none"), Ok(None));
+        for wrong in ["#FFFF00", "Yellow", "mint", ""] {
+            let why = canonical_value("highlight", wrong).unwrap_err();
+            assert!(why.contains("not a highlight colour") && why.contains("yellow, orange, pink, purple, blue, green"), "{why}");
+        }
+        assert!(expands_at_end("highlight"));
+        assert!(!is_paragraph_attr("highlight"));
+    }
+
+    /// The C doors the arms draw through answer the palette by the spec's
+    /// numbers, and nothing for `none` or past the end.
+    #[test]
+    fn the_c_doors_answer_the_palette() {
+        use crate::capi::{KAYA_HIGHLIGHT_GREEN, KAYA_HIGHLIGHT_NONE, KAYA_HIGHLIGHT_YELLOW, kaya_highlight_ground, kaya_ink_on};
+        assert_eq!(kaya_highlight_ground(KAYA_HIGHLIGHT_YELLOW, 0), HIGHLIGHT_PALETTE[0].1);
+        assert_eq!(kaya_highlight_ground(KAYA_HIGHLIGHT_GREEN, 1), HIGHLIGHT_PALETTE[5].2);
+        assert_eq!(kaya_highlight_ground(KAYA_HIGHLIGHT_NONE, 0), u32::MAX);
+        assert_eq!(kaya_highlight_ground(7, 1), u32::MAX);
+        assert_eq!(kaya_ink_on(0xDD1F24, crate::brand::INK_LIGHT_PAGE), 0xDD1F24);
+        assert_eq!(kaya_ink_on(0xDD1F24, crate::brand::INK_DARK_PAGE), crate::brand::ink_for_dark(0xDD1F24));
+    }
+
+    /// The palette is the spec's vocabulary, in its order, past `none`.
+    #[test]
+    fn the_palette_names_are_the_spec_enum() {
+        let spec: Vec<&str> = crate::wire::HIGHLIGHT_COLORS.iter().skip(1).map(|(_, n)| *n).collect();
+        let palette: Vec<&str> = HIGHLIGHT_PALETTE.iter().map(|(n, _, _)| *n).collect();
+        assert_eq!(palette, spec);
+        assert_eq!(crate::wire::HIGHLIGHT_COLORS[0].1, "none");
+    }
+
+    /// H6's map over the references the plan computed: Word's sixteen
+    /// highlighter colours, Notion's backgrounds, a bare `<mark>`, Cocoa's
+    /// yellow and kaya's own find yellow; the greys are dropped.
+    #[test]
+    fn a_pasted_background_maps_to_the_nearest_name() {
+        let cases: &[(u32, Option<&str>)] = &[
+            (0xFFFF00, Some("yellow")),
+            (0x00FF00, Some("green")),
+            (0x0000FF, Some("blue")),
+            (0x000080, Some("blue")),
+            (0x808000, Some("yellow")),
+            (0x00FFFF, Some("green")),
+            (0x008080, Some("green")),
+            (0xFF00FF, Some("pink")),
+            (0x800080, Some("pink")),
+            (0xFF0000, Some("orange")),
+            (0x800000, Some("orange")),
+            (0xC0C0C0, None),
+            (0x808080, None),
+            (0x000000, None),
+            (0xFFFFFF, None),
+            (0xFBF3DB, Some("yellow")),
+            (0xFAEBDD, Some("orange")),
+            (0xF4DFEB, Some("pink")),
+            (0xEAE4F2, Some("purple")),
+            (0xDDEBF1, Some("blue")),
+            (0xDDEDEA, Some("green")),
+            (0xFBE4E4, Some("pink")),
+            (0xE9E5E3, None),
+            (0xEBECED, None),
+            (0xFFEA2E, Some("yellow")),
+            (0xFFF18F, Some("yellow")),
+        ];
+        for (rgb, want) in cases {
+            assert_eq!(nearest_highlight(*rgb), *want, "{rgb:06X}");
+        }
+        for (name, light, dark) in HIGHLIGHT_PALETTE {
+            assert_eq!((nearest_highlight(*light), nearest_highlight(*dark)), (Some(*name), Some(*name)));
+        }
     }
 }

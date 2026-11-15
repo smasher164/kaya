@@ -1,0 +1,5 @@
+fresh view=NSAppearanceNameAqua effective=NSAppearanceNameAqua drawing=NSAppearanceNameAqua cgColor=0.969,0.910,0.686,1.000 commonest=["F7E8AFx1306", "000000x476"]
+fresh view=NSAppearanceNameDarkAqua effective=NSAppearanceNameDarkAqua drawing=NSAppearanceNameDarkAqua cgColor=0.349,0.298,0.102,1.000 commonest=["594C19x1304", "FFFFFFx477"]
+same-view view=NSAppearanceNameAqua effective=NSAppearanceNameAqua drawing=NSAppearanceNameAqua cgColor=0.969,0.910,0.686,1.000 commonest=["F7E8AFx1306", "000000x476"]
+same-view-switched view=NSAppearanceNameDarkAqua effective=NSAppearanceNameDarkAqua drawing=NSAppearanceNameDarkAqua cgColor=0.349,0.298,0.102,1.000 commonest=["594C19x1459", "FFFFFFx371"]
+same-view-switched-back view=NSAppearanceNameAqua effective=NSAppearanceNameAqua drawing=NSAppearanceNameAqua cgColor=0.969,0.910,0.686,1.000 commonest=["F7E8AFx1462", "000000x371"]

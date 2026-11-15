@@ -20984,3 +20984,36 @@ newlines before it is Automerge index `3 + b + 2k`, and a patch at index `i`
 with `m` markers before it is kaya byte `i - 2m - 1`. Measured in scratch by the
 library design pass; the full account is docs/editor-library-plan.md §1.2, and
 docs/rich-document-plan.md §3's table points here.
+
+## The highlighter's platform findings (measured 2026-11-15)
+
+Four probes before any arm of docs/highlight-plan.md was built; each record
+holds its method and output.
+
+- RichEdit, the engine of WinUI's RichEditBox and of the WordPad that Windows
+  11 24H2 removed (build 26200 has none), reads an RTF background from
+  `\highlightN` and `\chcbpatN` and IGNORES `\cbN`, writing `\highlightN`
+  only; Cocoa does the opposite (reads `\cb` only). A copy that writes one
+  spelling loses one reader, so clip.rs writes `\highlightN\cbN` and reads all
+  three (docs/measurements/highlight-windows-2026-11-15.md; the guard is
+  clip.rs's every_rtf_background_spelling_reads_as_a_highlight).
+- A RichEditBox's `BackgroundColor` survives a theme switch untouched while
+  every automatic foreground becomes an explicit black or white
+  (microsoft-ui-xaml #6908 again): the control never moves a highlight to its
+  dark value, so the WinUI arm must rewrite the slot after
+  `ActualThemeChanged` (same record).
+- On GTK 4.24 two background tags over one range paint by priority, colour
+  and `bg-full-height` both, and a tag minted after find's `kaya-highlight`
+  sits above it, hiding the match from the highlights read, which keys on
+  `bg-full-height == "true"`. Setting the mark's priority once at its mint
+  is not enough, since a later mint lands above it again
+  (docs/measurements/highlight-gtk-2026-11-15.md).
+- On Compose, Material 3's selection wash over the dark highlight is lighter
+  than over the dark page: selected white text reads 3.21:1 there against
+  4.78:1 on the page (docs/measurements/highlight-compose-2026-11-15.md).
+  Neither a `drawBehind` mark nor a `SpanStyle(background)` reaches the
+  accessibility node's text, which carries no spans at all.
+- On the Mac a dynamic `NSColor` in a fragment's attribute resolves to the
+  view's appearance inside `draw(at:in:)`, and a pixel read of the dark value
+  comes back one step off (`594C19` for `594C1A`)
+  (docs/measurements/highlight-mac-2026-11-15.md).
