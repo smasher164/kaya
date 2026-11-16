@@ -21037,6 +21037,30 @@ the floor kayaTextareaFrame declares, so the siblings start below it and run
 off the bottom instead of being drawn over it, as GTK's set_size_request does.
 Before the second row the textarea had 69 pt, still under its floor; the box
 it tapped happened to sit inside the placed part.
+RULED 2026-11-15, the floor KEPT (the maintainer: "im okay with your
+recommendations to address these issues"): an over-full phone column runs
+off the bottom, under the keyboard.
+
+## Find's match over a highlight, and the ink on a mid ground (measured 2026-11-15)
+
+Find's ground over a highlight mark, against the mark under it, on the light
+page: the Mac and iOS (systemYellow at 55%, which the captures show as
+F8CE46) 1.12:1 to 1.16:1, GTK (`#ffe066`) 1.04:1 to 1.09:1, WinUI (`#FFF18F`)
+1.04:1 to 1.08:1, Compose (`#FFEB3B` at 140/255) 1.00:1 to 1.03:1: a 55%
+yellow over a yellow mark is the mark. In the dark appearance every lane was
+apart (2.87:1 and up). The text over find's ground read worse than either:
+white on GTK's and WinUI's opaque yellow 1.30:1 and 1.15:1, on the olive the
+Mac, iOS and Compose composite over their dark page 3.72:1, 4.46:1 and 2.94:1.
+Pixels from the review page's captures (the editor's "plan" inside its yellow
+mark: WinUI F7E8AF and FFF18F side by side, GTK F7E8AF and FFE066, the Mac
+dark 574C22 and B09937). And `brand::contrast_matched` chose its side by
+`luminance < 0.5`, which on those olives (luminance 0.21 to 0.33) picks white
+at 2.8:1 to 3.7:1 where black reads 4.7:1 to 7.6:1; the side is now the one
+with more room, which moves no page or mark (luminance 0.013, 0.069 to 0.079,
+0.790 to 0.829 and 1.0, all outside the band 0.179 to 0.5 where the two rules
+differ). docs/highlight-plan.md H3 holds what was built; brand.rs's
+find_on_a_mark_stands_apart_from_every_mark and
+ink_on_a_mid_ground_takes_the_roomier_side hold the floors.
 
 ## The clear text view's picture (measured 2026-11-15)
 

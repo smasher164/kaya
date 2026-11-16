@@ -386,8 +386,9 @@ pub fn ink_from_dark(rgb: u32) -> u32 {
 }
 
 /// `rgb`'s hue at the Oklab lightness whose contrast against `page` is
-/// `target`, on the side of the page away from it; the nearest reachable
-/// when the gamut ends first.
+/// `target`, on the side of the page with more room (a mid ground, find's
+/// olive, measured: docs/traps.md); the nearest reachable when the gamut ends
+/// first.
 fn contrast_matched(rgb: u32, page: u32, target: f64) -> u32 {
     let (_, a, b) = oklab(rgb);
     let at = |l: f64| -> u32 {
@@ -408,7 +409,7 @@ fn contrast_matched(rgb: u32, page: u32, target: f64) -> u32 {
         };
         pack(delinearize(lin.0.max(0.0)), delinearize(lin.1.max(0.0)), delinearize(lin.2.max(0.0)))
     };
-    let lighter = rel_luminance(page) < 0.5;
+    let lighter = contrast_ratio(page, 0xFF_FFFF) > contrast_ratio(page, 0x00_0000);
     let (mut lo, mut hi) = if lighter { (oklab_l(page), 1.0f64) } else { (0.0f64, oklab_l(page)) };
     for _ in 0..48 {
         let mid = (lo + hi) / 2.0;
@@ -513,6 +514,39 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// docs/highlight-plan.md H3, find over a mark: in each appearance find's
+    /// ground there stands 1.5:1 or more from every mark, the page's ink on it
+    /// reads at 7:1 and every preset at 4.5:1 once re-mapped.
+    #[test]
+    fn find_on_a_mark_stands_apart_from_every_mark() {
+        for dark in [false, true] {
+            let find = crate::richdoc::find_on_mark(dark);
+            for (name, light, night) in crate::richdoc::HIGHLIGHT_PALETTE {
+                let mark = if dark { *night } else { *light };
+                let apart = contrast_ratio(find, mark);
+                assert!(apart >= 1.5, "kaya: find on a mark {find:06X} sits {apart:.2}:1 from {name} {mark:06X} (dark {dark})");
+            }
+            let ink = contrast_ratio(ink_on(0x00_0000, find), find);
+            assert!(ink >= 7.0, "kaya: the page's ink reads {ink:.2}:1 on find on a mark {find:06X}");
+            for (preset, rgb) in crate::richdoc::COLOR_PRESETS {
+                let drawn = contrast_ratio(ink_on(*rgb, find), find);
+                assert!(drawn >= INK_FLOOR, "kaya: {preset} on find on a mark {find:06X} draws at {drawn:.2}:1");
+            }
+        }
+    }
+
+    /// A mid ground takes the ink from the side with more room: on find's
+    /// olive the page's ink is drawn dark (docs/traps.md).
+    #[test]
+    fn ink_on_a_mid_ground_takes_the_roomier_side() {
+        for ground in [0x96_8435, 0xA4_983B, 0xB1_9933, 0x88_7724] {
+            let drawn = ink_on(0x00_0000, ground);
+            let best = contrast_ratio(ground, 0x00_0000).max(contrast_ratio(ground, 0xFF_FFFF));
+            let got = contrast_ratio(drawn, ground);
+            assert!(got >= best - 0.05, "kaya: the page's ink on {ground:06X} drew {drawn:06X} at {got:.2}:1, under {best:.2}:1");
         }
     }
 

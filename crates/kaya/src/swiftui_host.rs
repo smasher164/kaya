@@ -495,6 +495,7 @@ pub struct KayaHostApi {
     /// docs/highlight-plan.md H1 and H4: the palette and the ink on a ground.
     pub ink_on: extern "C" fn(u32, u32) -> u32,
     pub highlight_ground: extern "C" fn(u32, u32) -> u32,
+    pub find_on_mark: extern "C" fn(u32) -> u32,
 }
 
 /// # Safety
@@ -830,6 +831,7 @@ pub(crate) fn run() -> i32 {
         text_item_speech: crate::capi::kaya_text_item_speech,
         ink_on: crate::capi::kaya_ink_on,
         highlight_ground: crate::capi::kaya_highlight_ground,
+        find_on_mark: crate::capi::kaya_find_on_mark,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

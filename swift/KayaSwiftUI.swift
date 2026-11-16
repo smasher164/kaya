@@ -833,15 +833,18 @@ final class KayaRichFragment: NSTextLayoutFragment {
             let selected = kayaMarkSelectionInElement(self)
             attributed.enumerateAttribute(kayaMarkKey, in: range, options: []) { value, sub, _ in
                 guard let colour = value as? KayaPlatformColor, sub.length > 0 else { return }
-                context.setFillColor(colour.cgColor)
-                for piece in kayaRangeMinus(sub, selected) {
-                    let from = line.locationForCharacter(at: piece.location).x
-                    let to = line.locationForCharacter(at: NSMaxRange(piece)).x
-                    guard to > from else { continue }
-                    context.fill(
-                        CGRect(
-                            x: point.x + bounds.minX + from, y: point.y + bounds.minY,
-                            width: to - from, height: bounds.height))
+                // Under find's match the ground is the core's find-on-mark (kayaPaintFind).
+                attributed.enumerateAttribute(.backgroundColor, in: sub, options: []) { found, part, _ in
+                    context.setFillColor((found == nil ? colour : kayaFindOnMarkSolid).cgColor)
+                    for piece in kayaRangeMinus(part, selected) {
+                        let from = line.locationForCharacter(at: piece.location).x
+                        let to = line.locationForCharacter(at: NSMaxRange(piece)).x
+                        guard to > from else { continue }
+                        context.fill(
+                            CGRect(
+                                x: point.x + bounds.minX + from, y: point.y + bounds.minY,
+                                width: to - from, height: bounds.height))
+                    }
                 }
             }
             attributed.enumerateAttribute(kayaRuleKey, in: range, options: []) { value, _, stop in
@@ -5877,6 +5880,121 @@ var kayaPendingPanelDirectory: String?
 /// check-verbs holds this clause.
 func kayaClearHighlights(_ storage: NSTextStorage) {
     kayaRemoveAttributeWhereSet(storage, .backgroundColor)
+    var inks: [(NSRange, Any)] = []
+    storage.enumerateAttribute(kayaFindInkKey, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+        if let value { inks.append((range, value)) }
+    }
+    if inks.isEmpty { return }
+    storage.beginEditing()
+    for (range, under) in inks {
+        storage.addAttribute(.foregroundColor, value: under, range: range)
+        storage.removeAttribute(kayaFindInkKey, range: range)
+    }
+    storage.endEditing()
+}
+
+/// The foreground under a match, put back by the clear; kayaRestyle drops it
+/// wherever it writes the foreground itself (docs/highlight-plan.md H3, find's ink).
+let kayaFindInkKey = NSAttributedString.Key("kaya.draw.findink")
+
+#if os(macOS)
+    let kayaFindPaint = NSColor.systemYellow.withAlphaComponent(0.55)
+    let kayaFindPage = NSColor.textBackgroundColor
+    let kayaPlatformInk = NSColor.textColor
+#else
+    let kayaFindPaint = UIColor.systemYellow.withAlphaComponent(0.55)
+    let kayaFindPage = UIColor.systemBackground
+    let kayaPlatformInk = UIColor.label
+#endif
+
+/// Find's ground where a match meets a highlight mark, from the core: drawn
+/// solid by KayaRichFragment in place of the mark, and find's paint there is
+/// the same colour at find's alpha, so the two composite to it exactly.
+let kayaFindOnMarkSolid = kayaAppearancePair(
+    kayaColorFromRGB(KayaHost.findOnMark(dark: false)), kayaColorFromRGB(KayaHost.findOnMark(dark: true)))
+let kayaFindOnMarkPaint = kayaAppearancePair(
+    kayaColorFromRGB(KayaHost.findOnMark(dark: false)).withAlphaComponent(0.55),
+    kayaColorFromRGB(KayaHost.findOnMark(dark: true)).withAlphaComponent(0.55))
+
+/// A colour as one appearance resolves it, in sRGB.
+func kayaResolvedRGB(_ colour: KayaPlatformColor, dark: Bool) -> UInt32 {
+    #if os(macOS)
+        var out: UInt32?
+        NSAppearance(named: dark ? .darkAqua : .aqua)?.performAsCurrentDrawingAppearance { out = kayaRGBOf(colour) }
+        return out ?? 0
+    #else
+        return kayaRGBOf(colour.resolvedColor(with: UITraitCollection(userInterfaceStyle: dark ? .dark : .light))) ?? 0
+    #endif
+}
+
+/// The ground a match is drawn on in one appearance: find's paint over the
+/// page, or the core's find-on-mark.
+func kayaFindGroundRGB(dark: Bool, onMark: Bool) -> UInt32 {
+    if onMark { return KayaHost.findOnMark(dark: dark) }
+    let top = kayaResolvedRGB(kayaFindPaint.withAlphaComponent(1), dark: dark)
+    let page = kayaResolvedRGB(kayaFindPage, dark: dark)
+    var out: UInt32 = 0
+    for shift in [16, 8, 0] as [UInt32] {
+        let a = Double((top >> shift) & 0xFF), b = Double((page >> shift) & 0xFF)
+        out |= UInt32((0.55 * a + 0.45 * b).rounded()) << shift
+    }
+    return out
+}
+
+/// The core's ink for a stored colour over a match's ground, in each appearance.
+nonisolated(unsafe) var kayaFindInks: [String: KayaPlatformColor] = [:]
+func kayaFindInk(_ stored: UInt32, onMark: Bool) -> KayaPlatformColor {
+    let key = "\(stored) \(onMark)"
+    if let made = kayaFindInks[key] { return made }
+    let made = kayaAppearancePair(
+        kayaColorFromRGB(KayaHost.inkOn(stored, kayaFindGroundRGB(dark: false, onMark: onMark))),
+        kayaColorFromRGB(KayaHost.inkOn(stored, kayaFindGroundRGB(dark: true, onMark: onMark))))
+    kayaFindInks[key] = made
+    return made
+}
+
+/// FIND'S SET, PAINTED (docs/highlight-plan.md H3): find's paint, the core's
+/// find-on-mark where a match meets a highlight mark, and the ink over both
+/// re-mapped by the core (a colour run's stored colour, the page's black
+/// otherwise; a link keeps the platform's link colour, which the text view
+/// draws over any foreground).
+func kayaPaintFind(_ storage: NSTextStorage, _ ranges: [NSRange]) {
+    var set = IndexSet()
+    for range in ranges where range.length > 0 && NSMaxRange(range) <= storage.length {
+        set.insert(integersIn: range.location..<NSMaxRange(range))
+    }
+    var pieces: [(NSRange, Bool, UInt32?, Any)] = []
+    for run in set.rangeView {
+        storage.enumerateAttributes(in: NSRange(location: run.lowerBound, length: run.count), options: []) {
+            attrs, sub, _ in
+            let stored: UInt32? =
+                attrs[kayaRichKey("link")] != nil
+                ? nil : (attrs[kayaRichKey("color")] as? String).flatMap(kayaHexRGB) ?? 0x000000
+            pieces.append((sub, attrs[kayaMarkKey] != nil, stored, attrs[.foregroundColor] ?? kayaPlatformInk))
+        }
+    }
+    if pieces.isEmpty { return }
+    storage.beginEditing()
+    for (sub, onMark, stored, under) in pieces {
+        storage.addAttribute(.backgroundColor, value: onMark ? kayaFindOnMarkPaint : kayaFindPaint, range: sub)
+        guard let stored else { continue }
+        storage.addAttribute(kayaFindInkKey, value: under, range: sub)
+        storage.addAttribute(.foregroundColor, value: kayaFindInk(stored, onMark: onMark), range: sub)
+    }
+    storage.endEditing()
+}
+
+/// Find's paint is two colours (H3), so a read joins the runs that touch.
+func kayaJoinedRuns(_ runs: [NSRange]) -> [NSRange] {
+    var out: [NSRange] = []
+    for run in runs {
+        if let last = out.last, NSMaxRange(last) == run.location {
+            out[out.count - 1] = NSRange(location: last.location, length: last.length + run.length)
+        } else {
+            out.append(run)
+        }
+    }
+    return out
 }
 
 /// The same rule for any attribute an update pass clears: an edit only over
@@ -7075,6 +7193,7 @@ enum KayaHost {
     static func inkFromDark(_ rgb: UInt32) -> UInt32 { api.ink_from_dark(rgb) }
     static func inkOn(_ rgb: UInt32, _ ground: UInt32) -> UInt32 { api.ink_on(rgb, ground) }
     static func highlightGround(_ color: UInt32, dark: Bool) -> UInt32 { api.highlight_ground(color, dark ? 1 : 0) }
+    static func findOnMark(dark: Bool) -> UInt32 { api.find_on_mark(dark ? 1 : 0) }
 
     /// An entry edit, with the three facts the core's undo ledger cannot derive
     /// (docs/undo-plan.md §3): the window, focus, and whether the edit is
@@ -9469,7 +9588,7 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
             }
             return KayaAxRanges(
                 text: text,
-                highlights: runs,
+                highlights: kayaJoinedRuns(runs),
                 selection: cfRange(kAXSelectedTextRangeAttribute),
                 visible: cfRange(kAXVisibleCharacterRangeAttribute))
         }
@@ -10329,7 +10448,7 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
             }
             return KayaUIRanges(
                 text: view.text ?? "",
-                highlights: runs,
+                highlights: kayaJoinedRuns(runs),
                 selection: view.selectedRange,
                 painted: !wantsPaint || runs.isEmpty || kayaPaintedPixels(view) > 0)
         }
@@ -40588,11 +40707,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
             // `addAttribute` raises NSRangeException and the app exits 134
             // (measured), and the storage's length is a fact only this side
             // holds at this instant.
-            for range in highlights where NSMaxRange(range) <= storage.length {
-                storage.addAttribute(
-                    .backgroundColor, value: NSColor.systemYellow.withAlphaComponent(0.55),
-                    range: range)
-            }
+            kayaPaintFind(storage, highlights)
         }
 
         // THE TWO ONE-SHOTS, each performed once per request and clamped to the
@@ -40847,6 +40962,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         out[.foregroundColor] =
             link != nil
             ? NSColor.linkColor : ink ?? (block == "quote" ? NSColor.secondaryLabelColor : NSColor.textColor)
+        storage.removeAttribute(kayaFindInkKey, range: sub)
         if has("underline") || link != nil {
             out[.underlineStyle] = NSUnderlineStyle.single.rawValue
         } else {
@@ -41658,13 +41774,7 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
             if highlightsFor == text {
                 // Bounds re-checked against the LIVE storage: its length is a
                 // fact only this side holds at this instant.
-                storage.beginEditing()
-                for range in highlights where NSMaxRange(range) <= storage.length {
-                    storage.addAttribute(
-                        .backgroundColor, value: UIColor.systemYellow.withAlphaComponent(0.55),
-                        range: range)
-                }
-                storage.endEditing()
+                kayaPaintFind(storage, highlights)
             }
 
             // THE TWO ONE-SHOTS, each performed once per request, both clamped to
@@ -42435,6 +42545,7 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
             out[.foregroundColor] =
                 link != nil
                 ? UIColor.link : ink ?? (block == "quote" ? UIColor.secondaryLabel : UIColor.label)
+            storage.removeAttribute(kayaFindInkKey, range: sub)
             if has("underline") || link != nil {
                 out[.underlineStyle] = NSUnderlineStyle.single.rawValue
             } else {

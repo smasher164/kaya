@@ -401,6 +401,7 @@ import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.graphics.takeOrElse
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.text.input.ImeAction
@@ -1660,6 +1661,9 @@ val kayaSelectionWash = HashMap<Long, Int>()
  * kayaPaintedRanges: find's paint lands on a mark's ground there, and the
  * witness composites against what was drawn (docs/highlight-plan.md H3). */
 val kayaDrawnMarks = HashMap<Long, List<Triple<Int, Int, Int>>>()
+
+/** Find's ground on a mark as the layer drew it, ARGB (docs/highlight-plan.md H3). */
+val kayaDrawnFindOnMark = HashMap<Long, Int>()
 
 /**
  * How many apply batches this interpreter has finished — the signal an
@@ -8702,6 +8706,8 @@ object KayaCompose {
         val wash: Int = 0,
         // The marks the layer drew, (start, stop, ARGB).
         val marks: List<Triple<Int, Int, Int>> = emptyList(),
+        // Find's ground where a match meets a mark, ARGB.
+        val findOnMark: Int = 0,
     )
 
     private fun kayaGatherHighlights(
@@ -8746,7 +8752,8 @@ object KayaCompose {
         return KayaHighlights(
             text = text, ranges = ranges, viewport = box, onScreen = rects,
             surfaceOffset = offset, surfaceSize = surface, wash = wash,
-            marks = kayaDrawnMarks[node.id] ?: emptyList())
+            marks = kayaDrawnMarks[node.id] ?: emptyList(),
+            findOnMark = kayaDrawnFindOnMark[node.id] ?: 0)
     }
 
     /** The photograph, with the space it was taken in carried beside
@@ -8790,11 +8797,11 @@ object KayaCompose {
         val base = kayaModalColour(shot, box, read.onScreen)
         val deco = kayaOver(KAYA_HIGHLIGHT_COLOR.toArgb(), base)
         val washed = kayaOver(read.wash, deco)
-        // A RANGE OVER A DRAWN MARK is find's paint on the mark's ground,
+        // A RANGE OVER A DRAWN MARK stands on find's ground for a mark,
         // which is what that range's pixels hold (docs/highlight-plan.md H3).
         fun overMarks(r: KayaRange): List<Int> = read.marks
             .filter { (a, b, _) -> a < r.stop && b > r.start }
-            .map { (_, _, ground) -> kayaOver(KAYA_HIGHLIGHT_COLOR.toArgb(), ground) }
+            .map { read.findOnMark }
         // AND WHAT THE FIELD PAINTS WITH NO DECORATION AT ALL, both
         // ways: a colour the witness cannot TELL APART from that is one
         // it must not accept. Watched — with the highlight's alpha at
@@ -18775,6 +18782,8 @@ internal data class KayaRichPalette(
     /** A `color` run draws kaya_ink_for_dark of its stored colour on a dark
      *  page (docs/rich-document-plan.md RD5). */
     val dark: Boolean = false,
+    /** The field's own container, which find's paint composites over. */
+    val page: Color = Color.White,
 )
 
 private val kayaDarkInks = HashMap<Int, Int>()
@@ -18897,8 +18906,15 @@ internal fun kayaRichSpanStyle(
 internal fun kayaRichTransformation(
     runs: List<KayaRichRun>,
     palette: KayaRichPalette,
+    find: List<KayaRange> = emptyList(),
+    findFor: String? = null,
 ): androidx.compose.foundation.text.input.OutputTransformation =
     androidx.compose.foundation.text.input.OutputTransformation {
+        val inks = if (find.isNotEmpty() && findFor == asCharSequence().toString()) {
+            kayaFindInkSpans(find, runs, length, palette)
+        } else {
+            emptyList()
+        }
         // ONE PARAGRAPH STYLE PER PARAGRAPH, never per segment: a boundary
         // inside a paragraph breaks the line (docs/rich-text-plan.md §18).
         val styled = kayaRichParagraphs(runs, asCharSequence())
@@ -18915,6 +18931,7 @@ internal fun kayaRichTransformation(
             if (stop <= from) continue
             addStyle(kayaRichSpanStyle(attrs, palette), from, stop)
         }
+        for ((from, to, ink) in inks) addStyle(SpanStyle(color = ink), from, to)
     }
 
 /**
@@ -22907,11 +22924,18 @@ fun KayaTextField(
         code = LocalContentColor.current.copy(alpha = KAYA_RICH_CODE_ALPHA),
         bold = kayaNodeBold(node, LocalTextStyle.current),
         codeFamily = kayaNodeCodeFamily(node),
-        dark = isSystemInDarkTheme())
+        dark = isSystemInDarkTheme(),
+        page = if (inComposer) MaterialTheme.colorScheme.surface else TextFieldDefaults.colors().unfocusedContainerColor)
     val richSeq = node.richSeq
     val cap = KayaSceneModel.keyboardFieldCap?.takeIf { !singleLine && it.first == node.id }?.second
-    val output = remember(node, node.rich, richSeq, palette) {
-        if (node.rich) kayaRichTransformation(node.richRuns, palette) else null
+    val find = node.highlights
+    val findFor = node.highlightsFor
+    val output = remember(node, node.rich, richSeq, palette, find, findFor) {
+        when {
+            node.rich -> kayaRichTransformation(node.richRuns, palette, find, findFor)
+            find.isNotEmpty() -> kayaRichTransformation(emptyList(), palette, find, findFor)
+            else -> null
+        }
     }
     val input = remember(node, node.rich) {
         if (node.rich) kayaRichInputTransformation(node) else null
@@ -23310,6 +23334,8 @@ private fun KayaHighlightLayer(
             kayaPaintedRanges[node.id] = paint
             kayaSelectionWash[node.id] = wash
             kayaDrawnMarks[node.id] = marks.map { (a, b, ground) -> Triple(a, b, ground.toArgb()) }
+            val findOnMark = kayaFindOnMark(palette.dark)
+            kayaDrawnFindOnMark[node.id] = findOnMark.toArgb()
             if (markers.isEmpty()) {
                 kayaDrawnMarkers.remove(node.id)
                 kayaPhantomLines.remove(node.id)
@@ -23337,11 +23363,21 @@ private fun KayaHighlightLayer(
                         kayaDrawnMarkers[node.id] = kayaRichMarkers(
                             markers, runs, live, layout, measurer, style, ink, boxColors)
                     }
+                    // FIND OVER A MARK stands on the core's find-on-mark, cut
+                    // under the selection as the mark is, and find's paint
+                    // there is that colour at find's alpha (H3).
                     for (r in paint) {
                         if (r.start < 0 || r.start > r.stop || r.stop > live.length) continue
-                        drawPath(
-                            layout.getPathForRange(r.start, r.stop),
-                            KAYA_HIGHLIGHT_COLOR)
+                        for ((a, b, onMark) in kayaFindPieces(r, marks)) {
+                            if (onMark) {
+                                for ((x, y) in kayaRangeMinus(a, b, selection.min, selection.max)) {
+                                    drawPath(layout.getPathForRange(x, y), findOnMark)
+                                }
+                            }
+                            drawPath(
+                                layout.getPathForRange(a, b),
+                                if (onMark) findOnMark.copy(alpha = KAYA_HIGHLIGHT_COLOR.alpha) else KAYA_HIGHLIGHT_COLOR)
+                        }
                     }
                 }
             }
@@ -23358,6 +23394,63 @@ internal fun kayaRichMarks(runs: List<KayaRichRun>, length: Int, dark: Boolean):
         val ground = attrs["highlight"]?.let { kayaMarkGround(it, dark) } ?: return@mapNotNull null
         if (from >= length) null else Triple(from, minOf(to, length), ground)
     }
+
+/** A find range cut at the marks under it: (from, to, on a mark). */
+internal fun kayaFindPieces(r: KayaRange, marks: List<Triple<Int, Int, Color>>): List<Triple<Int, Int, Boolean>> {
+    val cuts = sortedSetOf(r.start, r.stop)
+    for ((a, b, _) in marks) {
+        if (a > r.start && a < r.stop) cuts.add(a)
+        if (b > r.start && b < r.stop) cuts.add(b)
+    }
+    val edges = cuts.toList()
+    return (0 until edges.size - 1).map { i ->
+        val (a, b) = Pair(edges[i], edges[i + 1])
+        Triple(a, b, marks.any { (x, y, _) -> x <= a && b <= y })
+    }
+}
+
+private val kayaFindOnMarks = HashMap<Boolean, Int>()
+
+/** Find's ground where a match meets a highlight mark, from the core. */
+internal fun kayaFindOnMark(dark: Boolean): Color =
+    Color(0xFF000000.toInt() or kayaFindOnMarks.getOrPut(dark) { KayaPresent.findOnMark(dark) })
+
+private val kayaFindInks = HashMap<String, Int>()
+
+/** FIND'S INK (docs/highlight-plan.md H3): over each piece of find's set the
+ * core's ink on the ground find draws there (a colour run's stored colour,
+ * the page's black otherwise); a link keeps the link colour. */
+internal fun kayaFindInkSpans(
+    find: List<KayaRange>,
+    runs: List<KayaRichRun>,
+    length: Int,
+    palette: KayaRichPalette,
+): List<Triple<Int, Int, Color>> {
+    val segments = kayaRichSegments(runs, length)
+    val marks = kayaRichMarks(runs, length, palette.dark)
+    val page = KAYA_HIGHLIGHT_COLOR.compositeOver(palette.page).toArgb() and 0xFFFFFF
+    val out = ArrayList<Triple<Int, Int, Color>>()
+    for (r in find) {
+        if (r.start < 0 || r.start >= r.stop || r.stop > length) continue
+        for ((a, b, onMark) in kayaFindPieces(r, marks)) {
+            val cuts = sortedSetOf(a, b)
+            for ((x, y, _) in segments) {
+                if (x > a && x < b) cuts.add(x)
+                if (y > a && y < b) cuts.add(y)
+            }
+            val edges = cuts.toList()
+            for (i in 0 until edges.size - 1) {
+                val attrs = segments.firstOrNull { (x, y, _) -> x <= edges[i] && edges[i] < y }?.third ?: emptyMap()
+                if (attrs.containsKey("link")) continue
+                val stored = attrs["color"]?.let { kayaParseDocumentColor(it) } ?: 0x000000
+                val ground = if (onMark) kayaFindOnMark(palette.dark).toArgb() and 0xFFFFFF else page
+                val ink = kayaFindInks.getOrPut("$stored $ground") { KayaPresent.inkOn(stored, ground) }
+                out.add(Triple(edges[i], edges[i + 1], Color(0xFF000000.toInt() or ink)))
+            }
+        }
+    }
+    return out
+}
 
 /** `from..to` with `cutFrom..cutTo` taken out: none, one or two pieces. */
 internal fun kayaRangeMinus(from: Int, to: Int, cutFrom: Int, cutTo: Int): List<Pair<Int, Int>> {

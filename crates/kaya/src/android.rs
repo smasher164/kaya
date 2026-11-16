@@ -1375,6 +1375,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "(IZ)I".into(),
                 fn_ptr: present_highlight_ground as *mut _,
             },
+            NativeMethod {
+                name: "findOnMark".into(),
+                sig: "(Z)I".into(),
+                fn_ptr: present_find_on_mark as *mut _,
+            },
         ],
     )
 }
@@ -2035,6 +2040,10 @@ extern "system" fn present_ink_from_dark(_env: JNIEnv, _class: JClass, rgb: jint
 
 extern "system" fn present_ink_on(_env: JNIEnv, _class: JClass, rgb: jint, ground: jint) -> jint {
     crate::capi::kaya_ink_on(rgb as u32, ground as u32) as jint
+}
+
+extern "system" fn present_find_on_mark(_env: JNIEnv, _class: JClass, dark: jni::sys::jboolean) -> jint {
+    crate::capi::kaya_find_on_mark(u32::from(dark)) as jint
 }
 
 extern "system" fn present_highlight_ground(_env: JNIEnv, _class: JClass, color: jint, dark: jni::sys::jboolean) -> jint {

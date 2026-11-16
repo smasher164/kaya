@@ -376,6 +376,11 @@ fn set_kaya_preedit(view: &gtk4::TextView, text: &str) {
 /// The ONE tag every declared range wears, named so it can be found
 /// again in the buffer's tag table rather than remembered in a map.
 const HIGHLIGHT_TAG: &str = "kaya-highlight";
+const FIND_GROUND: u32 = 0xFF_E066;
+/// Find's ground where a match meets a highlight mark (docs/highlight-plan.md
+/// H3), over find's own tag and full height like it, so the highlights read
+/// takes it for find's.
+const FIND_ON_MARK_TAG: &str = "kaya-find-on-mark";
 
 /// The mark REVEAL scrolls to. A mark and not an iterator: GTK computes
 /// line heights in an idle handler and documents `scroll_to_mark` as the
@@ -397,7 +402,7 @@ fn highlight_tag(buffer: &gtk4::TextBuffer) -> gtk4::TextTag {
         return tag;
     }
     let tag = gtk4::TextTag::new(Some(HIGHLIGHT_TAG));
-    tag.set_background(Some("#ffe066"));
+    tag.set_background_rgba(Some(&rgba_of_rgb(FIND_GROUND)));
     // Full height is the attribute the highlights read keys on: a code
     // run's ground is a bg-color too, and a highlight over a code run
     // must still read as one (docs/rich-text-plan.md §18).
@@ -618,16 +623,27 @@ fn order_rich_grounds(table: &gtk4::TextTagTable) {
     if let Some(find) = table.lookup(HIGHLIGHT_TAG) {
         find.set_priority(top);
     }
+    if let Some(on_mark) = table.lookup(FIND_ON_MARK_TAG) {
+        on_mark.set_priority(top);
+    }
 }
 
-/// Each colour run's ink over each highlight it sits under, recomputed whole.
-fn apply_rich_inks(view: &gtk4::TextView) {
+fn style_find_on_mark(tag: &gtk4::TextTag) {
+    use gtk4::prelude::TextTagExt;
+    let rgb = crate::richdoc::find_on_mark(adw::StyleManager::default().is_dark());
+    tag.set_background_rgba(Some(&rgba_of_rgb(rgb)));
+    tag.set_background_full_height(true);
+}
+
+/// Each colour run's ink over each highlight it sits under, and every ink
+/// and find's ground on a mark under find's match (docs/highlight-plan.md
+/// H3), recomputed whole.
+fn apply_rich_inks(buffer: &gtk4::TextBuffer) {
     use gtk4::prelude::{TextBufferExt, TextTagExt};
-    let buffer = view.buffer();
     let table = buffer.tag_table();
     let mut old = Vec::new();
     table.foreach(|tag| {
-        if tag.name().is_some_and(|n| n.starts_with(RICH_INK_PREFIX)) {
+        if tag.name().is_some_and(|n| n.starts_with(RICH_INK_PREFIX) || n == FIND_ON_MARK_TAG) {
             old.push(tag.clone());
         }
     });
@@ -641,17 +657,38 @@ fn apply_rich_inks(view: &gtk4::TextView) {
         if !next.forward_to_tag_toggle(None::<&gtk4::TextTag>) {
             next = buffer.end_iter();
         }
-        let (mut rgb, mut mark) = (None, None);
+        let (mut rgb, mut mark, mut find, mut link) = (None, None, false, false);
         for tag in it.tags() {
             let Some(name) = tag.name() else { continue };
             if let Some(v) = name.strip_prefix(&format!("{RICH_VALUED_PREFIX}color=")) {
                 rgb = rich_rgb(v);
             } else if let Some(v) = name.strip_prefix(&format!("{RICH_VALUED_PREFIX}highlight=")) {
                 mark = Some(v.to_owned());
+            } else if name == HIGHLIGHT_TAG {
+                find = true;
+            } else if name.starts_with(RICH_LINK_PREFIX) {
+                link = true;
             }
         }
-        if let (Some(rgb), Some(mark)) = (rgb, mark) {
-            let name = format!("{RICH_INK_PREFIX}{rgb:06X}-{mark}");
+        if find && mark.is_some() {
+            let tag = table.lookup(FIND_ON_MARK_TAG).unwrap_or_else(|| {
+                let tag = gtk4::TextTag::new(Some(FIND_ON_MARK_TAG));
+                style_find_on_mark(&tag);
+                table.add(&tag);
+                order_rich_grounds(&table);
+                tag
+            });
+            buffer.apply_tag(&tag, &it, &next);
+        }
+        let ground = match (find, &mark) {
+            (true, Some(_)) => Some(FIND_ON_MARK_INK.to_owned()),
+            (true, None) => Some(FIND_INK.to_owned()),
+            (false, Some(mark)) if rgb.is_some() => Some(mark.clone()),
+            _ => None,
+        };
+        if let Some(ground) = ground.filter(|_| !link) {
+            let rgb = rgb.unwrap_or(0x00_0000);
+            let name = format!("{RICH_INK_PREFIX}{rgb:06X}-{ground}");
             let tag = table.lookup(&name).unwrap_or_else(|| {
                 let tag = gtk4::TextTag::new(Some(&name));
                 style_ink_tag(&tag, &name);
@@ -664,12 +701,22 @@ fn apply_rich_inks(view: &gtk4::TextView) {
     }
 }
 
-/// An ink tag's foreground off its own name, for this appearance.
+/// An ink tag's ground: under find's match (on a mark or not), or a mark's.
+const FIND_INK: &str = "find";
+const FIND_ON_MARK_INK: &str = "findmark";
+
+/// An ink tag's foreground off its own name, for this appearance; a colour
+/// run's stored colour, or the page's black (docs/highlight-plan.md H3).
 fn style_ink_tag(tag: &gtk4::TextTag, name: &str) {
     use gtk4::prelude::TextTagExt;
     let Some((rgb, mark)) = name.strip_prefix(RICH_INK_PREFIX).and_then(|r| r.split_once('-')) else { return };
     let dark = adw::StyleManager::default().is_dark();
-    if let (Some(rgb), Some(ground)) = (rich_rgb(&format!("#{rgb}")), crate::richdoc::highlight_ground(mark, dark)) {
+    let ground = match mark {
+        FIND_INK => Some(FIND_GROUND),
+        FIND_ON_MARK_INK => Some(crate::richdoc::find_on_mark(dark)),
+        _ => crate::richdoc::highlight_ground(mark, dark),
+    };
+    if let (Some(rgb), Some(ground)) = (rich_rgb(&format!("#{rgb}")), ground) {
         tag.set_foreground_rgba(Some(&rgba_of_rgb(crate::brand::ink_on(rgb, ground))));
     }
 }
@@ -807,6 +854,8 @@ fn restyle_rich_grounds() {
                 view.buffer().tag_table().foreach(|tag| {
                     if let Some(name) = tag.name().filter(|n| n.starts_with(RICH_INK_PREFIX)) {
                         style_ink_tag(tag, &name);
+                    } else if tag.name().is_some_and(|n| n == FIND_ON_MARK_TAG) {
+                        style_find_on_mark(tag);
                     }
                 });
                 view.queue_draw();
@@ -964,7 +1013,7 @@ fn refresh_rich_view(core: &CoreState, id: WidgetId) {
     let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else { return };
     let Some(rich) = view.downcast_ref::<rich_view::KayaRichTextView>() else { return };
     apply_rich_geometry(view);
-    apply_rich_inks(view);
+    apply_rich_inks(&view.buffer());
     let markers = core.scene.rich_markers(id).unwrap_or_default();
     rich.set_markers(markers);
     refresh_item_description(core, id);
@@ -2258,6 +2307,7 @@ fn drop_stale_highlights(
     // rich document's formatting with it at the first keystroke after a find
     // (the editor's list, measured on the linux lane 2026-11-11).
     buffer.remove_tag(&highlight_tag(buffer), &buffer.start_iter(), &buffer.end_iter());
+    apply_rich_inks(buffer);
 }
 
 /// THE SECOND CLAUSE of `expect_no_clipping` (docs/flex-shrink-plan.md §4):
@@ -18043,6 +18093,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     &buffer.iter_at_offset(buffer_offset(&raw, range.stop)),
                 );
             }
+            apply_rich_inks(&buffer);
             // AND RECORD THE TEXT IT WAS DECLARED AGAINST — D2's whole
             // mechanism here, since GTK's tags would otherwise follow the
             // next edit rather than being dropped by it.

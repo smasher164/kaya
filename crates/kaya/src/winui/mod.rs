@@ -931,6 +931,12 @@ thread_local! {
     static HIGHLIGHT_SPANS: RefCell<HashMap<u64, Vec<(i32, i32)>>> =
         RefCell::new(HashMap::new());
 
+    /// The widgets whose text under find's set wears find's ink
+    /// (docs/highlight-plan.md H3), with a plain textarea's own foreground to
+    /// put back; a rich one's is derived again from its table.
+    static FIND_INKED: RefCell<HashMap<u64, Option<bindings::Windows::UI::Color>>> =
+        RefCell::new(HashMap::new());
+
     /// Widgets with a LIVE INPUT-METHOD COMPOSITION, from the control's
     /// own `TextCompositionStarted`/`TextCompositionEnded` (D4): a
     /// composition rides no kaya channel, so only the control knows, and
@@ -12777,6 +12783,113 @@ const HIGHLIGHT_BACKGROUND: bindings::Windows::UI::Color = bindings::Windows::UI
     B: 143,
 };
 
+fn ui_color(rgb: u32) -> bindings::Windows::UI::Color {
+    bindings::Windows::UI::Color { A: 255, R: (rgb >> 16) as u8, G: (rgb >> 8) as u8, B: rgb as u8 }
+}
+
+fn rgb_of_color(c: bindings::Windows::UI::Color) -> u32 {
+    (u32::from(c.R) << 16) | (u32::from(c.G) << 8) | u32::from(c.B)
+}
+
+/// Find's ground where a match meets a highlight mark, in either appearance.
+fn is_find_ground(c: bindings::Windows::UI::Color) -> bool {
+    c == HIGHLIGHT_BACKGROUND
+        || (c.A == 255 && [false, true].iter().any(|dark| rgb_of_color(c) == crate::richdoc::find_on_mark(*dark)))
+}
+
+/// Find's set cut at the rich table's segments, in the control's units, each
+/// piece with the attributes under it (none on a plain textarea).
+fn find_pieces(
+    field: &RichEditBox, widget: u64, spans: &[(i32, i32)],
+) -> windows_core::Result<Vec<(i32, i32, BTreeMap<String, String>)>> {
+    let mut segments: Vec<(i32, i32, BTreeMap<String, String>)> = Vec::new();
+    if rich_is_on(widget) {
+        let text = lf(Editable::Textarea(field.clone()).text()?);
+        let runs = rich_table(widget);
+        for (start, end, attrs) in rich_segments(&text, &runs) {
+            if let (Some(a), Some(b)) = (utf16_offset(&text, start), utf16_offset(&text, end)) {
+                segments.push((a, b, attrs));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for &(start, stop) in spans {
+        let mut cuts: Vec<i32> = vec![start, stop];
+        for (a, b, _) in &segments {
+            cuts.extend([*a, *b].into_iter().filter(|at| *at > start && *at < stop));
+        }
+        cuts.sort_unstable();
+        cuts.dedup();
+        for pair in cuts.windows(2) {
+            let attrs = segments
+                .iter()
+                .find(|(a, b, _)| *a <= pair[0] && pair[0] < *b)
+                .map(|(_, _, attrs)| attrs.clone())
+                .unwrap_or_default();
+            out.push((pair[0], pair[1], attrs));
+        }
+    }
+    Ok(out)
+}
+
+/// FIND'S SET, PAINTED (docs/highlight-plan.md H3): `HIGHLIGHT_BACKGROUND`,
+/// the core's find-on-mark where a match meets a highlight mark, and the ink
+/// over both re-mapped by the core (a colour run's stored colour, the page's
+/// black otherwise; a link keeps the link colour).
+fn find_paint(field: &RichEditBox, widget: u64, spans: &[(i32, i32)]) -> windows_core::Result<()> {
+    let doc = field.TextDocument()?;
+    let palette = rich_palette(field);
+    for (start, stop, attrs) in find_pieces(field, widget, spans)? {
+        let ground = if attrs.contains_key("highlight") {
+            ui_color(crate::richdoc::find_on_mark(palette.dark))
+        } else {
+            HIGHLIGHT_BACKGROUND
+        };
+        let range = doc.GetRange(start, stop)?;
+        set_background(&range, ground)?;
+        if attrs.contains_key("link") {
+            continue;
+        }
+        if !FIND_INKED.with_borrow(|map| map.contains_key(&widget)) {
+            let plain = (!rich_is_on(widget)).then(|| range.CharacterFormat()?.ForegroundColor()).transpose()?;
+            FIND_INKED.with_borrow_mut(|map| map.insert(widget, plain));
+        }
+        let stored = attrs.get("color").and_then(|c| crate::richdoc::parse_color(c).ok()).unwrap_or(0x00_0000);
+        let format = range.CharacterFormat()?;
+        format.SetForegroundColor(ui_color(crate::brand::ink_on(stored, rgb_of_color(ground))))?;
+        range.SetCharacterFormat(&format)?;
+    }
+    Ok(())
+}
+
+/// Find's ink taken off: a plain textarea's own foreground over the story, a
+/// rich one's derived again from its table.
+fn find_unpaint(field: &RichEditBox, widget: u64) -> windows_core::Result<()> {
+    let Some(plain) = FIND_INKED.with_borrow_mut(|map| map.remove(&widget)) else {
+        return Ok(());
+    };
+    let doc = field.TextDocument()?;
+    if rich_is_on(widget) {
+        let text = lf(Editable::Textarea(field.clone()).text()?);
+        let palette = rich_palette(field);
+        for (start, end, attrs) in rich_segments(&text, &rich_table(widget)) {
+            let (Some(a), Some(b)) = (utf16_offset(&text, start), utf16_offset(&text, end)) else {
+                continue;
+            };
+            let range = doc.GetRange(a, b)?;
+            let format = range.CharacterFormat()?;
+            format.SetForegroundColor(rich_foreground(&attrs, palette)?)?;
+            range.SetCharacterFormat(&format)?;
+        }
+    } else if let Some(color) = plain {
+        let story = doc.GetRange(0, TextConstants::MaxUnitCount()?)?;
+        let format = story.CharacterFormat()?;
+        format.SetForegroundColor(color)?;
+        story.SetCharacterFormat(&format)?;
+    }
+    Ok(())
+}
+
 /// The textarea behind a widget id, or None if this id is not one.
 ///
 /// TEXTAREA ONLY, and the core already refused anything else at the one
@@ -12839,15 +12952,11 @@ fn paint_highlights(
         // The clear is the whole story's background, which is where a rich
         // document's own grounds live too — so they are written again under
         // the set (`rich_ground`, docs/rich-text-plan.md §18).
+        find_unpaint(field, widget)?;
         clear_highlights(field)?;
         rich_paint_grounds(field, widget)?;
-        for range in ranges {
-            set_background(
-                &doc.GetRange(range.start as i32, range.stop as i32)?,
-                HIGHLIGHT_BACKGROUND,
-            )?;
-        }
-        Ok(())
+        let spans: Vec<(i32, i32)> = ranges.iter().map(|r| (r.start as i32, r.stop as i32)).collect();
+        find_paint(field, widget, &spans)
     })();
     // ALWAYS, even on the failure above: an unmatched BatchDisplayUpdates leaves
     // the control's rendering suspended for the rest of the process.
@@ -12872,7 +12981,10 @@ fn drop_stale_highlights(id: u64, field: &RichEditBox) {
     }
     HIGHLIGHT_TEXT.with_borrow_mut(|map| map.remove(&id));
     HIGHLIGHT_SPANS.with_borrow_mut(|map| map.remove(&id));
-    if let Err(e) = clear_highlights(field) {
+    // A rich textarea's ink is derived again by the restyle behind this edit,
+    // once the table has caught up (rich_repaint_highlights).
+    let unpaint = if rich_is_on(id) { Ok(()) } else { find_unpaint(field, id) };
+    if let Err(e) = unpaint.and_then(|()| clear_highlights(field)) {
         eprintln!("kaya: winui could not drop a stale highlight set: {}", e.message());
     }
     // That clear is the whole story's background, grounds included, and the
@@ -12898,11 +13010,7 @@ fn painted_runs(field: &RichEditBox, units: i32) -> windows_core::Result<Vec<(i3
         // `quote` paragraph wear this same attribute now (`rich_ground`,
         // docs/rich-text-plan.md §18), and a reader keyed on "not AutoColor"
         // would report them as declared ranges.
-        let painted = doc
-            .GetRange(at, at + 1)?
-            .CharacterFormat()?
-            .BackgroundColor()?
-            == HIGHLIGHT_BACKGROUND;
+        let painted = is_find_ground(doc.GetRange(at, at + 1)?.CharacterFormat()?.BackgroundColor()?);
         match (painted, open) {
             (true, None) => open = Some(at),
             (false, Some(from)) => {
@@ -13383,12 +13491,7 @@ fn rich_write_format(
     })?;
     character.SetSize(size)?;
     character.SetName(&HSTRING::from(if monospace { base.code_face.as_str() } else { base.face.as_str() }))?;
-    character.SetForegroundColor(match (linked, richdoc::drawn_ink(attrs, palette.dark), palette.text) {
-        (true, _, _) => palette.link,
-        (false, Some(ink), _) => ink,
-        (false, None, Some(text)) => text,
-        (false, None, None) => TextConstants::AutoColor()?,
-    })?;
+    character.SetForegroundColor(rich_foreground(attrs, palette)?)?;
     // The ground, written on every call like every other property: a run that
     // LOST its `code` takes its ground back off.
     character.SetBackgroundColor(match rich_ground(attrs, palette) {
@@ -13396,6 +13499,18 @@ fn rich_write_format(
         None => TextConstants::AutoColor()?,
     })?;
     Ok(())
+}
+
+/// A run's foreground with no find over it.
+fn rich_foreground(
+    attrs: &BTreeMap<String, String>, palette: RichPalette,
+) -> windows_core::Result<bindings::Windows::UI::Color> {
+    Ok(match (attrs.contains_key("link"), richdoc::drawn_ink(attrs, palette.dark), palette.text) {
+        (true, _, _) => palette.link,
+        (false, Some(ink), _) => ink,
+        (false, None, Some(text)) => text,
+        (false, None, None) => TextConstants::AutoColor()?,
+    })
 }
 
 /// THE DISPLAY, DERIVED FROM THE TABLE over `from..to` (bytes). A read-back
@@ -13476,13 +13591,9 @@ fn rich_paint_grounds(field: &RichEditBox, widget: u64) -> windows_core::Result<
 /// the top claimant of the one background attribute (`rich_ground`).
 fn rich_repaint_highlights(field: &RichEditBox, widget: u64) -> windows_core::Result<()> {
     let Some(spans) = HIGHLIGHT_SPANS.with_borrow(|map| map.get(&widget).cloned()) else {
-        return Ok(());
+        return find_unpaint(field, widget);
     };
-    let doc = field.TextDocument()?;
-    for (start, stop) in spans {
-        set_background(&doc.GetRange(start, stop)?, HIGHLIGHT_BACKGROUND)?;
-    }
-    Ok(())
+    find_paint(field, widget, &spans)
 }
 
 /// THE TYPING ATTRIBUTES A COLLAPSED CARET CARRIES: the byte before it, never a

@@ -726,4 +726,8 @@ object KayaPresent {
      *  kaya_highlight_ground's and kaya_ink_on's JNI spellings. */
     @JvmStatic external fun highlightGround(color: Int, dark: Boolean): Int
     @JvmStatic external fun inkOn(rgb: Int, ground: Int): Int
+
+    /** docs/highlight-plan.md H3: find's ground where a match meets a mark.
+     *  kaya_find_on_mark's JNI spelling. */
+    @JvmStatic external fun findOnMark(dark: Boolean): Int
 }

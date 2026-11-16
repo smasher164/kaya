@@ -3210,6 +3210,7 @@ typedef struct KayaHostApi {
    */
   uint32_t (*ink_on)(uint32_t, uint32_t);
   uint32_t (*highlight_ground)(uint32_t, uint32_t);
+  uint32_t (*find_on_mark)(uint32_t);
 } KayaHostApi;
 
 
@@ -4981,6 +4982,13 @@ uint32_t kaya_ink_on(uint32_t rgb, uint32_t ground);
  * H1); u32::MAX for `none` or a number outside the palette.
  */
 uint32_t kaya_highlight_ground(uint32_t color, uint32_t dark);
+
+/**
+ * Either side: find's ground where a match meets a highlight mark, on the
+ * light page or on the dark one when `dark` is nonzero (docs/highlight-plan.md
+ * H3).
+ */
+uint32_t kaya_find_on_mark(uint32_t dark);
 
 /**
  * Guest side: a `.kdoc` file's bytes read (docs/rich-document-plan.md §4,

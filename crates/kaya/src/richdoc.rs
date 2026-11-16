@@ -75,6 +75,15 @@ pub(crate) const HIGHLIGHT_PALETTE: &[(&str, u32, u32)] = &[
     ("green", 0xBDF8D7, 0x255940),
 ];
 
+/// Find's ground where a match meets a highlight mark, light and dark
+/// (docs/highlight-plan.md H3, find over a mark); brand.rs's tests hold its
+/// distance from the six.
+pub(crate) const FIND_ON_MARK: (u32, u32) = (0xFFA000, 0xFFA000);
+
+pub(crate) fn find_on_mark(dark: bool) -> u32 {
+    if dark { FIND_ON_MARK.1 } else { FIND_ON_MARK.0 }
+}
+
 /// A palette name's ground for one appearance, or None for a name outside it.
 pub(crate) fn highlight_ground(name: &str, dark: bool) -> Option<u32> {
     HIGHLIGHT_PALETTE.iter().find(|(n, _, _)| *n == name).map(|(_, light, night)| if dark { *night } else { *light })
@@ -667,6 +676,8 @@ mod tests {
         assert_eq!(kaya_highlight_ground(7, 1), u32::MAX);
         assert_eq!(kaya_ink_on(0xDD1F24, crate::brand::INK_LIGHT_PAGE), 0xDD1F24);
         assert_eq!(kaya_ink_on(0xDD1F24, crate::brand::INK_DARK_PAGE), crate::brand::ink_for_dark(0xDD1F24));
+        assert_eq!(crate::capi::kaya_find_on_mark(0), FIND_ON_MARK.0);
+        assert_eq!(crate::capi::kaya_find_on_mark(1), FIND_ON_MARK.1);
     }
 
     /// The palette is the spec's vocabulary, in its order, past `none`.

@@ -7384,6 +7384,14 @@ pub extern "C" fn kaya_highlight_ground(color: u32, dark: u32) -> u32 {
         .unwrap_or(u32::MAX)
 }
 
+/// Either side: find's ground where a match meets a highlight mark, on the
+/// light page or on the dark one when `dark` is nonzero (docs/highlight-plan.md
+/// H3).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_find_on_mark(dark: u32) -> u32 {
+    crate::richdoc::find_on_mark(dark != 0)
+}
+
 /// Guest side: a `.kdoc` file's bytes read (docs/rich-document-plan.md §4,
 /// RD13). Answers a values list: Str refusal ("" when it read), Str
 /// read-only reason ("" when the document can be edited), then the document

@@ -145,6 +145,10 @@ expect_text_ground textarea#0 0:5 "light F7E8AF dark 594C1A"
 # highlights read names find's set alone, and nothing once it is cleared.
 click button#7
 expect_highlights textarea#0 "1:3=oo"
+# A match on a mark stands on the core's find-on-mark, under the core's ink
+# for it (H3, find over a mark).
+expect_text_ground textarea#0 1:3 "light FFA000 dark FFA000"
+expect_text_ink textarea#0 1:3 "light 8B000B dark 8B000B"
 click button#7
 expect_highlights textarea#0 ""
 # The clipboard keeps it both ways, and the mark grows over text typed at

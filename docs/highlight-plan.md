@@ -18,6 +18,13 @@ floor).
 H1's hexes RULED 2026-11-15 on the review page (the maintainer: "im okay with
 your recommendations"): recipe A as built, A' not taken; and with them the
 selection rule in H3 below.
+The three items the build left open RULED 2026-11-15 (the maintainer: "im okay
+with your recommendations to address these issues") and BUILT the same day:
+the iOS floor is KEPT (KayaFlex places a grown textarea in at least its floor,
+and an over-full phone column runs off the bottom); find's match on a mark
+stands on the core's find-on-mark on every lane; and the text over find's
+ground takes the core's ink on every lane (H3's "Find over a mark, and find's
+ink" below).
 
 The maintainer, 2026-11-15: "yes, let's do the highlighter pen." This plan is
 the design pass for RD6 of docs/rich-document-plan.md, which RULED A on
@@ -249,6 +256,31 @@ over a code run's ground and a quote's tint (the user put it there); a CODE
 run inside a highlight keeps its font and loses its grey; a QUOTE keeps its
 rule or indent and loses its tint under the highlighted bytes only. The
 mechanism is each row of H2's table.
+
+**Find over a mark, and find's ink (built 2026-11-15).** "Find's yellow at 55%
+over a pastel still reads" was wrong, measured: on the light page find's
+ground over a mark stood 1.00:1 (Compose) to 1.16:1 (the Mac) from the mark,
+and WinUI's `#FFF18F` over yellow read as the mark; in the dark appearance
+GTK's and WinUI's opaque find yellow sat under white text at 1.30:1 and 1.15:1,
+and the Mac, iOS and Compose olive under it at 3.72:1, 4.46:1 and 2.94:1
+(docs/traps.md, find's match over a highlight). So, on all five lanes: where
+find's match meets a mark the ground is the core's FIND ON MARK
+(`richdoc::FIND_ON_MARK`, `#FFA000` in both appearances, door
+`kaya_find_on_mark`), 1.63:1 or more from every light mark and 3.98:1 from
+every dark one, held at 1.5:1 by brand.rs's
+`find_on_a_mark_stands_apart_from_every_mark`. GTK and WinUI paint it as find's
+colour there; the Mac, iOS and Compose draw it in place of the mark (cut
+under the selection, as the mark is) with find's paint over it the same colour
+at find's alpha, so the two composite to it exactly. And the text over find's
+ground, on a mark or not, is `ink_on(stored, the ground find draws)`, where the
+stored colour is a `color` run's or the page's black; a link keeps the
+platform's link colour, as under a mark. `brand::ink_on` takes the side of a
+mid ground with more room (on the olive finds it drew white where black reads
+twice as well). The highlights read on GTK keys on full height, which the
+find-on-mark tag carries; on WinUI it accepts either of find's two grounds; on
+the Mac and iOS it joins touching runs, since find's paint is two colours.
+richdoc.steps reads the ground and the ink of its one match inside a mark,
+`light FFA000 dark FFA000` and `light 8B000B dark 8B000B`.
 
 **The wire, the file and the clipboard (H5, H6).** `format_text` carries
 `highlight`/`<name>` like any mark, `removed` 1 takes it off; `text_formatted`
