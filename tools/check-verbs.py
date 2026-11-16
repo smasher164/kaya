@@ -6564,7 +6564,7 @@ LAYERS_SITES = [
      [r"FADE_BAND: f64 = 32\.0;", r"FADE_SCRIM_ALPHA: u8 = 0x99;"]),
     ("gtk.rs", GTK, "the box cap",
      r"overlay\.connect_get_child_position\(", r"\}\);",
-     [r"nat_w\.min\(aw\)", r"nat_h\.min\(ah\)"]),
+     [r"nat_w\.min\(cap\)", r"max_across\(widget\)", r"nat_h\.min\(ah\)"]),
     ("gtk.rs", GTK, "the fade form",
      r"\.kaya-filled\.kaya-fade\.kaya-fade-bottom", r"\n",
      [r"border-top: 32px solid transparent", r"alpha\(black, 0\.6\) 32px"]),
@@ -6597,7 +6597,7 @@ for line in layers_out:
     layers_status = 1
 for label, rel, pattern, repl, finding in (
     ("the swiftui hit opacity cut", SWIFT,
-     r"(KayaRender\(node: o\)\n[^\n]*\n)                    \.contentShape\(Rectangle\(\)\)\n", "",
+     r"(KayaRender\(node: o, [^\n]*\n[^\n]*\n[^\n]*\n)                    \.contentShape\(Rectangle\(\)\)\n", "",
      r"^KayaSwiftUI\.swift's site for the overlays' hit opacity"),
     ("the swiftui reading-order pin cut", SWIFT,
      r"(\.modifier\(KayaLayerReader\(id: o\.id\)\)\n)                    \.accessibilitySortPr"

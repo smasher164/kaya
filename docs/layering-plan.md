@@ -1,6 +1,6 @@
 # Layering: one view over another (design pass, 2026-11-15)
 
-Status: BUILT 2026-11-16 (rulings: review page
+Status: BUILT 2026-11-16 except as below (rulings: review page
 claude.ai/artifact/BF7TWX5Ue3b9dHKfvSEmQb; LY9 B with the fade form, every
 other ruling as recommended). What the build settled, for the maintainer:
 the fade form is spelled tint `overlay_fade` (8); its panel is clear over a
@@ -17,8 +17,9 @@ below the window's other content); the SwiftUI content shape measured belt
 and braces; GTK caps each overlay at the box through get-child-position and
 WinUI reads an overlay as drawn inside its host's clip (docs/traps.md, the
 layering entries). §5 step 0 (a) and (c) were read through the arms with the
-guard cut rather than on a separate probe; the Android player-under-a-self-
-view leg is parked (docs/deferred.md). The maintainer,
+guard cut rather than on a separate probe. Still open (docs/deferred.md's GAP
+entry): a growing surface base on GTK and WinUI, and the Android
+player-under-a-self-view leg. The maintainer,
 2026-11-15: "do layering first". This plan is the design pass for
 docs/deferred.md's GAP "kaya cannot float one view over another" (opened by
 the maintainer's call-screen ruling of 2026-11-01, docs/capture-plan.md §12

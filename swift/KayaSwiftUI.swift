@@ -26142,7 +26142,8 @@ struct KayaLayersOverlays: View {
                 let fade = o.filled == tintOverlayFade ? kayaFadeEdge(o.place).edge : nil
                 let wide = o.fill == true || fade == .top || fade == .bottom
                 let tall = o.fill == true || fade == .leading || fade == .trailing
-                KayaRender(node: o)
+                KayaRender(node: o, flexVertical: wide != tall ? wide : nil, flexStretch: wide || tall)
+                    .fixedSize(horizontal: tall && !wide, vertical: wide && !tall)
                     .frame(maxWidth: wide ? .infinity : nil, maxHeight: tall ? .infinity : nil)
                     .contentShape(Rectangle())
                     .modifier(KayaLayerReader(id: o.id))

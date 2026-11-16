@@ -3162,8 +3162,9 @@ fn layers_cap(host: &Grid) -> windows_core::Result<()> {
         let wrapper: Grid = fe.cast()?;
         let inner = wrapper.Children()?;
         if inner.Size()? > 0 {
+            // Its height only: the overlay's own MaxWidth is the app's
+            // max_width (a call's 107 pt tile).
             let overlay: FrameworkElement = inner.GetAt(0)?.cast()?;
-            overlay.SetMaxWidth(mw)?;
             overlay.SetMaxHeight(mh)?;
         }
     }

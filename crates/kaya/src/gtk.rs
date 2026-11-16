@@ -17061,7 +17061,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         let (mt, mb) = (widget.margin_top(), widget.margin_bottom());
                         let (aw, ah) = ((bw - ms - me).max(0), (bh - mt - mb).max(0));
                         let nat_w = widget.measure(gtk4::Orientation::Horizontal, -1).1;
-                        let w = if widget.halign() == gtk4::Align::Fill { aw } else { nat_w.min(aw) };
+                        // The app's max_width, which a parent box's flex reads (max_across).
+                        let cap = aw.min(max_across(widget).unwrap_or(i32::MAX));
+                        let w = if widget.halign() == gtk4::Align::Fill { cap } else { nat_w.min(cap) };
                         let nat_h = widget.measure(gtk4::Orientation::Vertical, w).1;
                         let h = if widget.valign() == gtk4::Align::Fill { ah } else { nat_h.min(ah) };
                         let along = |align: gtk4::Align, avail: i32, size: i32| match align {
