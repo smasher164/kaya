@@ -35,9 +35,10 @@ let () =
                   (row ~filled:Tint.Accent ~a11y_id:"badge" [ label ~text:"3" ~a11y_id:"badge_text" ]);
                 placed Place.Bottom
                   (row ~filled:Tint.Overlay_fade ~a11y_id:"caption"
-                     [ label ~text:"Kind of Blue" ~a11y_id:"caption_text" ]);
-                placed Place.Bottom_trailing
-                  (button ~text:"Share" ~a11y_id:"share" ~on_click:(answer "share"));
+                     [
+                       label ~text:"Kind of Blue" ~grow:1.0 ~a11y_id:"caption_text";
+                       button ~text:"Share" ~a11y_id:"share" ~on_click:(answer "share");
+                     ]);
               ];
             layers ~a11y_id:"veilstack"
               [ button ~text:"Press the base button here" ~a11y_id:"base" ~on_click:(answer "base"); veil ];

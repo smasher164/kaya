@@ -36,13 +36,13 @@ static class LayersScene
                     }, filled: Tint.Accent);
                     tx.Row(caption =>
                     {
-                        tx.SetA11yId(tx.Label("Kind of Blue"), "caption_text");
+                        var text = tx.Label("Kind of Blue");
+                        tx.SetGrow(text, 1);
+                        tx.SetA11yId(text, "caption_text");
+                        tx.SetA11yId(tx.Button("Share", onClick: Answer("share")), "share");
                         tx.SetPlace(caption, Place.Bottom);
                         tx.SetA11yId(caption, "caption");
                     }, filled: Tint.OverlayFade);
-                    var share = tx.Button("Share", onClick: Answer("share"));
-                    tx.SetPlace(share, Place.BottomTrailing);
-                    tx.SetA11yId(share, "share");
                     tx.SetA11yId(stack, "photostack");
                 }, inset: 8);
                 tx.Layers(stack =>

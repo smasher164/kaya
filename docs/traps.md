@@ -21138,3 +21138,17 @@ Mac and iOS, 9.9:1 on GTK, 10.1:1 on WinUI and Compose, the same light and
 dark. A WinUI step shot of a right-to-left window comes back mirrored, glyphs
 included (the layersrtl review capture); the layout under it is right, so a
 picture for a page is flipped back, never read for direction.
+
+Controls on a panel (measured 2026-11-16, the layers scene's Share button,
+WCAG ratio of its text against the bezel under it). As a bare overlay drawn
+over the fade, in each platform's own look, it read 1.1:1 on the Mac and GTK
+and 2.7:1 on Android in the light (dark text, or Material's primary, on the
+dark scrim), 4.3:1 on iOS (accent on the gray capsule) and 9.1:1 on WinUI
+(its light bezel holds); in the dark every lane read 10:1 or more. Inside the
+fade panel in the dark appearance it reads 10.6:1 (Mac), 8.0:1 (iOS), 12.9:1
+(GTK), 14.1:1 (WinUI) and 10.0:1 (Compose), the same light and dark.
+GTK needed no code: libadwaita's buttons draw `alpha(currentColor, …)` over
+the colour they inherit, so the panel's white reaches them. On Compose a
+nested MaterialTheme for the panel rewrote the harness's record of the tint
+fills (kayaTintFills, read by expect_fill) with the dark scheme's colours, and
+the badge outside it read "neutral": the record is the app scheme's only.

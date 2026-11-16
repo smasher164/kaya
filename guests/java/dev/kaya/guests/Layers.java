@@ -37,9 +37,9 @@ public final class Layers {
                         tx.label("3").a11yId("badge_text");
                     }).filled(Tint.ACCENT).place(Place.TOP_TRAILING).a11yId("badge");
                     tx.row(caption -> {
-                        tx.label("Kind of Blue").a11yId("caption_text");
+                        tx.label("Kind of Blue").grow(1.0).a11yId("caption_text");
+                        answers.accept(tx.button("Share").a11yId("share"), "share");
                     }).filled(Tint.OVERLAY_FADE).place(Place.BOTTOM).a11yId("caption");
-                    answers.accept(tx.button("Share").place(Place.BOTTOM_TRAILING).a11yId("share"), "share");
                 }).inset(8).a11yId("photostack");
                 tx.layers(stack -> {
                     answers.accept(tx.button("Press the base button here").a11yId("base"), "base");

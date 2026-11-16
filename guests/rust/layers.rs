@@ -1,5 +1,5 @@
 //! The layers scene (tools/scenes/layers.steps; docs/layering-plan.md LY13): a
-//! cover with a badge, a caption on the fade form and a button over it; a
+//! cover with a badge and a caption and a button on the fade form; a
 //! button with a badge at its trailing end, a
 //! button under a veil, an unfilled column spanning it with a panel at its
 //! centre, that takes its taps until it is hidden; a cover with the
@@ -37,13 +37,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     .place(Place::TopTrailing)
                     .a11y_id("badge");
                     tx.row(|tx| {
-                        tx.label(caption).a11y_id("caption_text");
+                        tx.label(caption).grow(1.0).a11y_id("caption_text");
+                        let share = tx.button("Share").a11y_id("share").id();
+                        msgs.on_click(share, Msg::Share);
                     })
                     .filled(Tint::OverlayFade)
                     .place(Place::Bottom)
                     .a11y_id("caption");
-                    let share = tx.button("Share").place(Place::BottomTrailing).a11y_id("share").id();
-                    msgs.on_click(share, Msg::Share);
                 })
                 .inset(8.0)
                 .a11y_id("photostack");

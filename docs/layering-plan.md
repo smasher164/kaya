@@ -2,7 +2,8 @@
 
 Status: BUILT 2026-11-16, review page claude.ai/artifact/LL26jACE8HnF4s2kFzYa2e (rulings: review page
 claude.ai/artifact/BF7TWX5Ue3b9dHKfvSEmQb; LY9 B with the fade form, every
-other ruling as recommended). What the build settled, for the maintainer:
+other ruling as recommended). What the build settled, ruled as built on
+2026-11-16 (LY9's last paragraph):
 the fade form is spelled tint `overlay_fade` (8); its panel is clear over a
 32 pt band on the side facing into the picture, then black at 0.6 under the
 light text (white text over it holds at least 5.7:1 on a white picture), no
@@ -493,6 +494,24 @@ is promised, and the app names only the form, no direction and no opacity.
 It is the same fill Y3 allows on an image ground, so it reaches Y3 too
 (docs/styling-pass-plan.md). The build measures the contrast under the text
 on every lane.
+
+RULED 2026-11-16, after the build (the maintainer: "im okay with your
+choices/recommendations"): CONTROLS OVER A PICTURE TAKE THE OVERLAY'S LIGHT
+FOREGROUND. A button, or any other control, inside an `overlay` or
+`overlay_fade` panel draws in the platform's dark appearance, so its text is
+the panel's light text: SwiftUI's dark colour scheme (the Mac's NSButton in
+darkAqua, an iOS bordered button tinted white), Compose's dark scheme of the
+same seed, WinUI's `RequestedTheme` Dark on the panel, and on GTK libadwaita's
+buttons, which take the panel's own colour. A control bare over a picture
+keeps its platform chrome, as Y3 rules, since kaya promises no ground there;
+the layers scene's Share button moved into the fade panel for it. Also ruled
+as built: the fade form's spelling, tint `overlay_fade`, and its edge rule
+(an overlay's own place read as its nearest edge; a fade panel that is not an
+overlay told its edge by the core as a `place`). The Share button's text
+measured 8.0:1 (iOS) to 14.1:1 (WinUI) inside the fade, light and dark on every lane, where
+the bare overlay read 1.1:1 on the Mac and GTK and 2.7:1 on Android in the
+light (docs/traps.md, the layering entries); check-verbs' LAYERS clause holds
+each backend's site.
 
 ### LY10. Safe areas, scroll, hidden and grow
 

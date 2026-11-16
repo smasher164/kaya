@@ -96,8 +96,8 @@ static void build_scene(const uint8_t *cover, uintptr_t cover_len, const uint8_t
     kaya_tx_create_widget(&tx, W_ROOT, KAYA_KIND_COLUMN);
     kaya_tx_set_spacing(&tx, W_ROOT, 16.0);
 
-    /* The cover: the base first, then the badge, the fade caption and the
-     * button, each placed in the base's box at the container's inset. */
+    /* The cover: the base first, then the badge and the fade caption with
+     * its button, each placed in the base's box at the container's inset. */
     kaya_tx_create_widget(&tx, W_PHOTOSTACK, KAYA_KIND_LAYERS);
     kaya_tx_add_child(&tx, W_ROOT, W_PHOTOSTACK);
     kaya_tx_create_widget(&tx, W_PHOTO, KAYA_KIND_IMAGE);
@@ -110,12 +110,12 @@ static void build_scene(const uint8_t *cover, uintptr_t cover_len, const uint8_t
     kaya_tx_add_child(&tx, W_PHOTOSTACK, W_BADGE);
     panel(&tx, W_CAPTION, W_CAPTION_TEXT, "Kind of Blue", KAYA_TINT_OVERLAY_FADE, KAYA_PLACE_BOTTOM, "caption",
           "caption_text");
-    kaya_tx_add_child(&tx, W_PHOTOSTACK, W_CAPTION);
+    kaya_tx_set_grow(&tx, W_CAPTION_TEXT, 1.0);
     kaya_tx_create_widget(&tx, W_SHARE, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_SHARE, "Share");
-    kaya_tx_add_child(&tx, W_PHOTOSTACK, W_SHARE);
-    kaya_tx_set_place(&tx, W_SHARE, KAYA_PLACE_BOTTOM_TRAILING);
+    kaya_tx_add_child(&tx, W_CAPTION, W_SHARE);
     kaya_tx_set_a11y_id(&tx, W_SHARE, "share");
+    kaya_tx_add_child(&tx, W_PHOTOSTACK, W_CAPTION);
     kaya_tx_set_inset(&tx, W_PHOTOSTACK, 8.0);
     kaya_tx_set_a11y_id(&tx, W_PHOTOSTACK, "photostack");
 

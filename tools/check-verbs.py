@@ -2061,6 +2061,7 @@ print(f"check-verbs: keyed target arms: {len(KEYED_ARMS)} markers + "
 # with no landing affordance at all and every lane stay green. So the
 # four arms are byte-frozen here, doctored away one at a time.
 WINUI = "crates/kaya/src/winui/mod.rs"
+WINUI_SKIN = "crates/kaya/src/winui/skin.rs"
 DROP_LINE_ARMS = [
     ("shown at the landing edge while a row drag hovers a reorderable row",
      "    if !dropping && reorder_row && verdict != crate::wire::DRAG_OP_NONE {\n"
@@ -6568,6 +6569,40 @@ LAYERS_SITES = [
     ("gtk.rs", GTK, "the fade form",
      r"\.kaya-filled\.kaya-fade\.kaya-fade-bottom", r"\n",
      [r"border-top: 32px solid transparent", r"alpha\(black, 0\.6\) 32px"]),
+    # CONTROLS ON A PANEL TAKE THE OVERLAY'S LIGHT FOREGROUND (ruled
+    # 2026-11-16, docs/layering-plan.md LY9): the panel's content in the
+    # platform's dark appearance; GTK's buttons inherit the panel's colour.
+    ("KayaSwiftUI.swift", SWIFT, "the panels' dark appearance",
+     r"struct KayaOnMedia: ViewModifier", r"\n}\n",
+     [r"\.environment\(\\\.colorScheme, \.dark\)", r"\.environment\(\\\.kayaOnMedia, true\)"]),
+    ("KayaSwiftUI.swift", SWIFT, "the fade panel's dark appearance",
+     r"\} else if tint == tintOverlayFade \{", r"\} else if tint == tintOverlay \{",
+     [r"\.modifier\(KayaOnMedia\(\)\)"]),
+    ("KayaSwiftUI.swift", SWIFT, "the overlay panel's dark appearance",
+     r"\} else if tint == tintOverlay \{", r"\} else \{",
+     [r"\.modifier\(KayaOnMedia\(\)\)"]),
+    ("KayaSwiftUI.swift", SWIFT, "the mac button on a panel",
+     r"private struct KayaMacButton: NSViewRepresentable", r"func sizeThatFits",
+     [r"button\.appearance = context\.environment\.kayaOnMedia \? "
+      r"NSAppearance\(named: \.darkAqua\)"]),
+    ("KayaSwiftUI.swift", SWIFT, "the iOS button on a panel",
+     r"                \.buttonStyle\(KayaButtonStyle\(", r"\.alignmentGuide",
+     [r"\.tint\(kayaOnMedia && "]),
+    ("KayaCompose.kt", KOTLIN, "the panels' dark scheme",
+     r"inline fun KayaFilledContent\(", r"\n}\n",
+     [r"KAYA_TINT_OVERLAY_FADE\) \{\n\s*KayaOnMedia \{"]),
+    ("KayaCompose.kt", KOTLIN, "the dark scheme a panel's content composes under",
+     r"fun KayaOnMedia\(", r"\n}\n",
+     [r"KayaColorSchemes\.of\(seed, true, contrast\)", r"LocalTextStyle provides style"]),
+    ("winui/mod.rs", WINUI, "the fade panel's dark theme",
+     r"fn paint_fade\(", r"\n}\n",
+     [r"panel\.SetRequestedTheme\(ElementTheme::Dark\)"]),
+    ("winui/skin.rs", WINUI_SKIN, "the overlay panel's dark theme",
+     r"is_container && \*tint == i64::from\(crate::wire::TINT_OVERLAY\)", r"\n        \}\n",
+     [r"grid\.SetRequestedTheme\(ElementTheme::Dark\)"]),
+    ("gtk.rs", GTK, "the fade panel's light foreground",
+     r"\.kaya-filled\.kaya-fade \{", r"\n",
+     [r"color: white;"]),
 ]
 
 
@@ -6625,6 +6660,25 @@ for label, rel, pattern, repl, finding in (
     ("the swiftui fade darkness drifted", SWIFT,
      r"(let kayaFadeScrim = )0\.6\n", "0.4\n",
      r"^KayaSwiftUI\.swift's site for the fade form"),
+    ("the swiftui panels left in the app's appearance", SWIFT,
+     r"(struct KayaOnMedia: ViewModifier \{\n[^\n]*\n        content\n)"
+     r"            \.environment\(\\\.colorScheme, \.dark\)\n", "",
+     r"^KayaSwiftUI\.swift's site for the panels' dark appearance"),
+    ("the mac button left in the window's appearance", SWIFT,
+     r"(\n)            button\.appearance = context\.environment\.kayaOnMedia \? NSAppearance\(nam"
+     r"ed: \.darkAqua\) : nil", "",
+     r"^KayaSwiftUI\.swift's site for the mac button on a panel"),
+    ("the compose panels left in the app's scheme", KOTLIN,
+     r"(if \(node\.filled == 6L \|\| node\.filled == KAYA_TINT_OVERLAY_FADE\) \{\n)"
+     r"            KayaOnMedia \{", "            run {",
+     r"^KayaCompose\.kt's site for the panels' dark scheme"),
+    ("the winui fade panel left in the app's theme", WINUI,
+     r"(\n)    panel\.SetRequestedTheme\(ElementTheme::Dark\)\?;", "",
+     r"^winui/mod\.rs's site for the fade panel's dark theme"),
+    ("the gtk fade panel's colour cut", GTK,
+     r"(\.kaya-filled\.kaya-fade \{ border-radius: 0px; background-color: transparent; )"
+     r"color: white; ", "",
+     r"^gtk\.rs's site for the fade panel's light foreground"),
 ):
     doctored = perturb(f"layers ({label})", rel, pattern, repl)
     score_or_die(introduced(layers_clauses(**{rel: doctored}), layers_out, finding), label)

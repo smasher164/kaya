@@ -1,5 +1,5 @@
 """The layers scene (tools/scenes/layers.steps; docs/layering-plan.md LY13): a
-cover with a badge, a caption on the fade form and a button over it; a button
+cover with a badge and a caption and a button on the fade form; a button
 with a badge at its trailing end; a button under a veil, an unfilled column
 spanning it with a panel at its centre, that takes its taps until it is
 hidden; a cover with the flat overlay panel; and the log of which handler
@@ -36,9 +36,8 @@ with app.window(title="layers", width=480, height=860):
                 kaya.label("3").a11y_id("badge_text")
             with kaya.row(filled=kaya.Tint.OVERLAY_FADE) as caption:
                 caption.place(kaya.Place.BOTTOM).a11y_id("caption")
-                kaya.label("Kind of Blue").a11y_id("caption_text")
-            kaya.button("Share", on_click=lambda: answer("share")).place(
-                kaya.Place.BOTTOM_TRAILING).a11y_id("share")
+                kaya.label("Kind of Blue", grow=1).a11y_id("caption_text")
+                kaya.button("Share", on_click=lambda: answer("share")).a11y_id("share")
         with kaya.layers() as stack:
             stack.a11y_id("veilstack")
             kaya.button("Press the base button here", on_click=lambda: answer("base")).a11y_id("base")

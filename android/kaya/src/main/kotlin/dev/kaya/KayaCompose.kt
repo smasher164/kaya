@@ -1193,7 +1193,8 @@ fun kayaFilledSurface(node: KayaNode): Modifier {
         return Modifier.background(MaterialTheme.colorScheme.surfaceVariant, KAYA_COMPOSER_SHAPE)
     }
     if (node.filled == 0L && node.ground == 0L && !node.activatable && !node.selected) return Modifier
-    kayaTintFills = (1L..5L).map { kayaTintPair(it).first.toArgb() }
+    // The app scheme's fills, which expect_fill reads; a panel's dark scheme is not it.
+    if (!LocalKayaOnMedia.current) kayaTintFills = (1L..5L).map { kayaTintPair(it).first.toArgb() }
     var surface = Modifier
         .onGloballyPositioned {
             val r = it.boundsInWindow()
@@ -1658,6 +1659,9 @@ private fun KayaDockLine(modifier: Modifier) {
  * variant colour, which on an accent fill is dark on dark. */
 val LocalKayaOnFill = compositionLocalOf<Color?> { null }
 
+/** Inside an overlay or fade panel, whose dark scheme is not the app's. */
+val LocalKayaOnMedia = compositionLocalOf { false }
+
 /** A symbol button in a row that holds a composer, beside it rather than in it. */
 fun kayaIsComposerNeighbour(node: KayaNode): Boolean {
     if (node.symbol == 0L) return false
@@ -1694,10 +1698,38 @@ inline fun KayaFilledContent(node: KayaNode, crossinline content: @Composable ()
     } else {
         val onFill = if (node.selected) MaterialTheme.colorScheme.onSecondaryContainer
             else kayaTintPair(node.filled, node.groundTops).second
-        CompositionLocalProvider(
-            LocalContentColor provides onFill,
-            LocalKayaOnFill provides onFill,
-        ) {
+        if (node.filled == 6L || node.filled == KAYA_TINT_OVERLAY_FADE) {
+            KayaOnMedia {
+                CompositionLocalProvider(
+                    LocalContentColor provides onFill,
+                    LocalKayaOnFill provides onFill,
+                ) {
+                    content()
+                }
+            }
+        } else {
+            CompositionLocalProvider(
+                LocalContentColor provides onFill,
+                LocalKayaOnFill provides onFill,
+            ) {
+                content()
+            }
+        }
+    }
+}
+
+/** CONTROLS OVER A PICTURE TAKE THE OVERLAY'S LIGHT FOREGROUND
+ * (docs/layering-plan.md, ruled 2026-11-16): an overlay or fade panel's
+ * content composes under the dark scheme, kaya's text style kept;
+ * check-verbs' LAYERS clause holds it. */
+@Composable
+fun KayaOnMedia(content: @Composable () -> Unit) {
+    val style = LocalTextStyle.current
+    val contrast = kayaSystemContrast()
+    val seed = KayaSceneModel.brandSeed
+    val dark = remember(seed, contrast) { KayaColorSchemes.of(seed, true, contrast) }
+    MaterialTheme(colorScheme = dark, typography = MaterialTheme.typography, shapes = MaterialTheme.shapes) {
+        CompositionLocalProvider(LocalTextStyle provides style, LocalKayaOnMedia provides true) {
             content()
         }
     }
@@ -17064,12 +17096,12 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         val place = parts.getOrElse(2) { "center" }
                         val at = onUi(activity) {
                             val node = kayaWidgetTarget(parts[1])
-                            val frame = node?.let { kayaLayerFrames[it.id] }
+                            val frame = node?.let { kayaLayerFrames[it.id] ?: kayaNodeVisible[it.id] }
                             frame?.let {
                                 kayaPlacePoint(it, place, kayaRootDirection == LayoutDirection.Rtl, activity.resources.displayMetrics.density)
                             }
                         }
-                        if (at == null) failures.add("tap_at ${parts[1]} $place: no such target, no layers frame recorded for it, or no such place")
+                        if (at == null) failures.add("tap_at ${parts[1]} $place: no such target, no frame recorded for it, or no such place")
                         else {
                             kayaTouchTap(activity, at.x, at.y)
                             observed.add("tap_at ${parts[1]} $place")

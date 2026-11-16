@@ -25977,6 +25977,7 @@ struct KayaFilledSurface: ViewModifier {
             content
                 .foregroundStyle(.white)
                 .environment(\.kayaInFill, true)
+                .modifier(KayaOnMedia())
                 .padding(side.inward, kayaFadeBand)
                 .background { KayaFadeScrim(edge: side) }
         } else if tint == tintOverlay {
@@ -25986,6 +25987,7 @@ struct KayaFilledSurface: ViewModifier {
             content
                 .foregroundStyle(.white)
                 .environment(\.kayaInFill, true)
+                .modifier(KayaOnMedia())
                 .background {
                     ZStack {
                         Rectangle().fill(.regularMaterial)
@@ -26242,6 +26244,25 @@ extension EnvironmentValues {
     var kayaInFill: Bool {
         get { self[KayaInFillKey.self] }
         set { self[KayaInFillKey.self] = newValue }
+    }
+    var kayaOnMedia: Bool {
+        get { self[KayaOnMediaKey.self] }
+        set { self[KayaOnMediaKey.self] = newValue }
+    }
+}
+
+private struct KayaOnMediaKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+/// CONTROLS OVER A PICTURE TAKE THE OVERLAY'S LIGHT FOREGROUND
+/// (docs/layering-plan.md, ruled 2026-11-16): an overlay or fade panel's
+/// content draws in the dark appearance; check-verbs' LAYERS clause holds it.
+struct KayaOnMedia: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .environment(\.colorScheme, .dark)
+            .environment(\.kayaOnMedia, true)
     }
 }
 
@@ -32223,6 +32244,7 @@ struct KayaRender: View {
     @Environment(\.kayaGroupedSectionText) private var kayaGroupedSectionText
     @Environment(\.kayaGroupedButtonRow) private var kayaGroupedButtonRow
     @Environment(\.kayaPhoneDockArt) private var kayaPhoneDockArt
+    @Environment(\.kayaOnMedia) private var kayaOnMedia
 
     var body: some View {
         #if os(iOS)
@@ -32571,6 +32593,7 @@ struct KayaRender: View {
                 .buttonStyle(KayaButtonStyle(
                     prominent: node.role == roleProminent, plain: node.role == rolePlain,
                     groupedRow: kayaGroupedButtonRow))
+                .tint(kayaOnMedia && node.role != roleProminent && node.role != roleDestructive ? .white : nil)
                 .alignmentGuide(.top) { d in
                     kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
                     return d[.top]
@@ -33177,6 +33200,7 @@ struct KayaRender: View {
             button.setAccessibilityLabel(symbol == nil ? nil : title)
             kayaButtonGlyphs[id] = symbol
             context.coordinator.tag = tag
+            button.appearance = context.environment.kayaOnMedia ? NSAppearance(named: .darkAqua) : nil
             // SEMANTIC EMPHASIS, in AppKit's own words (docs/styling-plan.md
             // D4): destructive is NSButton's hasDestructiveAction (macOS 11+ —
             // the system decides what that looks like), prominent is the

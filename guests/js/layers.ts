@@ -1,5 +1,5 @@
 // The layers scene (tools/scenes/layers.steps; docs/layering-plan.md LY13): a
-// cover with a badge, a caption on the fade form and a button over it; a
+// cover with a badge and a caption and a button on the fade form; a
 // button with a badge at its trailing end; a button under a veil, an unfilled
 // column spanning it with a panel at its centre, that takes its taps until it
 // is hidden; a cover with the flat overlay panel; and the log of which handler
@@ -28,9 +28,9 @@ const { answered, veiled } = app.window({ title: "layers", width: 480, height: 8
       });
       kaya.row({ filled: "overlay_fade" }, (caption) => {
         caption.place("bottom").a11yId("caption");
-        kaya.label("Kind of Blue").a11yId("caption_text");
+        kaya.label("Kind of Blue", { grow: 1 }).a11yId("caption_text");
+        kaya.button("Share", { onClick: () => answer("share") }).a11yId("share");
       });
-      kaya.button("Share", { onClick: () => answer("share") }).place(kaya.Place.BOTTOM_TRAILING).a11yId("share");
     });
     kaya.layers((stack) => {
       stack.a11yId("veilstack");

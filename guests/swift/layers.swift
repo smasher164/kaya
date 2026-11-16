@@ -30,13 +30,13 @@ KayaApp.run { app in
                     tx.setA11yId(badge, "badge")
                 }
                 tx.row(filled: .overlayFade) { caption in
-                    tx.setA11yId(tx.label("Kind of Blue"), "caption_text")
+                    let text = tx.label("Kind of Blue")
+                    tx.setGrow(text, 1)
+                    tx.setA11yId(text, "caption_text")
+                    tx.setA11yId(tx.button("Share", onClick: answer("share")), "share")
                     tx.setPlace(caption, .bottom)
                     tx.setA11yId(caption, "caption")
                 }
-                let share = tx.button("Share", onClick: answer("share"))
-                tx.setPlace(share, .bottomTrailing)
-                tx.setA11yId(share, "share")
                 tx.setA11yId(stack, "photostack")
             }
             tx.layers { stack in

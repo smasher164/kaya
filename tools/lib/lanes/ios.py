@@ -253,8 +253,9 @@ RUST_SCENES = [
 # Scenes that also run under KAYA_APPEARANCE=dark, as `<scene>dark-swiftui`:
 # the tints resolved in the dark appearance (docs/tints-plan.md §4), and the
 # rich document's colours drawn and picked on a dark page
-# (docs/rich-document-plan.md RD5).
-DARK_EXTRAS = ("tints", "grounds", "richdoc")
+# (docs/rich-document-plan.md RD5), and the controls on a fade panel in the
+# dark appearance (docs/layering-plan.md).
+DARK_EXTRAS = ("tints", "grounds", "richdoc", "layers")
 # Scenes that also run in a bundle pinned to landscape, as
 # `<scene>land-<suite>` (docs/safe-area-plan.md §5.4): the keyboard leaves
 # least room there. The reading appended proves the interface turned: a

@@ -31,8 +31,9 @@ main = kayaMain $ \app -> do
               row [Filled TintAccent, Place PlaceTopTrailing, A11yId "badge"] [labelText "3" [A11yId "badge_text"]],
               row
                 [Filled TintOverlayFade, Place PlaceBottom, A11yId "caption"]
-                [labelText "Kind of Blue" [A11yId "caption_text"]],
-              buttonOn "Share" (answer "share") [Place PlaceBottomTrailing, A11yId "share"]
+                [ labelText "Kind of Blue" [Grow 1, A11yId "caption_text"],
+                  buttonOn "Share" (answer "share") [A11yId "share"]
+                ]
             ],
           layers
             [A11yId "veilstack"]

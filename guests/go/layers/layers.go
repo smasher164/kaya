@@ -1,5 +1,5 @@
 // The layers scene (tools/scenes/layers.steps; docs/layering-plan.md LY13): a
-// cover with a badge, a caption on the fade form and a button over it; a
+// cover with a badge and a caption and a button on the fade form; a
 // button with a badge at its trailing end; a button under a veil, an unfilled
 // column spanning it with a panel at its centre, that takes its taps until it
 // is hidden; a cover with the flat overlay panel; and the log of which handler
@@ -37,9 +37,9 @@ func App() *kaya.App {
 					tx.LabelText("3").A11yID("badge_text")
 				}).Filled(kaya.TintAccent).Place(kaya.PlaceTopTrailing).A11yID("badge")
 				tx.Row(func() {
-					tx.LabelText("Kind of Blue").A11yID("caption_text")
+					tx.LabelText("Kind of Blue").Grow(1).A11yID("caption_text")
+					tx.Button("Share", answer("share")).A11yID("share")
 				}).Filled(kaya.TintOverlayFade).Place(kaya.PlaceBottom).A11yID("caption")
-				tx.Button("Share", answer("share")).Place(kaya.PlaceBottomTrailing).A11yID("share")
 			}).Inset(8).A11yID("photostack")
 			tx.Layers(func() {
 				tx.Button("Press the base button here", answer("base")).A11yID("base")
