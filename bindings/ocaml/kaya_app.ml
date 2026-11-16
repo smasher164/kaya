@@ -940,9 +940,9 @@ let image_phase_of_packed n = Image_phase.of_wire (Int64.to_int n)
    label's standalone colour (docs/styling-pass-plan.md Y7); its own module
    because [Warning] is already a symbol. *)
 module Tint = struct
-  type t = None | Accent | Success | Warning | Critical | Neutral | Overlay
+  type t = None | Accent | Success | Warning | Critical | Neutral | Overlay | Overlay_fade
 
-  let all = [ None; Accent; Success; Warning; Critical; Neutral; Overlay ]
+  let all = [ None; Accent; Success; Warning; Critical; Neutral; Overlay; Overlay_fade ]
 
   let wire = function
     | None -> Int64.of_int Kaya_wire.tint_none
@@ -952,11 +952,41 @@ module Tint = struct
     | Critical -> Int64.of_int Kaya_wire.tint_critical
     | Neutral -> Int64.of_int Kaya_wire.tint_neutral
     | Overlay -> Int64.of_int Kaya_wire.tint_overlay
+    | Overlay_fade -> Int64.of_int Kaya_wire.tint_overlay_fade
 
   let of_wire n =
     match List.find_opt (fun t -> wire t = n) all with
     | Some t -> t
     | Option.None -> failwith (Printf.sprintf "kaya: tint %Ld is not one this build knows" n)
+end
+
+(* Where an overlay of a layers container sits in its base's box
+   (docs/layering-plan.md LY3); leading and trailing follow the layout's
+   direction. *)
+module Place = struct
+  type t =
+    | Top_leading
+    | Top
+    | Top_trailing
+    | Leading
+    | Center
+    | Trailing
+    | Bottom_leading
+    | Bottom
+    | Bottom_trailing
+
+  let wire p =
+    Int64.of_int
+      (match p with
+      | Top_leading -> Kaya_wire.place_top_leading
+      | Top -> Kaya_wire.place_top
+      | Top_trailing -> Kaya_wire.place_top_trailing
+      | Leading -> Kaya_wire.place_leading
+      | Center -> Kaya_wire.place_center
+      | Trailing -> Kaya_wire.place_trailing
+      | Bottom_leading -> Kaya_wire.place_bottom_leading
+      | Bottom -> Kaya_wire.place_bottom
+      | Bottom_trailing -> Kaya_wire.place_bottom_trailing)
 end
 
 (* A [Tint.t] row field's wire form, for the ppx's generated code. *)
@@ -2413,6 +2443,15 @@ let bind_ground_image (Widget id) (s : bytes signal) =
 
 (* An image's clip (Y6). *)
 let set_shape (Widget id) (s : shape) = emit (the_tx ()) (Kaya_wire.tx_set_shape id (shape_wire s))
+
+(* Where an overlay sits in its layers container's box (docs/layering-plan.md
+   LY3); [placed p child] is the same as a child thunk. *)
+let set_place (Widget id) p = emit (the_tx ()) (Kaya_wire.tx_set_place id (Place.wire p))
+
+let placed p child () =
+  let w = child () in
+  set_place w p;
+  w
 
 (* A label in a tint's standalone colour (Y7). *)
 let set_tint (Widget id) t = emit (the_tx ()) (Kaya_wire.tx_set_tint id (pack_tint t))
@@ -4250,6 +4289,13 @@ let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?h
            ]))
     stack_when;
   parent
+
+(* LAYERS (docs/layering-plan.md): the first child is the base, laid out as
+   it would be alone in this container's place; every later child is drawn
+   over it, placed in the base's box by [placed] at this container's inset,
+   and takes every tap in its own box. *)
+let layers ?grow ?fill ?a11y_id ?a11y_label ?inset ?inset_pair children () =
+  container ?grow ?fill ?a11y_id ?a11y_label ?inset ?inset_pair Kaya_wire.kind_layers children ()
 
 (* An existing widget as a child: [w wid] wraps an already-realized
    handle in an inert thunk, so a widget created earlier slots into a
@@ -6388,6 +6434,12 @@ module Tpl = struct
     emit tx (Kaya_wire.tx_bind_source_element ~level ~field:fd.fd_index id)
 
   let set_shape (Node id) (sh : shape) = emit (the_tx ()) (Kaya_wire.tx_set_shape id (shape_wire sh))
+  let set_place (Node id) p = emit (the_tx ()) (Kaya_wire.tx_set_place id (Place.wire p))
+
+  let placed p child () =
+    let n = child () in
+    set_place n p;
+    n
   let set_tint (Node id) t = emit (the_tx ()) (Kaya_wire.tx_set_tint id (pack_tint t))
   let set_max_lines (Node id) n = emit (the_tx ()) (Kaya_wire.tx_set_max_lines id (float_of_int n))
   let set_monospaced (Node id) on = emit (the_tx ()) (Kaya_wire.tx_set_monospaced id on)
@@ -7293,6 +7345,9 @@ module Tpl = struct
     in
     Option.iter (fun v -> Floor.set_wrap parent v) wrap;
     parent
+
+  let layers ?grow ?fill ?a11y_id ?a11y_label ?inset ?inset_pair children () =
+    container ?grow ?fill ?a11y_id ?a11y_label ?inset ?inset_pair Kaya_wire.kind_layers children ()
 
   (* Attach a live-built context catalog to a template node: each
      activation carries that copy's key path — the keys ARE the noun. *)

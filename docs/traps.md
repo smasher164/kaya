@@ -21074,3 +21074,34 @@ systemBackground first is wrong too: the transparent ground was what hid the
 black neighbouring glyphs inside a run's box, and over white they read as
 the ink (`light 474747` for 016FEF). The ink is now picked among OPAQUE pixels
 only. The Mac's window-server picture is opaque, so it never showed.
+
+## Layering's platform findings (measured 2026-11-16)
+
+docs/layering-plan.md's build, each read through the arm with its guard cut.
+On the Mac, SwiftUI's own reading order of a base with `.overlay` content is
+the overlays FIRST (`badge_text caption_text share photo`), so the sort-priority
+pin is load-bearing; and a negative sort priority with no `.contain` around
+the layers view sank the overlays below the window's other content (the
+small cover read before the big cover's badge), so the pin is scoped. An
+`a11y_id` on a layers container without `.contain` overrode every child's
+identifier (all read `photostack`). SwiftUI's `.contentShape(Rectangle())` on
+an overlay measured belt and braces: with it cut, a tap on a filled panel and
+on an unfilled fill-column veil's empty area still did not reach the base
+button (the leg stayed green). GtkOverlay allocates an overlay at least its
+minimum, which reached 10 px past a 34 px button base ("bottom -10"), and the
+rectangle get-child-position returns carries the child's margins (returning
+the content box doubled the inset to 16). A WinUI overlay keeps the height its
+content wants past MaxHeight on the wrapper and on itself (a veil 43 px over a
+32 px button), so placed() reads it as drawn, inside the host's clip. OCaml's
+and Haskell's construction write `fill` before the child joins its parent, so
+the GTK and WinUI layers hold a fill whatever the parent at the time. On the
+linux x11 leg a right-to-left window sits at a negative screen x (xdotool
+mousemove -295), so layersrtl.steps taps nothing. On Android, Compose's
+accessibility delegate computes its traversal links only while it believes a
+service listens; its testing switch, set by reflection and left on, let the
+event loop send an event with accessibility off and the platform threw
+("Accessibility off. Did you forget to check that?"), so the switch is put
+back before the looper turns. And the peer's surface and the self-view were
+on no TalkBack traversal link at all: their box carries the content
+description over a child node, so unmerged it is no leaf; both now merge
+their descendants.

@@ -147,6 +147,7 @@ public final class EmissionCheck {
         CHAIN.put("selected(Signal)", prop(KayaWire.PROP_SELECTED));
         CHAIN.put("selected(boolean)", prop(KayaWire.PROP_SELECTED));
         CHAIN.put("shape(Shape)", prop(KayaWire.PROP_SHAPE));
+        CHAIN.put("place(Place)", prop(KayaWire.PROP_PLACE));
         CHAIN.put("spacing(double)", prop(KayaWire.PROP_SPACING));
         CHAIN.put("stackWhen(SizeClass)", record(KayaWire.TX_KIND_CREATE_BREAKPOINT));
         CHAIN.put("step(double)", prop(KayaWire.PROP_STEP));

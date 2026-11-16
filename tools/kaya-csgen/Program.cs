@@ -496,6 +496,7 @@ static class Program
             "segments, selected, onSelect");
         Fwd("Row", ["System.Action body"], "body");
         Fwd("Column", ["System.Action body"], "body");
+        Fwd("Layers", ["System.Action body"], "body");
         Fwd("Scroll", ["System.Action body"], "body");
         Fwd("Grid", ["int columns", "System.Action body"], "columns, body");
         Fwd("Labeled", ["string label", "System.Action body"], "label, body");
@@ -593,6 +594,7 @@ static class Program
         Set("SetGroundImage", ["Node n", "Signal s"], "n, s");
         Set("SetGroundImage", ["Node n", "Field<byte[]> f", "uint level = 0"], "n, f, level");
         Set("SetShape", ["Node n", "Shape shape"], "n, shape");
+        Set("SetPlace", ["Node n", "Place place"], "n, place");
         Set("SetTint", ["Node n", "Tint tint"], "n, tint");
         Set("SetMaxLines", ["Node n", "int lines"], "n, lines");
         Set("SetMonospaced", ["Node n", "bool on"], "n, on");

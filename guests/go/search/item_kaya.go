@@ -71,6 +71,7 @@ func (r itemRow) Unmatched() kaya.Field[bool] { return kaya.FieldAt[bool](1) }
 func (r itemRow) Row(body func()) kaya.Node { return r.t.Row(body) }
 
 func (r itemRow) Column(body func()) kaya.Node { return r.t.Column(body) }
+func (r itemRow) Layers(body func()) kaya.Node { return r.t.Layers(body) }
 
 func (r itemRow) Label(f kaya.Field[string]) kaya.Node { return r.c.Label(r.t, f) }
 
@@ -164,6 +165,7 @@ func (r itemRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.Set
 func (r itemRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
 func (r itemRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
 func (r itemRow) SetShape(n kaya.Node, shape kaya.Shape)               { r.t.SetShape(n, shape) }
+func (r itemRow) SetPlace(n kaya.Node, place kaya.Place)               { r.t.SetPlace(n, place) }
 func (r itemRow) SetTint(n kaya.Node, tint kaya.Tint)                  { r.t.SetTint(n, tint) }
 func (r itemRow) BindTint(n kaya.Node, f kaya.Field[kaya.Tint])        { r.t.BindTint(n, f) }
 func (r itemRow) SetSelected(n kaya.Node, on bool)                     { r.t.SetSelected(n, on) }

@@ -62,6 +62,8 @@ SCENES = [
     "doctabs",
     # docs/font-picker-plan.md §7.
     "fontpick",
+    # Views over views (docs/layering-plan.md LY13).
+    "layers",
 ]
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
@@ -94,7 +96,9 @@ C_SCENES = ["undo", "dirty", "ranges", "save", "a11yrows", "styling",
             # The skin at the floor (docs/styling-pass-plan.md Y10).
             "grounds", "shapes", "cards", "tracks", "dock",
             # The capture at the floor (docs/capture-plan.md, the C floor's parsers).
-            "capture"]
+            "capture",
+            # Layers at the floor (docs/layering-plan.md LY12).
+            "layers"]
 
 # The nine hosted languages in their DEFAULT group order; a group
 # that deviates spells its own order in ORDER below. js is the ninth
@@ -111,7 +115,7 @@ GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks", "windowmem": "spli
               "links": "tasks", "formatde": "format", "formatar": "format",
               "tasksrtl": "tasks", "clock24": "format", "scrollrtl": "scroll",
               "numberfieldde": "numberfield", "numberfieldar": "numberfield",
-              "rangertl": "range",
+              "rangertl": "range", "layersrtl": "layers",
               "media_formats": "media", "media_delivery": "media",
               "media_session": "media", "media_tracks": "media", "media_feed": "media",
               "media_picked": "media", "media_timeout": "media",
@@ -125,7 +129,7 @@ GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks", "windowmem": "spli
 # platform installs it and the reads ask the platform, never this table.
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
                 "scrollrtl": "ar-EG", "numberfieldde": "de-DE", "numberfieldar": "ar-EG",
-                "rangertl": "ar-EG"}
+                "rangertl": "ar-EG", "layersrtl": "ar-EG"}
 
 # THE SCENES THIS LANE CUTS, through tools/lib/scene_cut.py, the phones'
 # census, which check-steps runs over this table too. The eye's Tab reach is
@@ -206,6 +210,8 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "chatcall": "go", "portfolio": "pyt
                "numberfieldar": "rust",
                # The range guest in Arabic (SCENE_LOCALE).
                "rangertl": "rust",
+               # The layers guest in Arabic (SCENE_LOCALE).
+               "layersrtl": "rust",
                # The media suite's scenes, one guest (docs/media-plan.md §7a).
                "media_formats": "rust", "media_delivery": "rust",
                "media_session": "rust", "media_tracks": "rust", "media_feed": "rust",
@@ -345,6 +351,9 @@ ORDER = [
     ("tints", ("rust",)),
     # A symbol on its own (docs/looks-plan.md §3.1).
     ("icons", ("rust",)),
+    # Views over views (docs/layering-plan.md LY13), and in Arabic.
+    ("layers", LANGS + ("c",)),
+    ("layersrtl", ("rust",)),
     ("codesurface", LANGS),
     # docs/font-picker-plan.md §7.
     ("fontpick", LANGS),

@@ -89,6 +89,8 @@ LEGS = {
         "tintsdark-compose",
         # A symbol on its own (docs/looks-plan.md §3.1).
         "icons-compose",
+        # Views over views (docs/layering-plan.md LY13), and in Arabic.
+        "layers-compose", "layersrtl-compose",
         "scrollto-compose",
         # The number field in the everyday locale and in German
         # (docs/number-field-plan.md §5); MODS cuts the steps.
@@ -249,6 +251,8 @@ LEGS = {
         "media_tracks-jvm", "media_feed-jvm", "media_reader-jvm",
         "netimage-jvm", "netimage_http-jvm",
         "grounds-jvm", "shapes-jvm", "cards-jvm", "tracks-jvm", "dock-jvm",
+        # docs/layering-plan.md LY13.
+        "layers-jvm",
         "capture-jvm", "capture_denied-jvm",
         "farend-jvm",
         "codesurface-jvm", "fontpick-jvm",
@@ -281,6 +285,8 @@ LEGS = {
         "media_tracks-go", "media_feed-go", "media_reader-go",
         "netimage-go", "netimage_http-go",
         "grounds-go", "shapes-go", "cards-go", "tracks-go", "dock-go",
+        # docs/layering-plan.md LY13.
+        "layers-go",
         "capture-go", "capture_denied-go",
         "farend-go",
         "codesurface-go", "fontpick-go",
@@ -304,7 +310,7 @@ PYTHON_GUESTS = {"portfolio": "portfolio", "varied": "varied", "music_home": "mu
 # this.
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
                 "scrollrtl": "ar-EG", "numberfieldde": "de-DE", "numberfieldar": "ar-EG",
-                "rangertl": "ar-EG"}
+                "rangertl": "ar-EG", "layersrtl": "ar-EG"}
 
 # The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
 # forced Configuration's fontScale and the Density every sp reads.

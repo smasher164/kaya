@@ -117,7 +117,10 @@ public final class KayaApp {
         /** A label's untinted text (docs/styling-pass-plan.md Y7). */
         NONE(KayaWire.TINT_NONE),
         /** The platform's panel over media (docs/styling-pass-plan.md Y3). */
-        OVERLAY(KayaWire.TINT_OVERLAY);
+        OVERLAY(KayaWire.TINT_OVERLAY),
+        /** The overlay panel as a scrim, kaya choosing its darkness
+         * (docs/layering-plan.md LY9). */
+        OVERLAY_FADE(KayaWire.TINT_OVERLAY_FADE);
 
         final long wire;
 
@@ -143,6 +146,23 @@ public final class KayaApp {
         final long wire;
 
         Shape(long wire) {
+            this.wire = wire;
+        }
+    }
+
+    /** Where an overlay of a layers container sits in its base's box
+     * (docs/layering-plan.md LY3); leading and trailing follow the
+     * layout's direction. */
+    public enum Place {
+        TOP_LEADING(KayaWire.PLACE_TOP_LEADING), TOP(KayaWire.PLACE_TOP),
+        TOP_TRAILING(KayaWire.PLACE_TOP_TRAILING), LEADING(KayaWire.PLACE_LEADING),
+        CENTER(KayaWire.PLACE_CENTER), TRAILING(KayaWire.PLACE_TRAILING),
+        BOTTOM_LEADING(KayaWire.PLACE_BOTTOM_LEADING), BOTTOM(KayaWire.PLACE_BOTTOM),
+        BOTTOM_TRAILING(KayaWire.PLACE_BOTTOM_TRAILING);
+
+        final long wire;
+
+        Place(long wire) {
             this.wire = wire;
         }
     }
@@ -5348,6 +5368,12 @@ public final class KayaApp {
             return this;
         }
 
+        /** This overlay's place in its layers container's box (Tx#setPlace), chained. */
+        public Widget place(Place place) {
+            building("place").setPlace(this, place);
+            return this;
+        }
+
         /** This label's standalone tint (Tx#setTint), chained. */
         public Widget tint(Tint tint) {
             building("tint").setTint(this, tint);
@@ -6843,6 +6869,10 @@ public final class KayaApp {
             return t.row(body);
         }
 
+        public Node layers(Runnable body) {
+            return t.layers(body);
+        }
+
         public Node column(Runnable body) {
             return t.column(body);
         }
@@ -7046,6 +7076,11 @@ public final class KayaApp {
          * cross axis ({@link Tpl#setFill}). */
         public void setFill(Node n, boolean on) {
             t.setFill(n, on);
+        }
+
+        /** This row's copy of an overlay, placed ({@link Tpl#setPlace}). */
+        public void setPlace(Node n, Place place) {
+            t.setPlace(n, place);
         }
 
         /** This row's copy of that container's cross-axis child placement
@@ -8091,6 +8126,11 @@ public final class KayaApp {
             emit(KayaWire.txSetFill(w.id, on));
         }
 
+        /** Where an overlay sits in its layers container's box (docs/layering-plan.md LY3). */
+        public void setPlace(Widget w, Place place) {
+            emit(KayaWire.txSetPlace(w.id, place.wire));
+        }
+
         /**
          * THE GRID THAT FITS (docs/layout-knobs-plan.md §3): as many
          * columns as fit this grid's width at {@code minWidth} DIP each,
@@ -8557,6 +8597,21 @@ public final class KayaApp {
 
         public <R> Built<R> row(java.util.function.Function<Widget, R> body) {
             return containerOf(KayaWire.KIND_ROW, body);
+        }
+
+        /**
+         * LAYERS (docs/layering-plan.md): the body's first child is the
+         * base, laid out as it would be alone in this container's place;
+         * every later child is drawn over it, placed in the base's box by
+         * {@link #setPlace} at this container's inset, and takes every tap
+         * in its own box.
+         */
+        public Widget layers(java.util.function.Consumer<Widget> body) {
+            return containerOf(KayaWire.KIND_LAYERS, body);
+        }
+
+        public <R> Built<R> layers(java.util.function.Function<Widget, R> body) {
+            return containerOf(KayaWire.KIND_LAYERS, body);
         }
 
         /** A scroll viewport over EXACTLY ONE child (declare it in the
@@ -10782,6 +10837,11 @@ public final class KayaApp {
             tx.emit(KayaWire.txSetFill(n.id, on));
         }
 
+        /** A stamped overlay's place, the blueprint twin of {@link Tx#setPlace}. */
+        public void setPlace(Node n, Place place) {
+            tx.emit(KayaWire.txSetPlace(n.id, place.wire));
+        }
+
         /** A stamped container's cross-axis child placement, the blueprint
          * twin of {@link Tx#setAlign(Widget, Align)}. */
         public void setAlign(Node n, Align align) {
@@ -11305,6 +11365,10 @@ public final class KayaApp {
         // tokens, containers take their body.
         public Node row(Runnable body) {
             return containerOf(KayaWire.KIND_ROW, body);
+        }
+
+        public Node layers(Runnable body) {
+            return containerOf(KayaWire.KIND_LAYERS, body);
         }
 
         public Node column(Runnable body) {

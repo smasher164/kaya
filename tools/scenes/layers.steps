@@ -1,0 +1,26 @@
+# docs/layering-plan.md LY13: views over views. Each overlay's drawn frame
+# against the box its base drew; the badge's fill read off the pixels over the
+# picture; the reading order is the base, then the overlays as declared. A real
+# tap on the overlay button answers it; beside a badge the base answers; on the
+# badge, and on the veil (an unfilled column spanning the box, tapped beside its
+# panel), nothing does (LY6); with the veil hidden the base answers again. The
+# right-to-left half is layersrtl.steps.
+expect_title "layers"
+expect_placed row@badge "top_trailing 8"
+expect_placed row@caption "bottom 8"
+expect_placed button@share "bottom_trailing 8"
+expect_placed column@busy "fill 0"
+expect_placed row@flat "top_leading 8"
+expect_fill row@badge accent
+expect_ax_order image@photo label@badge_text label@caption_text button@share
+expect_ax_order image@smallphoto label@flat_text
+tap_at button@share center
+expect label@answered "taps: share"
+tap_at button@side leading
+expect label@answered "taps: share side"
+tap_at row@sidebadge center
+tap_at column@busy leading
+click button@hideveil
+expect label@answered "taps: share side hide"
+tap_at button@base center
+expect label@answered "taps: share side hide base"

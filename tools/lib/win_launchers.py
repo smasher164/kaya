@@ -14,7 +14,7 @@ import media_server
 # scene. Keyed by the leg's scene (win.scene_lang).
 LOCALES = {"formatde": "de-DE", "formatar": "ar-EG", "numberfieldde": "de-DE",
            "numberfieldar": "ar-EG", "rangertl": "ar-EG", "scrollrtl": "ar-EG",
-           "tasksrtl": "ar-EG"}
+           "tasksrtl": "ar-EG", "layersrtl": "ar-EG"}
 IDENTITIES = {"music": "identities/music.toml"}
 # Python's -P: the script's directory is C:\kaya, where the lane stages
 # every guest flat, so a guest that imports a stdlib-shadowed name runs

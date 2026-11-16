@@ -118,8 +118,8 @@ KEY: overlay, layering kind, layers, place, expect_placed, tap_at, expect_ax_ord
 
 The root (spec, core refusals, the Rust sugar) is in; each unbuilt arm refuses the scene through the stub call:
 
-  - **DEPTH STUB: layers on gtk** — the GtkOverlay arm follows the Mac's depth slice (docs/layering-plan.md §5 step 3); closes when the layers scene is green on the linux lane.
-  - **DEPTH STUB: layers on winui** — the one-cell Grid arm follows the Mac's depth slice (docs/layering-plan.md §5 step 3); closes when the layers scene is green on the windows lane.
+  - ~~**DEPTH STUB: layers on gtk**~~ — LANDED 2026-11-16: the GtkOverlay arm (get-child-position caps each overlay at the box); the layers scene green on the linux lane in every language it runs.
+  - ~~**DEPTH STUB: layers on winui**~~ — LANDED 2026-11-16: the one-cell Grid arm (a host sized to the base, each overlay in a transparent-backed wrapper); the layers scene green on the windows lane in every language it runs.
 
 ## ~~BUILD — a font picker with family and face, native on three platforms and kaya-drawn on two (docs/font-picker-plan.md, ruled 2026-10-29)~~ COMPLETE 2026-10-29: every lane, all nine bindings, the fontpick scene in every language and the editor's Font…, through one full matrix (e2d4a307) and the review page (claude.ai/artifact/6RrGZauKea4rQyycBPn3oC); the three findings of its captures are the GAP entry below, the panel before macOS 26 the DEFER entry
 KEY: font picker, show_font_dialog, font_dialog_result, list_font_faces, font_faces, font_weight, font_italic, font_width, choose_font, on_font_chosen, NSFontPanel, NSFontPanelCollectionsToolbarItem, UIFontPickerViewController, GtkFontDialog, expect_face face, pick_font, expect_font_dialog, fontpick.steps, DEPTH STUB fontpick

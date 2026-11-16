@@ -2566,6 +2566,31 @@ func (tx *Tx) Row(body func()) Widget {
 	return tx.containerOf(KindRow, body)
 }
 
+// Layers is a container whose first child is the BASE, laid out as it would
+// be alone in this container's place, and whose later children are drawn
+// over it, each placed in the base's box by .Place at this container's
+// inset, each taking every tap in its own box (docs/layering-plan.md).
+func (tx *Tx) Layers(body func()) Widget {
+	return tx.containerOf(KindLayers, body)
+}
+
+// Place is where an overlay of a layers container sits in its base's box
+// (docs/layering-plan.md LY3): PlaceTopLeading through PlaceBottomTrailing,
+// leading and trailing following the layout's direction.
+type Place int64
+
+// SetPlace seats an overlay in its layers container's box.
+func (tx *Tx) SetPlace(w Widget, place Place) { tx.emit(TxSetPlace(w.id, int64(place))) }
+
+// Place is SetPlace's chain.
+func (w Widget) Place(place Place) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Place on a widget outside its build transaction — use Tx.SetPlace inside a live transaction")
+	}
+	w.tx.SetPlace(w, place)
+	return w
+}
+
 // Scroll is a scroll viewport over EXACTLY ONE child (the scene
 // rejects a second), vertical unless chained .Axis(AxisHorizontal).
 // Chain .Grow(1) so the enclosing track CONSTRAINS it — an unconstrained
@@ -6910,6 +6935,14 @@ func (t *Tpl) ImageBound[S interface {
 func (t *Tpl) Row(body func()) Node {
 	return t.containerOf(KindRow, body)
 }
+
+// Layers is the template flavor of Tx.Layers.
+func (t *Tpl) Layers(body func()) Node {
+	return t.containerOf(KindLayers, body)
+}
+
+// SetPlace seats a stamped overlay, the template flavor of Tx.SetPlace.
+func (t *Tpl) SetPlace(n Node, place Place) { t.tx.emit(TxSetPlace(n.id, int64(place))) }
 
 func (t *Tpl) Column(body func()) Node {
 	return t.containerOf(KindColumn, body)

@@ -332,6 +332,8 @@ sealed class LibraryPlaylistRow
 
     public Node Column(System.Action body) => t.Column(body);
 
+    public Node Layers(System.Action body) => t.Layers(body);
+
     public Node Scroll(System.Action body) => t.Scroll(body);
 
     public Node Grid(int columns, System.Action body) => t.Grid(columns, body);
@@ -527,6 +529,8 @@ sealed class LibraryPlaylistRow
         t.SetGroundImage(n, f, level);
 
     public void SetShape(Node n, Shape shape) => t.SetShape(n, shape);
+
+    public void SetPlace(Node n, Place place) => t.SetPlace(n, place);
 
     public void SetTint(Node n, Tint tint) => t.SetTint(n, tint);
 

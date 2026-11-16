@@ -3974,6 +3974,13 @@ def compose_media_arms(media_src=None, header_src=None):
     bad = []
     code = kotlin_code(media_src if media_src is not None else real(KOTLIN_MEDIA))
     header = header_src if header_src is not None else real(KAYA_H)
+    # LY7 (docs/layering-plan.md): an OVERLAY video draws on a TextureView,
+    # in exactly this one spelling, which the LAYERS clause holds; every
+    # other video view keeps the SurfaceView.
+    code = code.replace("import androidx.media3.ui.compose.SURFACE_TYPE_TEXTURE_VIEW\n", "")
+    code = code.replace(
+        "if (kayaInOverlay(node)) SURFACE_TYPE_TEXTURE_VIEW else SURFACE_TYPE_SURFACE_VIEW",
+                        "SURFACE_TYPE_SURFACE_VIEW")
     for banned in ("PlayerView", "SubtitleView", "SURFACE_TYPE_TEXTURE_VIEW",
                    "TextureView"):
         if re.search(r"\b" + banned + r"\b", code):
@@ -4051,8 +4058,9 @@ if compose_media_out:
 print(f"check-verbs: Compose media arm read "
       f"({len(re.findall(r'KayaPresent[.]player[A-Z]', real(KOTLIN_MEDIA)))} player reports)")
 for pattern, repl, label, want in (
-    (r"(surfaceType = )SURFACE_TYPE_SURFACE_VIEW", "SURFACE_TYPE_TEXTURE_VIEW",
-     "a TextureView surface", 1),
+    (r"(surfaceType = )if \(kayaInOverlay\(node\)\) SURFACE_TYPE_TEXTURE_VIEW else SURFACE_TYP"
+     r"E_SURFACE_VIEW",
+     "SURFACE_TYPE_TEXTURE_VIEW", "a TextureView surface for every video", 1),
     (r"(\n +)kayaPlayerReport\(id\) \{ KayaPresent\.playerEnded\(id\) \}",
      "KayaPresent.playerEnded(id)", "a report outside the door", 1),
     (r"(    report\(\)\n)    KayaMediaSession\.follow\(id\)\n", "",
@@ -6070,6 +6078,7 @@ for key, pattern, repl, label in (
      "box = [format.0 / 2, format.1 / 2]",
      "SwiftUI with its own copy of the rule"),
     ("swift", r"(KayaVideoSurface\(node: node\)\n)\s*\.aspectRatio\(natural, contentMode: \.fit\)\n"
+              r"(?:\s*\.modifier\(KayaPictureBox\(on: node\.layersHost != nil\)\)\n)?"
               r"(\s*)\.frame\(idealWidth: natural\.width, "
               r"maxWidth: node\.grow > 0 \? \.infinity : natural\.width\)",
      r"\1\2.frame(\n\2    idealWidth: natural.width, maxWidth: node.grow > 0 ? .infinity : "
@@ -6517,6 +6526,109 @@ for label, slot, old, new in (
         print(f"check-verbs: rich vocabulary negative ({label}): 1 substitution, "
               f"refused: {found[0]}")
 
+# LAYERS (docs/layering-plan.md §4): the sites no scene can tell from their
+# absence on every lane. The hit opacity measured belt and braces on SwiftUI
+# (docs/traps.md) and is load-bearing on Compose and WinUI; the reading-order
+# pins and their scope; the fade form's band and darkness, one pair on four
+# arms; the GTK box cap; and LY7's TextureView choice for an overlay video on
+# Android. Each row's site must name each API; each negative is one
+# substitution watched red.
+LAYERS_SITES = [
+    ("KayaSwiftUI.swift", SWIFT, "the overlays' hit opacity and reading order",
+     r"struct KayaLayersOverlays: View", r"\n}\n",
+     [r"\.contentShape\(Rectangle\(\)\)", r"\.accessibilitySortPriority\(-Double\(i \+ 1\)\)"]),
+    ("KayaSwiftUI.swift", SWIFT, "the reading order's scope",
+     r"        case kindLayers:", r"        case kindLabeled:",
+     [r"\.accessibilitySortPriority\(0\)", r"\.accessibilityElement\(children: \.contain\)"]),
+    ("KayaSwiftUI.swift", SWIFT, "the fade form",
+     r"let kayaFadeBand: CGFloat", r"\n\n",
+     [r"kayaFadeBand: CGFloat = 32\n", r"kayaFadeScrim = 0\.6\n"]),
+    ("KayaCompose.kt", KOTLIN, "the overlays' hit opacity and reading order",
+     r"internal fun KayaLayers\(", r"\n}\n",
+     [r"\.pointerInput\(Unit\) \{ awaitPointerEventScope", r"traversalIndex = \(i \+ 1\)",
+      r"isTraversalGroup = true"]),
+    ("KayaCompose.kt", KOTLIN, "the fade form",
+     r"const val KAYA_TINT_OVERLAY_FADE", r"\n\n",
+     [r"KAYA_FADE_BAND = 32\n", r"KAYA_FADE_SCRIM = 0\.6f\n"]),
+    ("KayaMedia.kt", KOTLIN_MEDIA, "LY7's overlay player",
+     r"PlayerSurface\(\n", r"\n            \)\n",
+     [r"kayaInOverlay\(node\)\) SURFACE_TYPE_TEXTURE_VIEW"]),
+    ("KayaCapture.kt", COMPOSE_CAPTURE, "LY7's overlay self-view",
+     r"PreviewView\(context\)\.apply", r"\n                \}\n",
+     [r"kayaInOverlay\(node\)\) PreviewView\.ImplementationMode\.COMPATIBLE"]),
+    ("winui/mod.rs", WINUI, "the overlays' hit opacity",
+     r"// LY6: the transparent ground", r"core\.layer_wrappers\.insert",
+     [r"wrapper\.SetBackground\(&SolidColorBrush::CreateInstanceWithColor"]),
+    ("winui/mod.rs", WINUI, "the fade form",
+     r"const FADE_BAND: f64", r"\n\n",
+     [r"FADE_BAND: f64 = 32\.0;", r"FADE_SCRIM_ALPHA: u8 = 0x99;"]),
+    ("gtk.rs", GTK, "the box cap",
+     r"overlay\.connect_get_child_position\(", r"\}\);",
+     [r"nat_w\.min\(aw\)", r"nat_h\.min\(ah\)"]),
+    ("gtk.rs", GTK, "the fade form",
+     r"\.kaya-filled\.kaya-fade\.kaya-fade-bottom", r"\n",
+     [r"border-top: 32px solid transparent", r"alpha\(black, 0\.6\) 32px"]),
+]
+
+
+def layers_clauses(**srcs):
+    bad = []
+    for name, rel, what, anchor_re, end, apis in LAYERS_SITES:
+        text = srcs.get(rel) if srcs.get(rel) is not None else real(rel)
+        m = re.search(anchor_re, text)
+        if not m:
+            bad.append(f"{name} has no site for {what} (wanted /{anchor_re}/)")
+            continue
+        body = text[m.start():]
+        stop = re.search(end, body[len(m.group(0)):])
+        body = body[:len(m.group(0)) + stop.end()] if stop else body
+        for api in apis:
+            if not re.search(api, body):
+                bad.append(f"{name}'s site for {what} does not name /{api}/ — "
+                           f"no scene reads its absence on every lane "
+                           f"(docs/layering-plan.md §4)")
+    return bad
+
+
+layers_out = layers_clauses()
+layers_status = 0
+for line in layers_out:
+    print(f"check-verbs: {line}", file=sys.stderr)
+    layers_status = 1
+for label, rel, pattern, repl, finding in (
+    ("the swiftui hit opacity cut", SWIFT,
+     r"(KayaRender\(node: o\)\n[^\n]*\n)                    \.contentShape\(Rectangle\(\)\)\n", "",
+     r"^KayaSwiftUI\.swift's site for the overlays' hit opacity"),
+    ("the swiftui reading-order pin cut", SWIFT,
+     r"(\.modifier\(KayaLayerReader\(id: o\.id\)\)\n)                    \.accessibilitySortPr"
+     r"iority\(-Double\(i \+ 1\)\)\n", "",
+     r"^KayaSwiftUI\.swift's site for the overlays' hit opacity and reading order does not nam"
+     r"e /\\\.accessibilitySortPriority"),
+    ("the compose hit opacity cut", KOTLIN,
+     r"(\n)                            \.pointerInput\(Unit\) \{ awaitPointerEventScope \{ whi"
+     r"le \(true\) awaitPointerEvent\(\) \} \}", "",
+     r"^KayaCompose\.kt's site for the overlays' hit opacity"),
+    ("the compose reading-order pin cut", KOTLIN,
+     r"(isTraversalGroup = true; )traversalIndex = \(i \+ 1\)\.toFloat\(\)", "Unit",
+     r"^KayaCompose\.kt's site for the overlays' hit opacity and reading order does not name /"
+     r"traversalIndex"),
+    ("the android overlay video left on SurfaceView", KOTLIN_MEDIA,
+     r"(surfaceType = )if \(kayaInOverlay\(node\)\) SURFACE_TYPE_TEXTURE_VIEW else SURFACE_TYP"
+     r"E_SURFACE_VIEW",
+     "SURFACE_TYPE_SURFACE_VIEW",
+     r"^KayaMedia\.kt's site for LY7"),
+    ("the winui transparent ground cut", WINUI,
+     r"(\n)                    wrapper\.SetBackground\(&SolidColorBrush::CreateInstanceWithCol"
+     r"or\(bindings::Windows::UI::Color \{ A: 0, R: 0, G: 0, B: 0 \}\)\?\)\?;", "",
+     r"^winui/mod\.rs's site for the overlays' hit opacity"),
+    ("the swiftui fade darkness drifted", SWIFT,
+     r"(let kayaFadeScrim = )0\.6\n", "0.4\n",
+     r"^KayaSwiftUI\.swift's site for the fade form"),
+):
+    doctored = perturb(f"layers ({label})", rel, pattern, repl)
+    score_or_die(introduced(layers_clauses(**{rel: doctored}), layers_out, finding), label)
+    print(f"check-verbs: layers negative ({label}): refused")
+
 # The SELF-TEST fail() calls below the drain at "EVERY SELF-TEST FAILURE
 # BELOW THE FIRST DRAIN" reach the exit here.
 if failures:
@@ -6525,7 +6637,7 @@ if failures:
     raise SystemExit(1)
 if (clip_status or window_status or ink_status or ax_status
         or drop_tol_status or fade_tol_status or capsule_status
-        or words_status or label_status or polish_status
+        or words_status or label_status or polish_status or layers_status
         or metrics_status or keyed_status or drop_line_status
         or vtrace_status or norm_status or ind_status
         or answer_status or seed_focus_status or notify_auth_status

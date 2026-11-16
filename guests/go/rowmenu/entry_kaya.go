@@ -83,6 +83,7 @@ func (r entryRow) Plain() kaya.Field[bool] { return kaya.FieldAt[bool](2) }
 func (r entryRow) Row(body func()) kaya.Node { return r.t.Row(body) }
 
 func (r entryRow) Column(body func()) kaya.Node { return r.t.Column(body) }
+func (r entryRow) Layers(body func()) kaya.Node { return r.t.Layers(body) }
 
 func (r entryRow) Label(f kaya.Field[string]) kaya.Node { return r.c.Label(r.t, f) }
 
@@ -176,6 +177,7 @@ func (r entryRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.Se
 func (r entryRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
 func (r entryRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
 func (r entryRow) SetShape(n kaya.Node, shape kaya.Shape)               { r.t.SetShape(n, shape) }
+func (r entryRow) SetPlace(n kaya.Node, place kaya.Place)               { r.t.SetPlace(n, place) }
 func (r entryRow) SetTint(n kaya.Node, tint kaya.Tint)                  { r.t.SetTint(n, tint) }
 func (r entryRow) BindTint(n kaya.Node, f kaya.Field[kaya.Tint])        { r.t.BindTint(n, f) }
 func (r entryRow) SetSelected(n kaya.Node, on bool)                     { r.t.SetSelected(n, on) }

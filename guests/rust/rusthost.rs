@@ -177,6 +177,7 @@ mod stampbefore;
 mod mountfocus;
 mod tints;
 mod icons;
+mod layers;
 
 #[path = "submit.rs"]
 mod submit;
@@ -309,6 +310,8 @@ fn app(ctx: kaya::AppCtx) {
         Ok("mountfocus") => mountfocus::app(ctx),
         Ok("tints") => tints::app(ctx),
         Ok("icons") => icons::app(ctx),
+        // And its right-to-left half under KAYA_LOCALE=ar-EG (tools/scenes/layersrtl.steps).
+        Ok("layers") | Ok("layersrtl") => layers::app(ctx),
         Ok("submit") => submit::app(ctx),
         Ok("tooltips") => tooltips::app(ctx),
         Ok("search") => search::app(ctx),

@@ -64,6 +64,7 @@ static class Program
             case "expander": ExpanderScene.Run(); break;
             case "safearea": SafeareaScene.Run(); break;
             case "grounds": GroundsScene.Run(); break;
+            case "layers": case "layersrtl": LayersScene.Run(); break;
             case "shapes": ShapesScene.Run(); break;
             case "cards": CardsScene.Run(); break;
             case "tracks": TracksScene.Run(); break;

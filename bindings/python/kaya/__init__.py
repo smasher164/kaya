@@ -819,6 +819,12 @@ class _Handle:
         _records().append(wire.tx_set_format(self.id, format._wire()))
         return self
 
+    def place(self: H, place: Place | str) -> H:
+        """Where this overlay sits in its layers container's box
+        (docs/layering-plan.md LY3). Returns the handle."""
+        _records().append(wire.tx_set_place(self.id, int(Place(place))))
+        return self
+
     def fill(self: H, on: bool) -> H:
         """Whether this widget spans its container's cross axis — a
         column's width, a row's height — whatever the container's
@@ -5277,6 +5283,7 @@ class Tint(enum.IntEnum):
     CRITICAL = wire.TINT_CRITICAL
     NEUTRAL = wire.TINT_NEUTRAL
     OVERLAY = wire.TINT_OVERLAY
+    OVERLAY_FADE = wire.TINT_OVERLAY_FADE
 
 
 _WIRE_TYPES.append((Tint, wire.VALUE_I64))
@@ -5295,6 +5302,25 @@ class Shape(enum.IntEnum):
     @classmethod
     def _missing_(cls, value: object) -> Any:
         return _vocab_missing(cls, value, "an image's shape", "kaya.Shape.CIRCLE")
+
+
+class Place(enum.IntEnum):
+    """Where an overlay of a layers container sits in its base's box
+    (docs/layering-plan.md LY3); leading and trailing follow the layout's
+    direction. Plain names accepted too — `place("bottom_trailing")`."""
+    TOP_LEADING = wire.PLACE_TOP_LEADING
+    TOP = wire.PLACE_TOP
+    TOP_TRAILING = wire.PLACE_TOP_TRAILING
+    LEADING = wire.PLACE_LEADING
+    CENTER = wire.PLACE_CENTER
+    TRAILING = wire.PLACE_TRAILING
+    BOTTOM_LEADING = wire.PLACE_BOTTOM_LEADING
+    BOTTOM = wire.PLACE_BOTTOM
+    BOTTOM_TRAILING = wire.PLACE_BOTTOM_TRAILING
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "an overlay's place", "kaya.Place.BOTTOM_TRAILING")
 
 
 def _tint_value(tint: Tint | str) -> Tint:
@@ -5836,6 +5862,17 @@ def column(*, grow: float | None = None, spacing: float | None = None,
     _set_filled(handle, filled)
     _set_filled_color(handle, filled_color)
     _set_skin(handle, ground_gradient, ground_image, selected, on_activate, on_select)
+    return _Container(handle)
+
+
+def layers(*, grow: float | None = None, inset: Inset | None = None) -> _Container:
+    """LAYERS (docs/layering-plan.md): the block's first child is the base,
+    laid out as it would be alone in this container's place; every later
+    child is drawn over it, placed in the base's box by `.place(...)` at
+    this container's `inset`, and takes every tap in its own box."""
+    handle = _widget(wire.KIND_LAYERS)
+    _set_grow(handle, grow)
+    _set_inset(handle, inset)
     return _Container(handle)
 
 

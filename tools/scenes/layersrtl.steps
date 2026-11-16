@@ -1,0 +1,10 @@
+# The layers scene under KAYA_LOCALE=ar-EG (docs/layering-plan.md LY3, LY13):
+# leading and trailing follow the layout, so the trailing corner is the left.
+# No tap here: on the linux x11 leg a right-to-left window sits at a negative
+# screen x (docs/traps.md), and the taps are layers.steps' own.
+expect_locale ar-EG
+expect_direction rtl
+expect_title "layers"
+expect_placed row@badge "top_trailing 8"
+expect_placed button@share "bottom_trailing 8"
+expect_placed row@flat "top_leading 8"

@@ -136,6 +136,9 @@ use crate::scene::Scene;
 enum NativeWidget {
     Column(Grid),
     Row(Grid),
+    /// docs/layering-plan.md: one cell, the base first; `host` follows the
+    /// base's size and holds each overlay in its own transparent-backed grid.
+    Layers { grid: Grid, host: Grid },
     /// `switch` is the `role switch` lowering (docs/tasks-s2-plan.md T1): a
     /// ToggleSwitch that REPLACES the CheckBox in the tree, with the caption
     /// moved into its Header. The CheckBox stays in `core.checkboxes`, which
@@ -230,6 +233,7 @@ impl NativeWidget {
         match self {
             NativeWidget::Column(panel) => panel.cast(),
             NativeWidget::Row(panel) => panel.cast(),
+            NativeWidget::Layers { grid, .. } => grid.cast(),
             // THE OUTER CONTROL ONCE A ROLE SWAPPED IT (T1, T3): what the
             // parent lays out, what UIA describes and what the a11y props
             // land on. The registry keeps the inner one — see the variants.
@@ -605,6 +609,17 @@ struct CoreState {
     /// docs/looks-plan.md §3.1, creation-ordered (`icon#N`), the ids beside them.
     icons: Vec<Grid>,
     icon_ids: Vec<u64>,
+    /// docs/layering-plan.md: the layers containers and their ids, each one's
+    /// children in order, each overlay's place, fill and hit-test wrapper,
+    /// each container's inset pair, and the fade panels.
+    layers: Vec<Grid>,
+    layer_ids: Vec<u64>,
+    layer_children: HashMap<u64, Vec<u64>>,
+    layer_places: HashMap<u64, i64>,
+    layer_fills: HashMap<u64, bool>,
+    layer_wrappers: HashMap<u64, Grid>,
+    layer_insets: HashMap<u64, (f64, Option<f64>)>,
+    fade_panels: std::collections::HashSet<u64>,
     grids: Vec<Grid>,
     textareas: Vec<RichEditBox>,
     textarea_ids: Vec<u64>,
@@ -2994,7 +3009,17 @@ fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Resu
     let pad = container_padding(core, id);
     let sides = container_padding_x(core, id);
     let reach = list_row_reach(core, id);
-    let pad = if reach > 0.0 {
+    let pad = if core.fade_panels.contains(&id.0) {
+        // The fade form's band clears the side facing into the picture (LY9).
+        let mut t = Thickness { Left: sides, Top: pad, Right: sides, Bottom: pad };
+        match fade_edge(core.layer_places.get(&id.0).copied().unwrap_or(8)) {
+            2 => t.Bottom += FADE_BAND,
+            4 => t.Right += FADE_BAND,
+            6 => t.Left += FADE_BAND,
+            _ => t.Top += FADE_BAND,
+        }
+        t
+    } else if reach > 0.0 {
         Thickness { Left: sides, Top: reach, Right: sides, Bottom: reach }
     } else if in_declared_table(core, id) {
         table_row_padding(core, id, pad)
@@ -3015,6 +3040,158 @@ fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Resu
         },
         _ => Ok(()),
     }
+}
+
+/// THE FADE FORM (docs/layering-plan.md LY9): the band over which the scrim
+/// clears toward the picture's interior, and the black it reaches under the
+/// text (0x99 is 0.6); check-verbs' LAYERS clause holds the pair.
+const FADE_BAND: f64 = 32.0;
+const FADE_SCRIM_ALPHA: u8 = 0x99;
+
+/// The edge a fade panel darkens toward, the core's fade_edge.
+fn fade_edge(place: i64) -> i64 {
+    match place {
+        1..=3 => 2,
+        4 => 4,
+        6 => 6,
+        _ => 8,
+    }
+}
+
+/// The scrim a fade panel wears: clear at the band's inner edge to the
+/// scrim's black FADE_BAND in, then flat; a leading or top panel's brush is
+/// the trailing or bottom one mirrored, and FlowDirection mirrors it again
+/// in a right-to-left layout.
+fn paint_fade(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
+    let Some(NativeWidget::Column(panel) | NativeWidget::Row(panel)) = core.widgets.get(&id) else { return Ok(()) };
+    let edge = fade_edge(core.layer_places.get(&id.0).copied().unwrap_or(8));
+    let (end, flip) = match edge {
+        2 => ("0,32", "<ScaleTransform ScaleY=\"-1\" CenterY=\"0.5\"/>"),
+        4 => ("32,0", "<ScaleTransform ScaleX=\"-1\" CenterX=\"0.5\"/>"),
+        6 => ("32,0", ""),
+        _ => ("0,32", ""),
+    };
+    let relative = if flip.is_empty() { String::new() } else { format!("<LinearGradientBrush.RelativeTransform>{flip}</LinearGradientBrush.RelativeTransform>") };
+    let brush: Brush = XamlReader::Load(&HSTRING::from(format!(
+        "<LinearGradientBrush xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
+         MappingMode=\"Absolute\" StartPoint=\"0,0\" EndPoint=\"{end}\">{relative}\
+         <GradientStop Offset=\"0\" Color=\"#00000000\"/><GradientStop Offset=\"1\" Color=\"#{FADE_SCRIM_ALPHA:02X}000000\"/>\
+         </LinearGradientBrush>"
+    )))?
+    .cast()?;
+    panel.SetBackground(&brush)?;
+    panel.SetCornerRadius(bindings::Microsoft::UI::Xaml::CornerRadius { TopLeft: 0.0, TopRight: 0.0, BottomRight: 0.0, BottomLeft: 0.0 })?;
+    panel.SetRequestedTheme(ElementTheme::Dark)?;
+    stamp_container_padding(core, id)
+}
+
+/// The props a layers container holds over its children (docs/layering-plan.md
+/// LY3): true when the write is spent here.
+fn layers_prop(core: &mut CoreState, id: WidgetId, prop: Prop, value: &Value) -> windows_core::Result<bool> {
+    let parent = core
+        .layer_children
+        .iter()
+        .find(|(_, kids)| kids.contains(&id.0))
+        .map(|(p, kids)| (*p, kids.first() == Some(&id.0)));
+    match (prop, value) {
+        (Prop::Place, Value::I64(place)) => {
+            core.layer_places.insert(id.0, *place);
+            if core.fade_panels.contains(&id.0) {
+                paint_fade(core, id)?;
+            }
+            if let Some((p, _)) = parent {
+                layers_seat(core, p)?;
+            }
+            Ok(true)
+        }
+        (Prop::Filled, Value::I64(tint)) if *tint == i64::from(crate::wire::TINT_OVERLAY_FADE) => {
+            core.fade_panels.insert(id.0);
+            core.filled.insert(id, *tint);
+            paint_fade(core, id)?;
+            if let Some((p, false)) = parent {
+                layers_seat(core, p)?;
+            }
+            Ok(true)
+        }
+        (Prop::Inset, Value::F64(pad)) if core.layer_children.contains_key(&id.0) => {
+            core.layer_insets.entry(id.0).or_insert((0.0, None)).0 = *pad;
+            layers_seat(core, id.0)?;
+            Ok(true)
+        }
+        (Prop::InsetX, Value::F64(pad)) if core.layer_children.contains_key(&id.0) => {
+            core.layer_insets.entry(id.0).or_insert((0.0, None)).1 = Some(*pad);
+            layers_seat(core, id.0)?;
+            Ok(true)
+        }
+        // Held whether or not the widget has joined its layers container yet:
+        // some bindings write a child's props before adding it.
+        (Prop::Fill, Value::Bool(on)) => {
+            core.layer_fills.insert(id.0, *on);
+            match parent {
+                Some((p, false)) => {
+                    layers_seat(core, p)?;
+                    Ok(true)
+                }
+                _ => Ok(false),
+            }
+        }
+        // A hidden overlay takes no events: its wrapper goes with it (LY6).
+        (Prop::Hidden, Value::Bool(on)) => {
+            if let Some(wrapper) = core.layer_wrappers.get(&id.0) {
+                wrapper.SetVisibility(if *on { Visibility::Collapsed } else { Visibility::Visible })?;
+            }
+            Ok(false)
+        }
+        _ => Ok(false),
+    }
+}
+
+/// AN OVERLAY NEVER EXCEEDS THE BOX (LY2): a wrapper whose content wants
+/// more reported its desired size past the host (measured, a veil 11px below
+/// its button), so each wrapper and its overlay are capped at the host's size
+/// less the margins, when the base resizes and when the overlays are seated.
+fn layers_cap(host: &Grid) -> windows_core::Result<()> {
+    let (w, h) = (host.Width()?, host.Height()?);
+    let kids = host.Children()?;
+    for i in 0..kids.Size()? {
+        let fe: FrameworkElement = kids.GetAt(i)?.cast()?;
+        let m = fe.Margin()?;
+        let (mw, mh) = ((w - m.Left - m.Right).max(0.0), (h - m.Top - m.Bottom).max(0.0));
+        fe.SetMaxWidth(mw)?;
+        fe.SetMaxHeight(mh)?;
+        let wrapper: Grid = fe.cast()?;
+        let inner = wrapper.Children()?;
+        if inner.Size()? > 0 {
+            let overlay: FrameworkElement = inner.GetAt(0)?.cast()?;
+            overlay.SetMaxWidth(mw)?;
+            overlay.SetMaxHeight(mh)?;
+        }
+    }
+    Ok(())
+}
+
+/// Each overlay's wrapper aligned by its place, at the container's inset,
+/// stretched for fill or along a fade panel's edge (LY3, LY9).
+fn layers_seat(core: &CoreState, layers: u64) -> windows_core::Result<()> {
+    use bindings::Microsoft::UI::Xaml::{HorizontalAlignment as H, VerticalAlignment as V};
+    let (inset, inset_x) = core.layer_insets.get(&layers).copied().unwrap_or((0.0, None));
+    let sides = inset_x.unwrap_or(inset);
+    for kid in core.layer_children[&layers].iter().skip(1) {
+        let Some(wrapper) = core.layer_wrappers.get(kid) else { continue };
+        let place = core.layer_places.get(kid).copied().unwrap_or(crate::wire::PLACE_CENTER);
+        let fill = core.layer_fills.get(kid).copied().unwrap_or(false);
+        let edge = core.fade_panels.contains(kid).then(|| fade_edge(place));
+        let wide = fill || matches!(edge, Some(2 | 8));
+        let tall = fill || matches!(edge, Some(4 | 6));
+        let (col, row) = ((place - 1) % 3, (place - 1) / 3);
+        wrapper.SetHorizontalAlignment(if wide { H::Stretch } else { [H::Left, H::Center, H::Right][col as usize] })?;
+        wrapper.SetVerticalAlignment(if tall { V::Stretch } else { [V::Top, V::Center, V::Bottom][row as usize] })?;
+        wrapper.SetMargin(Thickness { Left: sides, Top: inset, Right: sides, Bottom: inset })?;
+    }
+    if let Some(NativeWidget::Layers { host, .. }) = core.widgets.get(&WidgetId(layers)) {
+        layers_cap(host)?;
+    }
+    Ok(())
 }
 
 /// A DECLARED TABLE'S ROW PUTS THE CARD'S INTERIOR BACK AS ITS OWN SIDE
@@ -17753,7 +17930,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.images.push(image.clone());
                     NativeWidget::Image { host, image }
                 }
-                WidgetKind::Layers => crate::depth_stub("layers"),
+                WidgetKind::Layers => {
+                    let grid = Grid::new()?;
+                    let host = Grid::new()?;
+                    host.SetWidth(0.0)?;
+                    host.SetHeight(0.0)?;
+                    grid.Children()?.Append(&host)?;
+                    core.layers.push(grid.clone());
+                    core.layer_ids.push(id.0);
+                    core.layer_children.insert(id.0, Vec::new());
+                    NativeWidget::Layers { grid, host }
+                }
                 WidgetKind::Icon => {
                     // docs/looks-plan.md §3.1: the symbol arrives as a SetProp
                     // and the glyph is rebuilt into the host from the three.
@@ -18966,6 +19153,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             if let (Prop::Text | Prop::A11yLabel | Prop::Help, Value::Str(s)) = (prop, &value) {
                 record_tip(core, id, prop, s);
             }
+            if layers_prop(core, id, prop, &value)? {
+                return Ok(());
+            }
             // Grow is handled ahead of the per-kind table: it is the one
             // kind-agnostic prop, and its effect lands on the parent's
             // track definitions rather than on the widget itself.
@@ -20138,6 +20328,38 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // BEFORE THE BRANCHES, every one of which returns early for a
             // container this backend does not lower to a panel.
             core.tree_parent.insert(child.0, parent.0);
+            if let Some(NativeWidget::Layers { grid, host }) = core.widgets.get(&parent) {
+                let (grid, host) = (grid.clone(), host.clone());
+                let element = core.widgets.get(&child).expect("scene validated the id").element()?;
+                let kids = core.layer_children.get_mut(&parent.0).expect("layers created");
+                kids.push(child.0);
+                if kids.len() == 1 {
+                    grid.Children()?.InsertAt(0, &element)?;
+                    let base: FrameworkElement = element.cast()?;
+                    let held = host.clone();
+                    let follow = move |base: &FrameworkElement| -> windows_core::Result<()> {
+                        let (w, h) = (base.ActualWidth()?, base.ActualHeight()?);
+                        held.SetWidth(w)?;
+                        held.SetHeight(h)?;
+                        layers_cap(&held)?;
+                        let clip = bindings::Microsoft::UI::Xaml::Media::RectangleGeometry::new()?;
+                        clip.SetRect(bindings::Windows::Foundation::Rect { X: 0.0, Y: 0.0, Width: w as f32, Height: h as f32 })?;
+                        held.SetClip(&clip)
+                    };
+                    let watched = base.clone();
+                    base.SizeChanged(&bindings::Microsoft::UI::Xaml::SizeChangedEventHandler::new(move |_, _| follow(&watched)))?;
+                } else {
+                    // LY6: the transparent ground makes the overlay's whole box
+                    // take the pointer, where a null one passes it through.
+                    let wrapper = Grid::new()?;
+                    wrapper.SetBackground(&SolidColorBrush::CreateInstanceWithColor(bindings::Windows::UI::Color { A: 0, R: 0, G: 0, B: 0 })?)?;
+                    wrapper.Children()?.Append(&element)?;
+                    host.Children()?.Append(&wrapper)?;
+                    core.layer_wrappers.insert(child.0, wrapper);
+                }
+                layers_seat(core, parent.0)?;
+                return Ok(());
+            }
             // docs/looks-plan.md §3.2: a child joining a colour fill takes its
             // text colour now, its element already made and not yet parented.
             if core.filled.get(&parent) == Some(&i64::from(crate::wire::TINT_COLOR)) {
@@ -22761,6 +22983,14 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             expander_ids: Vec::new(),
             icons: Vec::new(),
             icon_ids: Vec::new(),
+            layers: Vec::new(),
+            layer_ids: Vec::new(),
+            layer_children: HashMap::new(),
+            layer_places: HashMap::new(),
+            layer_fills: HashMap::new(),
+            layer_wrappers: HashMap::new(),
+            layer_insets: HashMap::new(),
+            fade_panels: std::collections::HashSet::new(),
             expander_hints: HashMap::new(),
             expander_named: std::collections::HashSet::new(),
             grids: Vec::new(),
@@ -24153,7 +24383,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Segmented => id_of!(core.segmenteds, NativeWidget::Segmented(bar), bar),
         K::Expander => core.expander_ids.get(i).copied(),
         K::Icon => core.icon_ids.get(i).copied(),
-        K::Layers => None,
+        K::Layers => core.layer_ids.get(i).copied(),
         K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
@@ -24497,7 +24727,7 @@ fn target_element(
         K::Segmented => nth!(core.segmenteds),
         K::Expander => nth!(core.expanders),
         K::Icon => nth!(core.icons),
-        K::Layers => return Ok(None),
+        K::Layers => nth!(core.layers),
         K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
@@ -24607,7 +24837,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Segmented => ids!(core.segmenteds, NativeWidget::Segmented(bar), bar),
         K::Expander => core.expander_ids.clone(),
         K::Icon => core.icon_ids.clone(),
-        K::Layers => Vec::new(),
+        K::Layers => core.layer_ids.clone(),
         K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
@@ -28930,7 +29160,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Segmented => find(core, K::Segmented, &core.segmenteds, &id),
                 K::Expander => find(core, K::Expander, &core.expanders, &id),
                 K::Icon => find(core, K::Icon, &core.icons, &id),
-                K::Layers => None,
+                K::Layers => find(core, K::Layers, &core.layers, &id),
                 K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),
@@ -29202,6 +29432,127 @@ impl crate::harness::Stage for WinUiStage {
     fn rest_pointer(&self, t: crate::harness::Target) -> Result<(), String> {
         Self::place_cursor(t, "rest_pointer", [(12, 6), (6, 3)]);
         Ok(())
+    }
+    fn placed(&self, t: crate::harness::Target) -> Result<(crate::harness::Frame, crate::harness::Frame, bool), String> {
+        Self::on_ui_read(move |core| Ok((|| -> Result<(crate::harness::Frame, crate::harness::Frame, bool), String> {
+            let id = target_widget_id(core, t).ok_or("no such target")?;
+            let kids = core
+                .layer_children
+                .values()
+                .find(|kids| kids.contains(&id))
+                .ok_or("not an overlay of a layers container")?;
+            if kids.first() == Some(&id) {
+                return Err("the base of its layers container, not an overlay".to_owned());
+            }
+            let frame = |id: u64| -> Option<crate::harness::Frame> {
+                let element = core.widgets.get(&WidgetId(id))?.element().ok()?;
+                let fe: FrameworkElement = element.cast().ok()?;
+                let to = element.TransformToVisual(None::<&UIElement>).ok()?;
+                let a = to.TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 }).ok()?;
+                let b = to
+                    .TransformPoint(bindings::Windows::Foundation::Point {
+                        X: fe.ActualWidth().ok()? as f32,
+                        Y: fe.ActualHeight().ok()? as f32,
+                    })
+                    .ok()?;
+                let (x0, x1) = (f64::from(a.X.min(b.X)), f64::from(a.X.max(b.X)));
+                let (y0, y1) = (f64::from(a.Y.min(b.Y)), f64::from(a.Y.max(b.Y)));
+                Some((x0, y0, x1 - x0, y1 - y0))
+            };
+            let o = frame(id).ok_or("the overlay has no laid-out box")?;
+            let b = frame(kids[0]).ok_or("the base has no laid-out box")?;
+            // The overlay AS DRAWN, inside the host's clip: a WinUI element
+            // keeps the height its content wants past a MaxHeight cap
+            // (measured, a veil 43px tall over a 32px button; docs/traps.md).
+            let (x0, y0) = (o.0.max(b.0), o.1.max(b.1));
+            let (x1, y1) = ((o.0 + o.2).min(b.0 + b.2), (o.1 + o.3).min(b.1 + b.3));
+            let o = (x0, y0, (x1 - x0).max(0.0), (y1 - y0).max(0.0));
+            let element = core.widgets.get(&WidgetId(id)).ok_or("gone")?.element().map_err(|e| e.to_string())?;
+            let fe: FrameworkElement = element.cast().map_err(|e| e.to_string())?;
+            let rtl = fe.FlowDirection().map_err(|e| e.to_string())? == bindings::Microsoft::UI::Xaml::FlowDirection::RightToLeft;
+            Ok((o, b, rtl))
+        })()))
+        .unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))
+    }
+    fn tap_at(&self, t: crate::harness::Target, place: &str) -> Result<(), String> {
+        let place = place.to_owned();
+        Self::drive_pointer();
+        Self::foreground_guest("tap_at");
+        let aim = Self::on_ui_read(move |core| {
+            let Some(id) = target_widget_id(core, t) else { return Ok(None) };
+            let rtl = core
+                .widgets
+                .get(&WidgetId(id))
+                .and_then(|w| w.element().ok())
+                .and_then(|e| e.cast::<FrameworkElement>().ok())
+                .and_then(|fe| fe.FlowDirection().ok())
+                == Some(bindings::Microsoft::UI::Xaml::FlowDirection::RightToLeft);
+            Ok(widget_screen_rect(core, id).and_then(|f| crate::harness::place_point(f, &place, rtl)))
+        });
+        let Ok(Some((x, y))) = aim else {
+            return Err(format!("no laid-out box ({aim:?})"));
+        };
+        let (cx, cy) = (x as i32, y as i32);
+        const MOVE: u32 = 0x0001;
+        const LEFTDOWN: u32 = 0x0002;
+        const LEFTUP: u32 = 0x0004;
+        const ABSOLUTE: u32 = 0x8000;
+        let width = i64::from(unsafe { GetSystemMetrics(0) }.max(2) - 1);
+        let height = i64::from(unsafe { GetSystemMetrics(1) }.max(2) - 1);
+        unsafe {
+            mouse_event(MOVE | ABSOLUTE, ((i64::from(cx) * 65535) / width) as u32, ((i64::from(cy) * 65535) / height) as u32, 0, 0);
+            SetCursorPos(cx, cy);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        unsafe { mouse_event(LEFTDOWN, 0, 0, 0, 0) };
+        std::thread::sleep(std::time::Duration::from_millis(80));
+        unsafe { mouse_event(LEFTUP, 0, 0, 0, 0) };
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        Ok(())
+    }
+    fn ax_order(&self, targets: &[crate::harness::Target]) -> Result<Vec<String>, String> {
+        let targets = targets.to_vec();
+        Self::on_ui_read(move |core| Ok((|| -> Result<Vec<String>, String> {
+            use bindings::Microsoft::UI::Xaml::Automation::Peers::{AutomationPeer, FrameworkElementAutomationPeer};
+            let mut want: Vec<(String, AutomationPeer)> = Vec::new();
+            for t in &targets {
+                let id = target_widget_id(core, *t).ok_or_else(|| format!("no such target {}", crate::harness::target_spec(t)))?;
+                let element = core.widgets.get(&WidgetId(id)).ok_or("gone")?.element().map_err(|e| e.to_string())?;
+                let peer = peer_within(&element, 4).map_err(|e| e.to_string())?.ok_or_else(|| {
+                    format!("{} publishes no automation peer", crate::harness::target_spec(t))
+                })?;
+                want.push((crate::harness::target_spec(t), peer.cast().map_err(|e| e.to_string())?));
+            }
+            // The window content is a panel, which publishes no peer, so the
+            // walk is the element tree in child order, each element's own peer
+            // compared: the order UIA's control view lists a panel's children.
+            let content = core.window.Content().map_err(|e| e.to_string())?;
+            let mut order: Vec<String> = Vec::new();
+            fn walk(e: &UIElement, want: &[(String, AutomationPeer)], order: &mut Vec<String>, depth: u32) {
+                use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+                if depth > 64 {
+                    return;
+                }
+                if let Ok(peer) = FrameworkElementAutomationPeer::CreatePeerForElement(e) {
+                    if let Ok(peer) = peer.cast::<AutomationPeer>() {
+                        if let Some((spec, _)) = want.iter().find(|(_, w)| *w == peer) {
+                            if !order.contains(spec) {
+                                order.push(spec.clone());
+                            }
+                        }
+                    }
+                }
+                let n = VisualTreeHelper::GetChildrenCount(e).unwrap_or(0);
+                for i in 0..n {
+                    if let Ok(child) = VisualTreeHelper::GetChild(e, i).and_then(|c| c.cast::<UIElement>()) {
+                        walk(&child, want, order, depth + 1);
+                    }
+                }
+            }
+            walk(&content, &want, &mut order, 0);
+            Ok(order)
+        })()))
+        .unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))
     }
     fn pointer_down(&self, t: crate::harness::Target) -> Result<(), String> {
         Self::drive_pointer();

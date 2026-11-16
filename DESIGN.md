@@ -1185,6 +1185,22 @@ Both are now lazy: GtkBox keeps GTK's layout until a child in that box
 actually grows, and VStack/HStack stay VStack/HStack until one of their
 children does.
 
+LAYERS (docs/layering-plan.md, BUILT 2026-11-16): the one container whose
+children share a box. The first child is the BASE, laid out as it would be
+alone in the container's place (the container's `grow`, `fill` and
+`max_width` act through it), and the box is the frame the base drew (a video
+or surface base's picture, not its track); every later child is an OVERLAY
+placed in that box by `place` (nine positions, leading and trailing
+mirrored, `center` from the core when unset) at the container's `inset`,
+offered at most the box less the inset and clipped to it, `fill` spanning
+it. Declaration order is z-order; an overlay takes every pointer event in its
+own box; assistive technology reads the base, then the overlays as declared,
+pinned on every platform. Text over a picture base sits in a `filled`
+container (Y3 reaches overlays). `bleed` is the base's alone and no child of
+layers takes `grow`. SwiftUI lowers it to the base's `.overlay` over a ZStack
+of placed overlays, Compose to a wrap-content Box with matchParentSize hosts,
+GTK to a GtkOverlay, WinUI to a one-cell Grid with a host sized to the base.
+
 The known normalization worklist:
 
 - `hidden` means collapsed (occupies no space) everywhere. GTK collapses,

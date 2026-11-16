@@ -943,6 +943,13 @@ export class Handle {
     return this;
   }
 
+  /** Where this overlay sits in its layers container's box
+   * (docs/layering-plan.md LY3). Chains. */
+  place(place: PlaceValue | PlaceName): this {
+    records().push(wire.tx_set_place(this.id, placeValue(place)));
+    return this;
+  }
+
   /** This textarea carries ATTRIBUTE RUNS (docs/rich-text-plan.md R1):
    * setDocument, applyEdit, format, and the onEdit/onFormat deltas. Off,
    * none of that exists and the widget is the plain uncontrolled field.
@@ -4757,15 +4764,41 @@ export const Tint = Object.freeze({
   CRITICAL: wire.TINT_CRITICAL,
   NEUTRAL: wire.TINT_NEUTRAL,
   OVERLAY: wire.TINT_OVERLAY,
+  OVERLAY_FADE: wire.TINT_OVERLAY_FADE,
 });
 export type TintValue = (typeof Tint)[keyof typeof Tint];
-export type TintName = "none" | "accent" | "success" | "warning" | "critical" | "neutral" | "overlay";
+export type TintName = "none" | "accent" | "success" | "warning" | "critical" | "neutral" | "overlay" | "overlay_fade";
 export type TintToken = typeof Tint;
 
 /** An image's clip (docs/styling-pass-plan.md Y6): ROUNDED is the
  * platform's own medium corner, CIRCLE the inscribed circle, covering. */
 export const Shape = Object.freeze({ RECT: wire.SHAPE_RECT, ROUNDED: wire.SHAPE_ROUNDED, CIRCLE: wire.SHAPE_CIRCLE });
 export type ShapeValue = (typeof Shape)[keyof typeof Shape];
+
+/** Where an overlay of a layers container sits in its base's box
+ * (docs/layering-plan.md LY3); leading and trailing follow the layout's
+ * direction. */
+export const Place = Object.freeze({
+  TOP_LEADING: wire.PLACE_TOP_LEADING,
+  TOP: wire.PLACE_TOP,
+  TOP_TRAILING: wire.PLACE_TOP_TRAILING,
+  LEADING: wire.PLACE_LEADING,
+  CENTER: wire.PLACE_CENTER,
+  TRAILING: wire.PLACE_TRAILING,
+  BOTTOM_LEADING: wire.PLACE_BOTTOM_LEADING,
+  BOTTOM: wire.PLACE_BOTTOM,
+  BOTTOM_TRAILING: wire.PLACE_BOTTOM_TRAILING,
+});
+export type PlaceValue = (typeof Place)[keyof typeof Place];
+export type PlaceName = Lowercase<keyof typeof Place>;
+function placeValue(place: PlaceValue | PlaceName): number {
+  if (typeof place === "number" && Object.values(Place).includes(place)) return place;
+  const named = typeof place === "string" ? (Place as Record<string, number>)[place.toUpperCase()] : undefined;
+  if (named === undefined) {
+    throw new TypeError(`kaya: an overlay's place is one of ${Object.keys(Place).map((k) => k.toLowerCase()).join(", ")}, not ${String(place)} — kaya.Place.BOTTOM_TRAILING`);
+  }
+  return named;
+}
 export type ShapeName = "rect" | "rounded" | "circle";
 const SHAPE_NAMES: Record<string, number> = Object.fromEntries(Object.entries(Shape).map(([k, v]) => [k.toLowerCase(), v]));
 const TINT_NAMES: Record<string, number> = Object.fromEntries(Object.entries(Tint).map(([k, v]) => [k.toLowerCase(), v]));
@@ -5214,6 +5247,19 @@ export function column<T = void>(optsOrBody?: ColumnOptions | ((column: Widget) 
   const handle = widget(wire.KIND_COLUMN);
   setLayout(handle, opts);
   setSkin(handle, opts);
+  return new Container(handle).run(run);
+}
+
+export type LayersOptions = GrowOption & { inset?: Inset };
+
+/** LAYERS (docs/layering-plan.md): the body's first child is the base, laid
+ * out as it would be alone in this container's place; every later child is
+ * drawn over it, placed in the base's box by `.place(...)` at this
+ * container's inset, and takes every tap in its own box. */
+export function layers<T = void>(optsOrBody?: LayersOptions | ((layers: Widget) => T), body?: (layers: Widget) => T): T {
+  const [opts, run] = optsAndOptionalBody<LayersOptions, Widget, T>(optsOrBody, body);
+  const handle = widget(wire.KIND_LAYERS);
+  setLayout(handle, opts);
   return new Container(handle).run(run);
 }
 

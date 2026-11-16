@@ -2817,6 +2817,63 @@ for _lang, _rel, _templates in REVEAL_SURFACES:
         _rv_cuts += 1
 print(f"check-sugar-surface: reveal cuts watched red {_rv_cuts}/{_rv_want}")
 
+# --- PLACE, live zone and its vocabulary, in all nine (docs/layering-plan.md
+# LY12): the per-child setter, and the nine places spelled. The `layers`
+# constructor is the kind census above; the template zone's is tpl-surfaces'.
+PLACE_SURFACES = [
+    ("rust", "crates/kaya/src/app.rs",
+     [r"pub fn {0}\(self, place: Place\) -> Self",
+      r"pub enum Place \{{[^}}]*BottomTrailing"]),
+    ("python", "bindings/python/kaya/__init__.py",
+     [r"^    def {0}\(self: H, place: Place \| str\) -> H:",
+      r"BOTTOM_TRAILING = wire\.PLACE_BOTTOM_TRAILING"]),
+    ("go", "bindings/go/app.go",
+     [r"^func \(w Widget\) {1}\(place Place\) Widget",
+      r"^func \(tx \*Tx\) Set{1}\(w Widget, place Place\)"]),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     [r"public void Set{1}\(Widget w, Place place\)",
+      r"BottomTrailing = KayaWire\.PlaceBottomTrailing"]),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     [r"public Widget {0}\(Place place\)",
+      r"BOTTOM_TRAILING\(KayaWire\.PLACE_BOTTOM_TRAILING\)"]),
+    ("swift", "bindings/swift/KayaApp.swift",
+     [r"public func set{1}\(_ w: KayaWidget, _ place: KayaPlace\)",
+      r"case bottomTrailing = 9"]),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     [r"^  {1} :: Place -> Attr c", r"\| PlaceBottomTrailing"]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     [r"^let set_{0} \(Widget id\) p =",
+      r"\| Bottom_trailing -> Kaya_wire\.place_bottom_trailing"]),
+    ("js", "bindings/js/kaya/index.ts",
+     [r"^  {0}\(place: PlaceValue \| PlaceName\): this",
+      r"BOTTOM_TRAILING: wire\.PLACE_BOTTOM_TRAILING"]),
+]
+
+
+def check_place(fake=None, text_for=None):
+    out = []
+    for lang, rel, templates in PLACE_SURFACES:
+        text = text_for(lang, rel) if text_for else read_rel(rel)
+        names = fake or ("place", "Place")
+        for template in templates:
+            pat = template.format(*names)
+            if not re.search(pat, text, re.M):
+                out.append(f"check-sugar-surface: {lang}'s LIVE zone cannot spell "
+                           f"an overlay's `place` (wanted /{pat}/ in {rel})")
+    return out
+
+
+for _line in check_place():
+    print(_line)
+    status = 1
+_pl_named = sum(1 for _, _, ts in PLACE_SURFACES for t in ts
+                if "{" in t.replace("{{", "").replace("}}", ""))
+_pl_fake = check_place(("kayaFakePlace", "KayaFakePlace"))
+print(f"check-sugar-surface: fake place spellings fired {len(_pl_fake)}/{_pl_named}")
+if len(_pl_fake) != _pl_named:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(_pl_fake)}/{_pl_named} place "
+                  f"patterns fired for names that exist nowhere)")
+
 # --- `hidden`, live zone, in all nine (docs/hidden-plan.md): a constant and
 # a signal on any widget. tpl-surfaces holds the template zone's row field.
 HIDDEN_SURFACES = [

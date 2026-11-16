@@ -580,7 +580,22 @@ val image_phase_of_packed : int64 -> Image_phase.t
 
 (* What a filled container's surface means (docs/tints-plan.md T1). *)
 module Tint : sig
-  type t = None | Accent | Success | Warning | Critical | Neutral | Overlay
+  type t = None | Accent | Success | Warning | Critical | Neutral | Overlay | Overlay_fade
+end
+
+(* Where an overlay of a layers container sits in its base's box
+   (docs/layering-plan.md LY3). *)
+module Place : sig
+  type t =
+    | Top_leading
+    | Top
+    | Top_trailing
+    | Leading
+    | Center
+    | Trailing
+    | Bottom_leading
+    | Bottom
+    | Bottom_trailing
 end
 
 (* A [Tint.t] row field's wire form, for the ppx's generated code. *)
@@ -1734,6 +1749,21 @@ val bind_filled_color : widget -> color signal -> unit
 val set_ground_image : widget -> bytes -> unit
 val bind_ground_image : widget -> bytes signal -> unit
 val set_shape : widget -> shape -> unit
+val set_place : widget -> Place.t -> unit
+val placed : Place.t -> (unit -> widget) -> unit -> widget
+
+(* LAYERS (docs/layering-plan.md): the first child is the base; every later
+   child is drawn over it, placed by [placed] at this container's inset. *)
+val layers :
+  ?grow:float ->
+  ?fill:bool ->
+  ?a11y_id:string ->
+  ?a11y_label:string ->
+  ?inset:float ->
+  ?inset_pair:float * float ->
+  (unit -> widget) list ->
+  unit ->
+  widget
 val set_tint : widget -> Tint.t -> unit
 val bind_tint : widget -> Tint.t signal -> unit
 val set_selected : widget -> bool -> unit
@@ -2550,6 +2580,19 @@ module Tpl : sig
   val set_ground_image : node -> bytes -> unit
   val bind_ground_image_field : ?level:int -> node -> ('e, bytes) field -> unit
   val set_shape : node -> shape -> unit
+  val set_place : node -> Place.t -> unit
+  val placed : Place.t -> (unit -> node) -> unit -> node
+
+  val layers :
+    ?grow:float ->
+    ?fill:bool ->
+    ?a11y_id:string ->
+    ?a11y_label:string ->
+    ?inset:float ->
+    ?inset_pair:float * float ->
+    (unit -> node) list ->
+    unit ->
+    node
   val set_tint : node -> Tint.t -> unit
 
   (* A stamped label's most lines, the rest truncated with the platform's

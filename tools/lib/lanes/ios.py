@@ -51,7 +51,7 @@ SWIFT_ENTRIES = [
     # Network images (docs/network-images-plan.md §6).
     "netimage", "netimage_http",
     # The skin (docs/styling-pass-plan.md §5).
-    "grounds", "shapes", "cards", "tracks", "dock",
+    "grounds", "shapes", "cards", "tracks", "dock", "layers",
     # The code surface (docs/code-surface-plan.md §5).
     "codesurface",
     # The font picker (docs/font-picker-plan.md §7).
@@ -81,7 +81,7 @@ GO_SCENES = [
     "toast",
     "safearea",
     "netimage", "netimage_http",
-    "grounds", "shapes", "cards", "tracks", "dock",
+    "grounds", "shapes", "cards", "tracks", "dock", "layers",
     "codesurface", "fontpick",
 ]
 
@@ -159,6 +159,8 @@ RUST_SCENES = [
     "tints",
     # A symbol on its own (docs/looks-plan.md §3.1).
     "icons",
+    # Views over views (docs/layering-plan.md LY13), and in Arabic.
+    "layers", "layersrtl",
     # The submit gesture on the three text kinds (docs/submit-plan.md §5).
     "submit",
     # The secure field (docs/secure-entry-plan.md §5).
@@ -532,7 +534,7 @@ RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks", "richdocax": "ri
                 "codesurfacebig": "codesurface",
                 "clock24": "format", "scrollrtl": "scroll",
                 "numberfieldde": "numberfield", "numberfieldar": "numberfield",
-                "rangertl": "range",
+                "rangertl": "range", "layersrtl": "layers",
                 "media_formats": "media", "media_delivery": "media",
                 "media_session": "media", "media_tracks": "media",
                 "media_feed": "media", "media_picked": "media",
@@ -551,7 +553,7 @@ SESSION_SCENES = ("media_formats", "media_delivery", "media_session",
 # (docs/compliance-plan.md §4); the reads ask the platform, never this.
 SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
                 "scrollrtl": "ar-EG", "numberfieldde": "de-DE", "numberfieldar": "ar-EG",
-                "rangertl": "ar-EG"}
+                "rangertl": "ar-EG", "layersrtl": "ar-EG"}
 
 # The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
 # window's content size category nearest the factor.

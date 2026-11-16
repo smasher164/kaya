@@ -164,6 +164,9 @@ public enum KayaTint: Int64, Sendable {
     case critical = 4
     case neutral = 5
     case overlay = 6
+    /// The overlay panel as a scrim, kaya choosing its darkness
+    /// (docs/layering-plan.md LY9).
+    case overlayFade = 8
 }
 
 /// A row's tint as the wire carries it.
@@ -187,6 +190,21 @@ public enum KayaShape: Int64, Sendable {
     case rect = 0
     case rounded = 1
     case circle = 2
+}
+
+/// Where an overlay of a layers container sits in its base's box
+/// (docs/layering-plan.md LY3); leading and trailing follow the layout's
+/// direction.
+public enum KayaPlace: Int64, Sendable {
+    case topLeading = 1
+    case top = 2
+    case topTrailing = 3
+    case leading = 4
+    case center = 5
+    case trailing = 6
+    case bottomLeading = 7
+    case bottom = 8
+    case bottomTrailing = 9
 }
 
 /// A container's ARRANGEMENT AXIS: identity is the creation kind
@@ -5106,6 +5124,23 @@ public final class KayaAppTx {
         tx.setShape(w.id, shape.rawValue)
     }
 
+    /// Where an overlay sits in its layers container's box (docs/layering-plan.md LY3).
+    public func setPlace(_ w: KayaWidget, _ place: KayaPlace) {
+        tx.setPlace(w.id, place.rawValue)
+    }
+
+    /// LAYERS (docs/layering-plan.md): the body's first child is the base,
+    /// laid out as it would be alone in this container's place; every later
+    /// child is drawn over it, placed in the base's box by `setPlace` at this
+    /// container's inset, and takes every tap in its own box.
+    @discardableResult
+    public func layers<R>(
+        grow: Double? = nil, inset: KayaInset? = nil,
+        _ children: (KayaWidget) throws -> R
+    ) rethrows -> R {
+        try containerOf(UInt32(KAYA_KIND_LAYERS), children, grow: grow, inset: inset)
+    }
+
     /// A label in a tint's standalone colour (docs/styling-pass-plan.md Y7).
     public func setTint(_ w: KayaWidget, _ tint: KayaTint) {
         tx.setTint(w.id, tint.rawValue)
@@ -7673,6 +7708,11 @@ public final class KayaTpl {
         tx.tx.setShape(n.id, shape.rawValue)
     }
 
+    /// A stamped overlay's place (KayaAppTx.setPlace).
+    public func setPlace(_ n: KayaNodeHandle, _ place: KayaPlace) {
+        tx.tx.setPlace(n.id, place.rawValue)
+    }
+
     /// A stamped label's tint (KayaAppTx.setTint): one for every copy, or the
     /// row's own KayaTint field, the playing track's title.
     public func setTint(_ n: KayaNodeHandle, _ tint: KayaTint) {
@@ -8842,6 +8882,11 @@ public final class KayaTpl {
     @discardableResult
     public func row(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
         nodeContainerOf(UInt32(KAYA_KIND_ROW), children)
+    }
+
+    @discardableResult
+    public func layers(@KayaNodeChildren _ children: () -> Void) -> KayaNodeHandle {
+        nodeContainerOf(UInt32(KAYA_KIND_LAYERS), children)
     }
 
     @discardableResult

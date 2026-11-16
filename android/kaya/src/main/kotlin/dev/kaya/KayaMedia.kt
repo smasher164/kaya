@@ -73,6 +73,7 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.ui.compose.PlayerSurface
 import androidx.media3.ui.compose.SURFACE_TYPE_SURFACE_VIEW
+import androidx.media3.ui.compose.SURFACE_TYPE_TEXTURE_VIEW
 import androidx.media3.ui.compose.modifiers.resizeWithContentScale
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -651,7 +652,10 @@ internal fun KayaVideoView(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
     Box(
         modifier = sized.then(kayaBleed(node)).clipToBounds()
             .then(a11y)
-            .semantics {
+            // ONE FOCUS, MERGING: the box holds the surface's own node, so
+            // unmerged it is no leaf and TalkBack's traversal skipped it
+            // (measured with expect_ax_order, docs/traps.md).
+            .semantics(mergeDescendants = true) {
                 role = Role.Image
                 customActions = actions
             }
@@ -686,7 +690,10 @@ internal fun KayaVideoView(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
                 modifier = Modifier.fillMaxSize()
                     .resizeWithContentScale(scale, Size(pw.toFloat(), ph.toFloat()))
                     .clearAndSetSemantics {},
-                surfaceType = SURFACE_TYPE_SURFACE_VIEW,
+                // LY7 (docs/layering-plan.md): an overlay video draws in the
+                // window, so any order of videos composes; the base keeps its
+                // SurfaceView. check-verbs' LAYERS clause holds the choice.
+                surfaceType = if (kayaInOverlay(node)) SURFACE_TYPE_TEXTURE_VIEW else SURFACE_TYPE_SURFACE_VIEW,
             )
             SideEffect { kayaVideoSurfaces[node.id] = p.id }
         } else {

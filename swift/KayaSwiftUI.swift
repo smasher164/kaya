@@ -263,6 +263,7 @@ private let kindSegmented: UInt32 = 25
 private let kindExpander: UInt32 = 26
 private let kindSurface: UInt32 = 27
 private let kindIcon: UInt32 = 28
+private let kindLayers: UInt32 = 29
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -280,6 +281,8 @@ private let propRole: UInt32 = 16
 private let propInset: UInt32 = 17
 private let propInsetX: UInt32 = 76
 private let propTitled: UInt32 = 77
+/// docs/layering-plan.md LY3: an overlay's seat in its base's box, a fade panel's edge.
+private let propPlace: UInt32 = 78
 /// The pickers' slots (docs/datetime-plan.md D2): packed-decimal I64s —
 /// YYYYMMDD for the three dates, HHMM for the time — and a minute count.
 private let propDate: UInt32 = 19
@@ -433,6 +436,7 @@ private let tintNone: Int64 = 0
 private let tintOverlay: Int64 = 6
 /// docs/looks-plan.md §3.2: the fill is the container's `color`.
 private let tintColor: Int64 = 7
+private let tintOverlayFade: Int64 = 8
 // THE RICH TEXT VOCABULARIES, hand-copied APPEND-ONLY wire values held
 // against the core's by tools/check-verbs.py (docs/rich-text-plan.md R3).
 // An attribute NAME rides the wire as a string; these are the numbers the
@@ -1442,8 +1446,13 @@ final class KayaNode: Identifiable {
     /// The prompt an empty text field shows (docs/search-plan.md S3).
     var placeholder = ""
     /// One child's cross-axis stretch (docs/layout-knobs-plan.md §1): nil
-    /// leaves the kind's default to the arm that draws it.
-    var fill: Bool? = nil
+    /// leaves the kind's default to the arm that draws it; a layers base
+    /// takes its container's (LY2).
+    var ownFill: Bool? = nil
+    var fill: Bool? {
+        get { layersHost.map { $0.fill } ?? ownFill }
+        set { ownFill = newValue }
+    }
     /// An auto grid's floor, read when `columns` is 0
     /// (docs/layout-knobs-plan.md §3).
     var minColumnWidth: Double = 0
@@ -1609,8 +1618,17 @@ final class KayaNode: Identifiable {
     /// Grid-only: how many columns children fill row-major.
     var columns = 1
     /// This child's flex weight within its row/column; 0 is natural size.
-    /// See Prop::Grow in protocol.rs.
-    var grow = 0.0
+    /// See Prop::Grow in protocol.rs. A layers base takes its container's
+    /// (docs/layering-plan.md LY2).
+    var ownGrow = 0.0
+    var grow: Double {
+        get { layersHost?.grow ?? ownGrow }
+        set { ownGrow = newValue }
+    }
+    /// The layers container this node is the base of (LY2).
+    @ObservationIgnored weak var layersHost: KayaNode?
+    /// An overlay's place, or the edge a fade panel darkens toward (LY3, LY9).
+    var place: Int64 = 0
     /// This container's inter-child gap on its main axis (default 8).
     var spacing = 8.0
     /// This container's cross-axis child placement (align wire values;
@@ -1683,6 +1701,8 @@ final class KayaNode: Identifiable {
     /// it takes no extent and no gap.
     var vacant: Bool {
         if hidden { return true }
+        // A hidden base leaves the box empty (docs/layering-plan.md LY10).
+        if kind == kindLayers { return children.first?.vacant ?? true }
         // A grown empty box is a spacer, which takes its share on purpose.
         guard kind == kindColumn || kind == kindRow, grow == 0, filled == 0, ground == 0, !insetSet, insetX == nil, !activatable,
             tableColumns.isEmpty
@@ -2088,6 +2108,7 @@ final class KayaSceneModel {
     var segmenteds: [KayaNode] = []
     var expanders: [KayaNode] = []
     var icons: [KayaNode] = []
+    var layers: [KayaNode] = []
     var surfaces: [KayaNode] = []
 
     /// Every kind registry, so a destroyed node leaves all of them at once.
@@ -7483,6 +7504,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindVideo: kayaScene.videos.append(node)
                 case kindSurface: kayaScene.surfaces.append(node)
                 case kindIcon: kayaScene.icons.append(node)
+                case kindLayers: kayaScene.layers.append(node)
                 case kindSecureField: kayaScene.secureFields.append(node)
                 case kindSegmented: kayaScene.segmenteds.append(node)
                 case kindExpander:
@@ -8127,6 +8149,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.submits = raw[body + 24] != 0
                 case (propTitled, valueBool):
                     kayaScene.nodes[id]!.titled = raw[body + 24] != 0
+                case (propPlace, valueI64):
+                    kayaScene.nodes[id]!.place = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propRevealed, valueBool):
                     kayaRevealSwap(kayaScene.nodes[id]!, raw[body + 24] != 0)
                 case (propRevealable, valueBool):
@@ -8364,6 +8388,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 let child = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
                 kayaScene.nodes[parent]!.children.append(kayaScene.nodes[child]!)
                 kayaScene.parents[child] = parent
+                if kayaScene.nodes[parent]!.kind == kindLayers, kayaScene.nodes[parent]!.children.count == 1 {
+                    kayaScene.nodes[child]!.layersHost = kayaScene.nodes[parent]!
+                }
                 // A choice widget's label children are its OPTIONS, so they
                 // leave the harness's label#N registry (their create arm ran
                 // before this parent was known); otherwise every later label
@@ -9153,7 +9180,7 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     // the way leaves do").
     let isContainer =
         node.kind == kindColumn || node.kind == kindRow || node.kind == kindGrid
-        || node.kind == kindScroll || node.kind == kindLabeled
+        || node.kind == kindScroll || node.kind == kindLabeled || node.kind == kindLayers
     // An activatable container is already ONE element, a button combining its
     // children (docs/styling-pass-plan.md Y4); `.contain` would wrap it in a
     // group that takes the identifier instead.
@@ -9349,6 +9376,35 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
     /// Every attribute read the walks make goes through kayaAxCopy; this
     /// is the count KAYA_AX_COUNT reports per identifier walk.
     private var kayaAxCopyCount = 0
+
+    /// expect_ax_order (docs/layering-plan.md LY13): the identifiers in the
+    /// order VoiceOver walks the tree, navigation order where the element
+    /// publishes one and its children otherwise.
+    func kayaAxOrderRead(_ identifiers: [String]) -> [String] {
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> [String] in
+            _ = kayaAxReadOnMain("")
+            let app = AXUIElementCreateApplication(getpid())
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            var seen: [String] = []
+            func walk(_ element: AXUIElement, _ depth: Int) {
+                if depth > 64 { return }
+                if let ident = kayaAxCopy(element, kAXIdentifierAttribute) as? String,
+                    identifiers.contains(ident), !seen.contains(ident)
+                {
+                    seen.append(ident)
+                }
+                let nav = kayaAxCopy(element, "AXChildrenInNavigationOrder" as String) as? [AXUIElement] ?? []
+                let kids =
+                    depth == 0
+                    ? kayaAxCopy(element, kAXWindowsAttribute) as? [AXUIElement] ?? []
+                    : (nav.isEmpty ? kayaAxCopy(element, kAXChildrenAttribute) as? [AXUIElement] ?? [] : nav)
+                for kid in kids { walk(kid, depth + 1) }
+            }
+            walk(app, 0)
+            return seen
+        }
+    }
 
     private func kayaAxRead(_ identifier: String, declaredRole: Int64 = 0) -> String? {
         guard !identifier.isEmpty else { return nil }
@@ -10014,6 +10070,33 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
         typealias KayaSetAutomation = @convention(c) (Bool) -> Void
         unsafeBitCast(symbol, to: KayaSetAutomation.self)(true)
         DispatchQueue.main.async { kayaExpanderRepublish() }
+    }
+
+    /// expect_ax_order (docs/layering-plan.md LY13): the identifiers in the
+    /// order UIKit materializes the elements, which VoiceOver walks.
+    func kayaAxOrderRead(_ identifiers: [String]) -> [String] {
+        kayaAxEnableAutomation()
+        return DispatchQueue.main.sync { () -> [String] in
+            var seen: [String] = []
+            func walk(_ element: NSObject, _ depth: Int) {
+                if depth > 64 { return }
+                if let ident = kayaAxIdentifier(element), identifiers.contains(ident), !seen.contains(ident) {
+                    seen.append(ident)
+                }
+                let count = element.accessibilityElementCount()
+                if count != NSNotFound && count > 0 {
+                    for i in 0..<count {
+                        if let child = element.accessibilityElement(at: i) as? NSObject { walk(child, depth + 1) }
+                    }
+                } else if let view = element as? UIView {
+                    view.subviews.forEach { walk($0, depth + 1) }
+                }
+            }
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows { walk(window, 0) }
+            }
+            return seen
+        }
     }
 
     private func kayaAxRead(_ identifier: String, declaredRole: Int64 = 0) -> String? {
@@ -10953,6 +11036,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     case "time_picker": return kayaTarget(spec, "time_picker", kayaScene.timePickers)
     case "image": return kayaTarget(spec, "image", kayaScene.images)
     case "icon": return kayaTarget(spec, "icon", kayaScene.icons)
+    case "layers": return kayaTarget(spec, "layers", kayaScene.layers)
     case "canvas": return kayaTarget(spec, "canvas", kayaScene.canvases)
     case "column": return kayaTarget(spec, "column", kayaScene.columns)
     case "row": return kayaTarget(spec, "row", kayaScene.rows)
@@ -17073,6 +17157,52 @@ private func kayaRunScript(_ script: String) {
                             "\(parts[1]) fold reads \"\(other)\", "
                                 + "wanted it folded into \(tableSpec)")
                     }
+                }
+            case "expect_placed":
+                // docs/layering-plan.md LY13: the overlay's drawn frame against
+                // the box its base drew, classified (harness.rs's classify_placed).
+                let want = kayaQuoted(Array(parts[2...]))
+                var got = ""
+                let until = Date().addingTimeInterval(5)
+                repeat {
+                    got = DispatchQueue.main.sync { kayaPlacedRead(parts[1]) }
+                    if got == want { break }
+                    Thread.sleep(forTimeInterval: 0.1)
+                } while Date() < until
+                if got == want {
+                    observed.append("\(parts[1]) placed \(want)")
+                } else {
+                    failures.append("\(parts[1]) placed \"\(got)\", wanted \"\(want)\"")
+                }
+            case "tap_at":
+                // A real pointer event at a point of the target's frame (LY13);
+                // the scene reads which handler answered with an ordinary expect.
+                kayaAwaitQuiet()
+                let place = parts.count > 2 ? String(parts[2]) : "center"
+                if let why = kayaTapAt(parts[1], place) {
+                    failures.append("tap_at \(parts[1]) \(place): \(why)")
+                } else {
+                    observed.append("tap_at \(parts[1]) \(place)")
+                }
+            case "expect_ax_order":
+                // The platform's own traversal order of the targets (LY8, LY13).
+                let specs = parts[1...].map { Substring($0) }
+                let ids = DispatchQueue.main.sync { specs.map { kayaAnyTarget($0)?.a11yId ?? "" } }
+                if let missing = zip(specs, ids).first(where: { $0.1.isEmpty }) {
+                    failures.append("expect_ax_order: \(missing.0) is no target with an a11y_id to find it by")
+                    break
+                }
+                var got: [String] = []
+                let until = Date().addingTimeInterval(5)
+                repeat {
+                    got = kayaAxOrderRead(ids)
+                    if got == ids { break }
+                    Thread.sleep(forTimeInterval: 0.2)
+                } while Date() < until
+                if got == ids {
+                    observed.append("ax order \(ids.joined(separator: " "))")
+                } else {
+                    failures.append("ax order \(got.joined(separator: " ")), wanted \(ids.joined(separator: " "))")
                 }
             case "expect_aligned":
                 // Classified from recorded geometry (cross rects in the
@@ -25836,10 +25966,19 @@ struct KayaFilledSurface: ViewModifier {
     /// platform's neutral fill is translucent, which shows the picture through
     /// the bubble, so it is composed over the page colour first.
     var onPicture = false
+    /// A fade panel's edge as a place (docs/layering-plan.md LY9).
+    var edge: Int64 = 0
 
     func body(content: Content) -> some View {
         if tint == 0 {
             content
+        } else if tint == tintOverlayFade {
+            let side = kayaFadeEdge(edge)
+            content
+                .foregroundStyle(.white)
+                .environment(\.kayaInFill, true)
+                .padding(side.inward, kayaFadeBand)
+                .background { KayaFadeScrim(edge: side) }
         } else if tint == tintOverlay {
             // docs/styling-pass-plan.md §3: the platform's panel over media,
             // the regular material under the 40% black the ruling names, light
@@ -25875,6 +26014,222 @@ struct KayaFilledSurface: ViewModifier {
 
 /// The overlay tint's scrim over the material (§3's SwiftUI lowering).
 let kayaOverlayScrim = 0.4
+
+/// THE FADE FORM (docs/layering-plan.md LY9): the band, in points, over which
+/// the scrim fades in from clear, and the black it reaches under the text,
+/// the darkness every backend draws (check-verbs' LAYERS clause holds both).
+let kayaFadeBand: CGFloat = 32
+let kayaFadeScrim = 0.6
+
+/// The edge a fade panel sits against, read from its place as the core's
+/// fade_edge reads it.
+struct KayaFadeSide {
+    let edge: Edge
+    /// The panel's side facing into the picture, which the band pads.
+    var inward: Edge.Set {
+        switch edge {
+        case .top: return .bottom
+        case .bottom: return .top
+        case .leading: return .trailing
+        case .trailing: return .leading
+        }
+    }
+}
+
+func kayaFadeEdge(_ place: Int64) -> KayaFadeSide {
+    switch place {
+    case 1, 2, 3: return KayaFadeSide(edge: .top)
+    case 4: return KayaFadeSide(edge: .leading)
+    case 6: return KayaFadeSide(edge: .trailing)
+    default: return KayaFadeSide(edge: .bottom)
+    }
+}
+
+struct KayaFadeScrim: View {
+    let edge: KayaFadeSide
+
+    var body: some View {
+        let solid = Color.black.opacity(kayaFadeScrim)
+        let clear = Color.black.opacity(0)
+        switch edge.edge {
+        case .bottom:
+            VStack(spacing: 0) {
+                LinearGradient(colors: [clear, solid], startPoint: .top, endPoint: .bottom).frame(height: kayaFadeBand)
+                solid
+            }
+        case .top:
+            VStack(spacing: 0) {
+                solid
+                LinearGradient(colors: [solid, clear], startPoint: .top, endPoint: .bottom).frame(height: kayaFadeBand)
+            }
+        case .leading:
+            HStack(spacing: 0) {
+                solid
+                LinearGradient(colors: [solid, clear], startPoint: .leading, endPoint: .trailing).frame(width: kayaFadeBand)
+            }
+        case .trailing:
+            HStack(spacing: 0) {
+                LinearGradient(colors: [clear, solid], startPoint: .leading, endPoint: .trailing).frame(width: kayaFadeBand)
+                solid
+            }
+        }
+    }
+}
+
+// MARK: - Layers (docs/layering-plan.md)
+
+/// The picture a video or surface base drew inside its track: the box its
+/// overlays are placed in (LY2).
+struct KayaPictureBoxKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
+    }
+}
+
+struct KayaPictureBox: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        if on {
+            content.anchorPreference(key: KayaPictureBoxKey.self, value: .bounds) { $0 }
+        } else {
+            content
+        }
+    }
+}
+
+/// Each layers child's frame and each container's box in the window's space,
+/// by node id: what expect_placed and tap_at read.
+@MainActor var kayaLayerFrames: [UInt64: CGRect] = [:]
+
+struct KayaLayerReader: ViewModifier {
+    let id: UInt64
+    func body(content: Content) -> some View {
+        if kayaHarnessActive || kayaShippedFrameReaders {
+            content.kayaGeometry({ KayaGeometry($0) }) { g in kayaLayerFrames[id] = g.frame }
+        } else {
+            content
+        }
+    }
+}
+
+@MainActor func kayaPlaceAlignment(_ place: Int64) -> Alignment {
+    switch place {
+    case 1: return .topLeading
+    case 2: return .top
+    case 3: return .topTrailing
+    case 4: return .leading
+    case 6: return .trailing
+    case 7: return .bottomLeading
+    case 8: return .bottom
+    case 9: return .bottomTrailing
+    default: return .center
+    }
+}
+
+/// The overlays of a layers container, in declaration order over the box.
+/// Each takes every pointer event in its own box (LY6: the content shape) and
+/// is read after the base, in order (LY8: the sort priority).
+struct KayaLayersOverlays: View {
+    let node: KayaNode
+
+    var body: some View {
+        let overlays = node.children.dropFirst().filter { !$0.hidden }
+        let insets = kayaInsetEdges(node, node.inset)
+        ZStack {
+            ForEach(Array(overlays.enumerated()), id: \.element.id) { i, o in
+                // A fade panel spans the box along the edge it sits against (LY9).
+                let fade = o.filled == tintOverlayFade ? kayaFadeEdge(o.place).edge : nil
+                let wide = o.fill == true || fade == .top || fade == .bottom
+                let tall = o.fill == true || fade == .leading || fade == .trailing
+                KayaRender(node: o)
+                    .frame(maxWidth: wide ? .infinity : nil, maxHeight: tall ? .infinity : nil)
+                    .contentShape(Rectangle())
+                    .modifier(KayaLayerReader(id: o.id))
+                    .accessibilitySortPriority(-Double(i + 1))
+                    .padding(insets)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: kayaPlaceAlignment(o.place))
+            }
+        }
+    }
+}
+
+/// expect_placed's read: the overlay's frame and its container's box,
+/// classified, or what is missing.
+@MainActor func kayaPlacedRead(_ spec: Substring) -> String {
+    guard let node = kayaAnyTarget(spec) else { return "<no such target>" }
+    guard let parent = kayaScene.parents[node.id].flatMap({ kayaScene.nodes[$0] }), parent.kind == kindLayers,
+        parent.children.first?.id != node.id
+    else { return "<not an overlay of a layers container>" }
+    guard let frame = kayaLayerFrames[node.id] else { return "<no frame recorded for the overlay>" }
+    guard let box = kayaLayerFrames[parent.id] else { return "<no box recorded for its layers container>" }
+    return kayaClassifyPlaced(frame, box, rtl: kayaLayoutDirectionWord() == "rtl")
+}
+
+/// The point tap_at presses: a place's position in the frame, 4 points in
+/// from the edges it names, mirrored in a right-to-left layout.
+func kayaPlacePoint(_ frame: CGRect, _ place: String, rtl: Bool) -> CGPoint? {
+    let words = Set(place.split(separator: "_").map(String.init))
+    guard place == "center" || !words.isEmpty, words.isSubset(of: ["top", "bottom", "leading", "trailing", "center"]) else {
+        return nil
+    }
+    let left = words.contains(rtl ? "trailing" : "leading"), right = words.contains(rtl ? "leading" : "trailing")
+    let x = left ? frame.minX + 4 : (right ? frame.maxX - 4 : frame.midX)
+    let y = words.contains("top") ? frame.minY + 4 : (words.contains("bottom") ? frame.maxY - 4 : frame.midY)
+    return CGPoint(x: x, y: y)
+}
+
+/// tap_at's route: on the Mac a mouse-down and its mouse-up through the
+/// window at the point (the up queued first, so a control that tracks the
+/// press finds it); nil when it was sent, else what stopped it.
+func kayaTapAt(_ spec: Substring, _ place: String) -> String? {
+    guard let node = DispatchQueue.main.sync(execute: { kayaAnyTarget(spec) }) else { return "no such target" }
+    let frame = DispatchQueue.main.sync { kayaLayerFrames[node.id] ?? kayaSkinFrame(node) }
+    guard let frame else { return "no laid-out frame to tap" }
+    let rtl = DispatchQueue.main.sync { kayaLayoutDirectionWord() == "rtl" }
+    guard let local = kayaPlacePoint(frame, place, rtl: rtl) else { return "no place \(place)" }
+    #if os(macOS)
+        return DispatchQueue.main.sync { () -> String? in
+            guard let window = kayaNSWindows[0] ?? NSApp.windows.first(where: { $0.isVisible }),
+                let content = window.contentView
+            else { return "no window to tap in" }
+            let at = content.convert(
+                content.isFlipped ? local : CGPoint(x: local.x, y: content.bounds.height - local.y), to: nil)
+            guard let down = kayaMouseButtonEvent(.leftMouseDown, at, window),
+                let up = kayaMouseButtonEvent(.leftMouseUp, at, window)
+            else { return "no mouse event could be made" }
+            NSApp.postEvent(up, atStart: false)
+            window.sendEvent(down)
+            return nil
+        }
+    #else
+        return kayaDriverTap(local)
+    #endif
+}
+
+/// expect_placed's classification (harness.rs's classify_placed): the
+/// overlay's frame against the box, in the layout's own direction.
+func kayaClassifyPlaced(_ o: CGRect, _ box: CGRect, rtl: Bool) -> String {
+    let left = Double(o.minX - box.minX), right = Double(box.maxX - o.maxX)
+    let top = Double(o.minY - box.minY), bottom = Double(box.maxY - o.maxY)
+    let all = [left, right, top, bottom]
+    if all.max()! - all.min()! <= 2 { return "fill \(Int(left.rounded()))" }
+    var words: [String] = []
+    var gaps: [Double] = []
+    if abs(top - bottom) > 2 {
+        words.append(top < bottom ? "top" : "bottom")
+        gaps.append(min(top, bottom))
+    }
+    if abs(left - right) > 2 {
+        let atLeft = left < right
+        words.append(atLeft != rtl ? "leading" : "trailing")
+        gaps.append(min(left, right))
+    }
+    if words.isEmpty { return "center" }
+    let shown = gaps.map { String(Int($0.rounded())) }
+    let inset = gaps.max()! - gaps.min()! <= 2 ? shown[0] : shown.joined(separator: "/")
+    return "\(words.joined(separator: "_")) \(inset)"
+}
 
 private struct KayaInFillKey: EnvironmentKey {
     static let defaultValue = false
@@ -32095,12 +32450,40 @@ struct KayaRender: View {
                     id: node.id, vertical: vertical,
                     crossInset: kayaIsGroupedFlow(node) ? Double(2 * kayaFoldSectionPadX) : 0))
             .modifier(KayaInsetPadding(node: node))
-            .modifier(KayaFilledSurface(tint: kayaShownFill(node), packed: node.groundTops, inset: CGFloat(kayaFilledInset(node)), onPicture: kayaOnPicture(node.id)))
+            .modifier(KayaFilledSurface(tint: kayaShownFill(node), packed: node.groundTops, inset: CGFloat(kayaFilledInset(node)), onPicture: kayaOnPicture(node.id), edge: node.place))
             .modifier(KayaGroundSurface(node: node))
             .modifier(KayaActivatable(node: node))
             .modifier(KayaSkinFrameReader(id: node.id, insetOuter: true))
             .modifier(KayaComposerSurface(on: node.role == roleComposer))
             .padding(.vertical, -kayaListRowReach(node))
+        case kindLayers:
+            // docs/layering-plan.md §3: the base laid out as it would be alone
+            // in this container's place, the overlays over the box it drew.
+            if let base = node.children.first, !base.hidden {
+                KayaRender(
+                    node: base, flexVertical: flexVertical, flexAlign: flexAlign, flexStretch: flexStretch,
+                    gridCell: gridCell
+                )
+                .modifier(KayaLayerReader(id: base.id))
+                .accessibilitySortPriority(0)
+                .overlayPreferenceValue(KayaPictureBoxKey.self) { picture in
+                    GeometryReader { g in
+                        let box = picture.map { g[$0] } ?? CGRect(origin: .zero, size: g.size)
+                        KayaLayersOverlays(node: node)
+                            .frame(width: box.width, height: box.height)
+                            .clipped()
+                            .modifier(KayaLayerReader(id: node.id))
+                            .position(x: box.midX, y: box.midY)
+                    }
+                }
+                .transformPreference(KayaPictureBoxKey.self) { $0 = nil }
+                // The sort priorities order the base and its overlays among
+                // themselves only (LY8, measured: unscoped they sank below
+                // the window's other content, and unpinned the overlays read
+                // before the base; docs/traps.md).
+                .accessibilityElement(children: .contain)
+                .frame(maxWidth: node.maxWidth > 0 ? node.maxWidth : nil)
+            }
         case kindLabeled:
             // THE LABELLED ROW (docs/forms-plan.md §3): the label names the
             // control — LabeledContent is the platform's own pair, and it
@@ -32342,6 +32725,7 @@ struct KayaRender: View {
                 // docs/capture-plan.md §3: a self-view has no play or pause.
                 KayaVideoSurface(node: node)
                     .aspectRatio(natural, contentMode: .fit)
+                    .modifier(KayaPictureBox(on: node.layersHost != nil))
                     .frame(idealWidth: natural.width, maxWidth: node.grow > 0 ? .infinity : natural.width)
                     .background(KayaVideoVisibility(node: node))
                     .accessibilityElement(children: .ignore)
@@ -32351,6 +32735,7 @@ struct KayaRender: View {
                 KayaVideoSurface(node: node)
                     .overlay { KayaCaptionOverlay(node: node) }
                     .aspectRatio(natural, contentMode: .fit)
+                    .modifier(KayaPictureBox(on: node.layersHost != nil))
                     .frame(idealWidth: natural.width, maxWidth: node.grow > 0 ? .infinity : natural.width)
                     .background(KayaVideoVisibility(node: node))
                     .accessibilityElement(children: .ignore)
@@ -32366,6 +32751,7 @@ struct KayaRender: View {
             let box = kayaSurfaceNatural(node)
             KayaSurfaceHost(node: node)
                 .aspectRatio(box, contentMode: .fit)
+                .modifier(KayaPictureBox(on: node.layersHost != nil))
                 .frame(idealWidth: box.width, maxWidth: node.grow > 0 ? .infinity : box.width)
                 .accessibilityElement(children: .ignore)
                 .accessibilityAddTraits(.isImage)

@@ -4777,6 +4777,8 @@ mod range_view {
 
 enum NativeWidget {
     Column(gtk4::Box),
+    /// docs/layering-plan.md: the base is the overlay's main child.
+    Layers(gtk4::Overlay),
     Button(gtk4::Button),
     Label(gtk4::Label),
     /// The label kind wearing `role link` (docs/tasks-s2-plan.md T3): a
@@ -4863,6 +4865,7 @@ impl NativeWidget {
             NativeWidget::Range(pair) => pair.group.clone().upcast(),
             NativeWidget::Image(w) => w.clone().upcast(),
             NativeWidget::Icon(w) => w.clone().upcast(),
+            NativeWidget::Layers(w) => w.clone().upcast(),
             NativeWidget::Scroll(w) => w.clone().upcast(),
             NativeWidget::Progress(w) => w.clone().upcast(),
             NativeWidget::Select(w) => w.clone().upcast(),
@@ -6028,7 +6031,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Segmented => core.segmenteds.iter().map(|w| w.clone().upcast()).collect(),
         K::Expander => core.expanders.iter().map(|x| x.control()).collect(),
         K::Icon => core.icons.iter().map(|w| w.clone().upcast()).collect(),
-        K::Layers => Vec::new(),
+        K::Layers => core.layers.iter().map(|w| w.clone().upcast()).collect(),
         K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
@@ -7085,6 +7088,15 @@ struct CoreState {
     images: Vec<gtk4::Picture>,
     /// docs/looks-plan.md §3.1, in creation order (`icon#N`).
     icons: Vec<gtk4::Image>,
+    /// docs/layering-plan.md: the layers containers, each one's children in
+    /// order, the per-child place and fill, each container's inset pair, and
+    /// the fade panels.
+    layers: Vec<gtk4::Overlay>,
+    layer_children: HashMap<u64, Vec<u64>>,
+    layer_places: HashMap<u64, i64>,
+    layer_fills: HashMap<u64, bool>,
+    layer_insets: HashMap<u64, (f64, Option<f64>)>,
+    fade_panels: std::collections::HashSet<u64>,
     /// The video views in creation order (docs/media-plan.md §3).
     videos: Vec<gtk_media::GtkVideoView>,
     /// The surfaces in creation order (docs/capture-plan.md §5): a video
@@ -9671,6 +9683,11 @@ const TINT_CSS: &str = "\
 .kaya-activatable-pad { padding: 12px; }
 .kaya-table-body > viewport > box > .kaya-activatable-pad { padding: 5px 12px; }
 .kaya-filled.osd { background-clip: border-box; }
+.kaya-filled.kaya-fade { border-radius: 0px; background-color: transparent; color: white; background-clip: border-box; background-origin: border-box; }
+.kaya-filled.kaya-fade.kaya-fade-bottom { border-top: 32px solid transparent; background-image: linear-gradient(to bottom, alpha(black, 0) 0px, alpha(black, 0.6) 32px, alpha(black, 0.6)); }
+.kaya-filled.kaya-fade.kaya-fade-top { border-bottom: 32px solid transparent; background-image: linear-gradient(to top, alpha(black, 0) 0px, alpha(black, 0.6) 32px, alpha(black, 0.6)); }
+.kaya-filled.kaya-fade.kaya-fade-left { border-right: 32px solid transparent; background-image: linear-gradient(to left, alpha(black, 0) 0px, alpha(black, 0.6) 32px, alpha(black, 0.6)); }
+.kaya-filled.kaya-fade.kaya-fade-right { border-left: 32px solid transparent; background-image: linear-gradient(to right, alpha(black, 0) 0px, alpha(black, 0.6) 32px, alpha(black, 0.6)); }
 button.text-button.kaya-plain { margin-left: -17px; margin-right: -17px; }
 .kaya-tint-accent { background-color: var(--accent-bg-color); color: var(--accent-fg-color); }
 .kaya-tint-success { background-color: @success_bg_color; color: @success_fg_color; }
@@ -10905,6 +10922,135 @@ fn refresh_list_rows(core: &mut CoreState) {
         }
     }
 }
+/// THE FADE FORM (docs/layering-plan.md LY9): TINT_CSS's scrim, clear over a
+/// 32px band from the side facing into the picture to black at 0.6 under the
+/// text; check-verbs' LAYERS clause holds the pair to the other backends'.
+const FADE_CLASS: &str = "kaya-fade";
+const FADE_EDGE_CLASSES: [&str; 4] = ["kaya-fade-top", "kaya-fade-bottom", "kaya-fade-left", "kaya-fade-right"];
+
+/// The edge class a fade panel wears, from its place as the core's fade_edge
+/// reads it, mirrored right to left.
+fn fade_edge_apply(widget: &gtk4::Widget, place: i64) {
+    use gtk4::prelude::WidgetExt;
+    let rtl = widget.direction() == gtk4::TextDirection::Rtl;
+    let class = match place {
+        1..=3 => "kaya-fade-top",
+        4 => if rtl { "kaya-fade-right" } else { "kaya-fade-left" },
+        6 => if rtl { "kaya-fade-left" } else { "kaya-fade-right" },
+        _ => "kaya-fade-bottom",
+    };
+    for c in FADE_EDGE_CLASSES {
+        if c != class {
+            widget.remove_css_class(c);
+        }
+    }
+    widget.add_css_class(class);
+}
+
+/// The props a layers container holds over its children (docs/layering-plan.md
+/// LY3): true when the write is spent here.
+fn layers_prop(core: &mut CoreState, id: u64, prop: Prop, value: &Value) -> bool {
+    let parent = core
+        .layer_children
+        .iter()
+        .find(|(_, kids)| kids.contains(&id))
+        .map(|(p, kids)| (*p, kids.first() == Some(&id)));
+    match (prop, value) {
+        (Prop::Place, Value::I64(place)) => {
+            core.layer_places.insert(id, *place);
+            if core.fade_panels.contains(&id) {
+                if let Some(w) = core.widgets.get(&WidgetId(id)) {
+                    fade_edge_apply(&w.widget(), *place);
+                }
+            }
+            if let Some((p, _)) = parent {
+                layers_seat(core, p);
+            }
+            true
+        }
+        (Prop::Filled, Value::I64(tint)) => {
+            if *tint == i64::from(crate::wire::TINT_OVERLAY_FADE) {
+                core.fade_panels.insert(id);
+                if let Some(w) = core.widgets.get(&WidgetId(id)) {
+                    fade_edge_apply(&w.widget(), core.layer_places.get(&id).copied().unwrap_or(8));
+                }
+            } else {
+                core.fade_panels.remove(&id);
+            }
+            if let Some((p, false)) = parent {
+                layers_seat(core, p);
+            }
+            false
+        }
+        (Prop::Inset, Value::F64(pad)) if core.layer_children.contains_key(&id) => {
+            core.layer_insets.entry(id).or_insert((0.0, None)).0 = *pad;
+            layers_seat(core, id);
+            true
+        }
+        (Prop::InsetX, Value::F64(pad)) if core.layer_children.contains_key(&id) => {
+            core.layer_insets.entry(id).or_insert((0.0, None)).1 = Some(*pad);
+            layers_seat(core, id);
+            true
+        }
+        // Held whether or not the widget has joined its layers container
+        // yet: a binding that sets props before adding the child (OCaml's,
+        // Haskell's) writes fill first (measured, the veil read "center").
+        (Prop::Fill, Value::Bool(on)) => {
+            core.layer_fills.insert(id, *on);
+            match parent {
+                Some((p, _)) => {
+                    layers_seat(core, p);
+                    true
+                }
+                None => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+/// Each overlay's halign, valign and margins from its place, its fill and the
+/// container's inset; a fade panel spans the box along its edge (LY3, LY9).
+fn layers_seat(core: &CoreState, layers: u64) {
+    use gtk4::prelude::WidgetExt;
+    let (inset, inset_x) = core.layer_insets.get(&layers).copied().unwrap_or((0.0, None));
+    let sides = inset_x.unwrap_or(inset).round() as i32;
+    let ends = inset.round() as i32;
+    let kids = &core.layer_children[&layers];
+    for (i, kid) in kids.iter().enumerate() {
+        let Some(native) = core.widgets.get(&WidgetId(*kid)) else { continue };
+        let w = native.widget();
+        if i == 0 {
+            w.set_halign(gtk4::Align::Fill);
+            w.set_valign(gtk4::Align::Fill);
+            continue;
+        }
+        let place = core.layer_places.get(kid).copied().unwrap_or(crate::wire::PLACE_CENTER);
+        let fill = core.layer_fills.get(kid).copied().unwrap_or(false);
+        let edge = core.fade_panels.contains(kid).then(|| match place {
+            1..=3 => 2,
+            4 => 4,
+            6 => 6,
+            _ => 8,
+        });
+        let col = (place - 1) % 3;
+        let row = (place - 1) / 3;
+        let along = |n: i64| match n {
+            0 => gtk4::Align::Start,
+            1 => gtk4::Align::Center,
+            _ => gtk4::Align::End,
+        };
+        let fade_wide = matches!(edge, Some(2 | 8));
+        let fade_tall = matches!(edge, Some(4 | 6));
+        w.set_halign(if fill || fade_wide { gtk4::Align::Fill } else { along(col) });
+        w.set_valign(if fill || fade_tall { gtk4::Align::Fill } else { along(row) });
+        w.set_margin_start(sides);
+        w.set_margin_end(sides);
+        w.set_margin_top(ends);
+        w.set_margin_bottom(ends);
+    }
+}
+
 const TINT_CLASSES: [&str; 6] =
     ["kaya-tint-accent", "kaya-tint-success", "kaya-tint-warning", "kaya-tint-critical", "card", "osd"];
 
@@ -10918,8 +11064,11 @@ fn set_filled(widget: &gtk4::Widget, tint: i64) {
     widget.add_css_class(FILLED_CLASS);
     // The capsule's height check rides the flex layout's allocation.
     ensure_flex(widget);
+    widget.remove_css_class(FADE_CLASS);
     // A colour fill's rule is its own, written by ground_css (docs/looks-plan.md §3.2).
-    if tint != i64::from(crate::wire::TINT_COLOR) {
+    if tint == i64::from(crate::wire::TINT_OVERLAY_FADE) {
+        widget.add_css_class(FADE_CLASS);
+    } else if tint != i64::from(crate::wire::TINT_COLOR) {
         widget.add_css_class(TINT_CLASSES[(tint.clamp(1, 6) - 1) as usize]);
     }
     if !widget.css_classes().iter().any(|c| c.starts_with(INSET_CLASS)) {
@@ -13534,7 +13683,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         K::Segmented => core.segmenteds[resolve(t.index, core.segmenteds.len())].clone().upcast(),
         K::Expander => core.expanders[resolve(t.index, core.expanders.len())].widget(),
         K::Icon => core.icons[resolve(t.index, core.icons.len())].clone().upcast(),
-        K::Layers => crate::depth_stub("layers"),
+        K::Layers => core.layers[resolve(t.index, core.layers.len())].clone().upcast(),
         K::Entry | K::Textarea | K::Search | K::NumberField | K::SecureField => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
@@ -16897,7 +17046,43 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.images.push(picture.clone());
                     NativeWidget::Image(picture)
                 }
-                WidgetKind::Layers => crate::depth_stub("layers"),
+                WidgetKind::Layers => {
+                    let overlay = gtk4::Overlay::new();
+                    // AN OVERLAY NEVER EXCEEDS THE BOX (docs/layering-plan.md
+                    // LY2): GtkOverlay allocates an overlay at least its
+                    // minimum, which reached past a short base (measured on
+                    // the linux lane, a veil 10px below its button); each is
+                    // seated here at its natural size capped by the box less
+                    // its margins.
+                    overlay.connect_get_child_position(|overlay, widget| {
+                        use gtk4::prelude::WidgetExt;
+                        let (bw, bh) = (overlay.width(), overlay.height());
+                        let (ms, me) = (widget.margin_start(), widget.margin_end());
+                        let (mt, mb) = (widget.margin_top(), widget.margin_bottom());
+                        let (aw, ah) = ((bw - ms - me).max(0), (bh - mt - mb).max(0));
+                        let nat_w = widget.measure(gtk4::Orientation::Horizontal, -1).1;
+                        let w = if widget.halign() == gtk4::Align::Fill { aw } else { nat_w.min(aw) };
+                        let nat_h = widget.measure(gtk4::Orientation::Vertical, w).1;
+                        let h = if widget.valign() == gtk4::Align::Fill { ah } else { nat_h.min(ah) };
+                        let along = |align: gtk4::Align, avail: i32, size: i32| match align {
+                            gtk4::Align::End => avail - size,
+                            gtk4::Align::Center => (avail - size) / 2,
+                            _ => 0,
+                        };
+                        let mut x = ms + along(widget.halign(), aw, w);
+                        if widget.direction() == gtk4::TextDirection::Rtl {
+                            x = bw - x - w;
+                        }
+                        let y = mt + along(widget.valign(), ah, h);
+                        // The rectangle carries the margins, which the child
+                        // takes off its own allocation.
+                        let left = if widget.direction() == gtk4::TextDirection::Rtl { me } else { ms };
+                        Some(gdk::Rectangle::new(x - left, y - mt, w + ms + me, h + mt + mb))
+                    });
+                    core.layers.push(overlay.clone());
+                    core.layer_children.insert(id.0, Vec::new());
+                    NativeWidget::Layers(overlay)
+                }
                 WidgetKind::Icon => {
                     // docs/looks-plan.md §3.1: the symbol arrives as a SetProp;
                     // 16px is GTK's normal icon size, text_scale multiplies it.
@@ -18668,6 +18853,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (Prop::Role, _) => Some(None),
                 _ => None,
             };
+            if layers_prop(core, id.0, prop, &value) {
+                return;
+            }
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
                 // docs/expander-plan.md K2-K4: both widgets carry the header,
@@ -20008,6 +20196,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             }
         }
         ApplyOp::AddChild { parent, child } => {
+            if let NativeWidget::Layers(overlay) = core.widgets.get(&parent).expect("scene validated the id") {
+                let overlay = overlay.clone();
+                let child_widget = core.widgets.get(&child).expect("scene validated the id").widget();
+                let kids = core.layer_children.get_mut(&parent.0).expect("layers created");
+                kids.push(child.0);
+                if kids.len() == 1 {
+                    overlay.set_child(Some(&child_widget));
+                } else {
+                    overlay.add_overlay(&child_widget);
+                    overlay.set_clip_overlay(&child_widget, true);
+                }
+                layers_seat(core, parent.0);
+                return;
+            }
             // A select's label children are its OPTIONS: rows of the
             // DropDown's model, never widgets in a container. The native label
             // stays unparented and leaves the harness's label registry, so
@@ -22495,6 +22697,12 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 time_pickers: Vec::new(),
                 images: Vec::new(),
                 icons: Vec::new(),
+                layers: Vec::new(),
+                layer_children: HashMap::new(),
+                layer_places: HashMap::new(),
+                layer_fills: HashMap::new(),
+                layer_insets: HashMap::new(),
+                fade_panels: std::collections::HashSet::new(),
                 videos: Vec::new(),
                 surfaces: Vec::new(),
                 canvases: Vec::new(),
@@ -23382,6 +23590,84 @@ mod toast_ear {
 
 #[cfg(feature = "harness")]
 impl GtkStage {
+    fn press(t: crate::harness::Target, place: Option<String>) -> Result<(), String> {
+        Self::drive_pointer();
+        use std::os::unix::process::CommandExt;
+        let driver = std::env::var(DRAG_DRIVER_VAR)
+            .map_err(|_| format!("{DRAG_DRIVER_VAR} is unset, so this lane has no pointer: export it naming tools/linux/dragdrive.py"))?;
+        if POINTER_PRESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some() {
+            return Err("an earlier pointer_down still holds the button".to_owned());
+        }
+        Self::await_frames(2);
+        let point = Self::on_main(move |core| {
+            let widget = skin_layout_widget(core, t)?;
+            let window = widget.root().and_then(|r| r.downcast::<gtk4::Window>().ok())?;
+            let b = widget.compute_bounds(&window)?;
+            let frame = (f64::from(b.x()), f64::from(b.y()), f64::from(b.width()), f64::from(b.height()));
+            let rtl = gtk4::prelude::WidgetExt::direction(&widget) == gtk4::TextDirection::Rtl;
+            let (x, y) = crate::harness::place_point(frame, place.as_deref().unwrap_or("center"), rtl)?;
+            Some((x, y, gtk4::prelude::NativeExt::surface_transform(&window)))
+        });
+        let (x, y, transform) = point.ok_or_else(|| "no laid-out widget in a window".to_owned())?;
+        let wayland = linux_wayland_session();
+        let proto = if wayland { "wayland" } else { "x11" };
+        let out = std::process::Command::new("python3")
+            .arg(&driver)
+            .args(["locate", proto])
+            .arg(std::process::id().to_string())
+            .args([transform.0, transform.1, x, y].iter().map(|v| (v.round() as i64).to_string()))
+            .output()
+            .map_err(|e| format!("{driver} could not be run: {e}"))?;
+        let located = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        if !out.status.success() {
+            return Err(format!("{driver} located nothing ({}): {}", out.status, String::from_utf8_lossy(&out.stderr).trim()));
+        }
+        let mut words = located.split_whitespace();
+        let (Some(sx), Some(sy), Some(injector)) = (words.next(), words.next(), words.next()) else {
+            return Err(format!("{driver} located nothing: {located:?}"));
+        };
+        let (sx, sy, injector) = (sx.to_owned(), sy.to_owned(), injector.to_owned());
+        let release = std::env::temp_dir().join(format!("kaya-pointer-up-{}", std::process::id()));
+        let _ = std::fs::remove_file(&release);
+        let child = if wayland {
+            release_wayland_pointer();
+            let mut command = std::process::Command::new(&injector);
+            command
+                .args(["set", &sx, &sy, "sleep", "150", "press", "left"])
+                .arg("wait")
+                .arg(&release)
+                .args(["20000", "release", "left", "sleep", "100"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::inherit());
+            // SAFETY: prctl is async-signal-safe and touches only the child.
+            unsafe {
+                command.pre_exec(|| {
+                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+                    Ok(())
+                });
+            }
+            Some(command.spawn().map_err(|e| format!("{injector} could not be run: {e}"))?)
+        } else {
+            let out = std::process::Command::new(&injector)
+                .args(["mousemove", &sx, &sy, "sleep", "0.15", "mousedown", "1"])
+                .output()
+                .map_err(|e| format!("{injector} could not be run: {e}"))?;
+            if !out.status.success() {
+                return Err(format!("{injector} mousedown failed ({}): {}", out.status, String::from_utf8_lossy(&out.stderr).trim()));
+            }
+            None
+        };
+        crate::vtrace::note(
+            "pointer_down",
+            format_args!("{} at ({x}, {y}) -> screen ({sx}, {sy}) on {proto}", crate::harness::target_spec(&t)),
+        );
+        *POINTER_PRESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(PointerPress { child, release, at: (sx, sy), injector });
+        std::thread::sleep(std::time::Duration::from_millis(if wayland { 300 } else { 100 }));
+        Self::await_frames(2);
+        Ok(())
+    }
     /// Where the x11 key verbs park the lane's pointer in X window `xid`: a
     /// point no button or activatable container holds, so the parked pointer
     /// hovers nothing the leg draws (docs/media-player-plan.md M22 (2)).
@@ -27523,83 +27809,68 @@ impl crate::harness::Stage for GtkStage {
         Ok(())
     }
     fn pointer_down(&self, t: crate::harness::Target) -> Result<(), String> {
-        Self::drive_pointer();
-        use std::os::unix::process::CommandExt;
-        let driver = std::env::var(DRAG_DRIVER_VAR)
-            .map_err(|_| format!("{DRAG_DRIVER_VAR} is unset, so this lane has no pointer: export it naming tools/linux/dragdrive.py"))?;
-        if POINTER_PRESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some() {
-            return Err("an earlier pointer_down still holds the button".to_owned());
-        }
+        Self::press(t, None)
+    }
+    fn placed(&self, t: crate::harness::Target) -> Result<(crate::harness::Frame, crate::harness::Frame, bool), String> {
         Self::await_frames(2);
-        let point = Self::on_main(move |core| {
-            let widget = skin_layout_widget(core, t)?;
-            let window = widget.root().and_then(|r| r.downcast::<gtk4::Window>().ok())?;
-            let b = widget.compute_bounds(&window)?;
-            Some((
-                f64::from(b.x()) + f64::from(b.width()) / 2.0,
-                f64::from(b.y()) + f64::from(b.height()) / 2.0,
-                gtk4::prelude::NativeExt::surface_transform(&window),
-            ))
-        });
-        let (x, y, transform) = point.ok_or_else(|| "no laid-out widget in a window".to_owned())?;
-        let wayland = linux_wayland_session();
-        let proto = if wayland { "wayland" } else { "x11" };
-        let out = std::process::Command::new("python3")
-            .arg(&driver)
-            .args(["locate", proto])
-            .arg(std::process::id().to_string())
-            .args([transform.0, transform.1, x, y].iter().map(|v| (v.round() as i64).to_string()))
-            .output()
-            .map_err(|e| format!("{driver} could not be run: {e}"))?;
-        let located = String::from_utf8_lossy(&out.stdout).trim().to_owned();
-        if !out.status.success() {
-            return Err(format!("{driver} located nothing ({}): {}", out.status, String::from_utf8_lossy(&out.stderr).trim()));
-        }
-        let mut words = located.split_whitespace();
-        let (Some(sx), Some(sy), Some(injector)) = (words.next(), words.next(), words.next()) else {
-            return Err(format!("{driver} located nothing: {located:?}"));
-        };
-        let (sx, sy, injector) = (sx.to_owned(), sy.to_owned(), injector.to_owned());
-        let release = std::env::temp_dir().join(format!("kaya-pointer-up-{}", std::process::id()));
-        let _ = std::fs::remove_file(&release);
-        let child = if wayland {
-            release_wayland_pointer();
-            let mut command = std::process::Command::new(&injector);
-            command
-                .args(["set", &sx, &sy, "sleep", "150", "press", "left"])
-                .arg("wait")
-                .arg(&release)
-                .args(["20000", "release", "left", "sleep", "100"])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::inherit());
-            // SAFETY: prctl is async-signal-safe and touches only the child.
-            unsafe {
-                command.pre_exec(|| {
-                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
-                    Ok(())
-                });
+        Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let widget = skin_layout_widget(core, t).ok_or("no such target")?;
+            let id = skin_widget_id(core, &widget).ok_or("the target is no widget of the scene")?;
+            let (layers, kids) = core
+                .layer_children
+                .iter()
+                .find(|(_, kids)| kids.contains(&id))
+                .ok_or("not an overlay of a layers container")?;
+            if kids.first() == Some(&id) {
+                return Err("the base of its layers container, not an overlay".to_owned());
             }
-            Some(command.spawn().map_err(|e| format!("{injector} could not be run: {e}"))?)
-        } else {
-            let out = std::process::Command::new(&injector)
-                .args(["mousemove", &sx, &sy, "sleep", "0.15", "mousedown", "1"])
-                .output()
-                .map_err(|e| format!("{injector} could not be run: {e}"))?;
-            if !out.status.success() {
-                return Err(format!("{injector} mousedown failed ({}): {}", out.status, String::from_utf8_lossy(&out.stderr).trim()));
-            }
-            None
-        };
-        crate::vtrace::note(
-            "pointer_down",
-            format_args!("{} at ({x}, {y}) -> screen ({sx}, {sy}) on {proto}", crate::harness::target_spec(&t)),
-        );
-        *POINTER_PRESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some(PointerPress { child, release, at: (sx, sy), injector });
-        std::thread::sleep(std::time::Duration::from_millis(if wayland { 300 } else { 100 }));
+            let base = core.widgets.get(&WidgetId(kids[0])).ok_or("the base is gone")?.widget();
+            let window = widget.root().and_then(|r| r.downcast::<gtk4::Window>().ok()).ok_or("not in a window")?;
+            let bounds = |w: &gtk4::Widget| {
+                w.compute_bounds(&window).map(|b| {
+                    (f64::from(b.x()), f64::from(b.y()), f64::from(b.width()), f64::from(b.height()))
+                })
+            };
+            let o = bounds(&widget).ok_or("the overlay has no bounds")?;
+            let b = bounds(&base).ok_or_else(|| format!("the base of layers {layers} has no bounds"))?;
+            Ok((o, b, widget.direction() == gtk4::TextDirection::Rtl))
+        })
+    }
+    fn tap_at(&self, t: crate::harness::Target, place: &str) -> Result<(), String> {
+        Self::press(t, Some(place.to_owned()))?;
+        self.pointer_up()
+    }
+    fn ax_order(&self, targets: &[crate::harness::Target]) -> Result<Vec<String>, String> {
+        let targets = targets.to_vec();
         Self::await_frames(2);
-        Ok(())
+        Self::on_main(move |core| {
+            use gtk4::prelude::{AccessibleExt, Cast};
+            let mut want: Vec<(String, gtk4::Accessible)> = Vec::new();
+            for t in &targets {
+                let w = target_widget(core, *t).ok_or_else(|| format!("no such target {}", crate::harness::target_spec(t)))?;
+                want.push((crate::harness::target_spec(t), w.upcast()));
+            }
+            let window = core.window.clone().upcast::<gtk4::Accessible>();
+            let mut order: Vec<String> = Vec::new();
+            fn walk(a: &gtk4::Accessible, want: &[(String, gtk4::Accessible)], order: &mut Vec<String>, depth: u32) {
+                if depth > 64 {
+                    return;
+                }
+                if let Some((spec, _)) = want.iter().find(|(_, w)| w == a) {
+                    if !order.contains(spec) {
+                        order.push(spec.clone());
+                    }
+                }
+                let mut child = a.first_accessible_child();
+                while let Some(c) = child {
+                    walk(&c, want, order, depth + 1);
+                    child = c.next_accessible_sibling();
+                }
+            }
+            walk(&window, &want, &mut order, 0);
+            Ok(order)
+        })
     }
     fn back_help(&self, window: u64) -> String {
         Self::on_main(move |core| match core.back_buttons.get(&window) {
@@ -31197,7 +31468,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Segmented => nth!(core.segmenteds),
         K::Expander => try_resolve(target.index, core.expanders.len()).map(|i| core.expanders[i].control()),
         K::Icon => try_resolve(target.index, core.icons.len()).map(|i| core.icons[i].clone().upcast()),
-        K::Layers => None,
+        K::Layers => try_resolve(target.index, core.layers.len()).map(|i| core.layers[i].clone().upcast()),
         K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
             .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())

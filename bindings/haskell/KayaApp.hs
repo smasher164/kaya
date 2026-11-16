@@ -326,6 +326,9 @@ module KayaApp
     Align (..),
     Tint (..),
     Shape (..),
+    Place (..),
+    layers,
+    layersOf,
     signalTint,
     imageDominant,
     PaletteColor (..),
@@ -3382,6 +3385,9 @@ data Tint
   | TintCritical
   | TintNeutral
   | TintOverlay
+  -- | The overlay panel as a scrim, kaya choosing its darkness
+  -- (docs\/layering-plan.md LY9).
+  | TintOverlayFade
   deriving (Eq, Show, Enum, Bounded)
 
 tintWire :: Tint -> Int64
@@ -3393,6 +3399,7 @@ tintWire t = fromIntegral $ case t of
   TintCritical -> W.tintCritical
   TintNeutral -> W.tintNeutral
   TintOverlay -> W.tintOverlay
+  TintOverlayFade -> W.tintOverlayFade
 
 tintOfWire :: Int64 -> Tint
 tintOfWire n = case filter ((== n) . tintWire) [minBound .. maxBound] of
@@ -3434,6 +3441,24 @@ shapeWire sh = fromIntegral $ case sh of
   ShapeRect -> W.shapeRect
   ShapeRounded -> W.shapeRounded
   ShapeCircle -> W.shapeCircle
+
+-- | Where an overlay of a layers container sits in its base's box
+-- (docs\/layering-plan.md LY3); leading and trailing follow the layout's
+-- direction.
+data Place
+  = PlaceTopLeading
+  | PlaceTop
+  | PlaceTopTrailing
+  | PlaceLeading
+  | PlaceCenter
+  | PlaceTrailing
+  | PlaceBottomLeading
+  | PlaceBottom
+  | PlaceBottomTrailing
+  deriving (Eq, Show, Enum, Bounded)
+
+placeWire :: Place -> Int64
+placeWire p = fromIntegral (fromEnum p + 1)
 
 -- | The colour an album's header fades from (Y2): the core's one quantizer,
 -- 'Nothing' for bytes that do not decode.
@@ -3753,6 +3778,9 @@ data Attr (c :: WClass) where
   -- Structural operators). Any widget class.
   Hidden :: Bool -> Attr c
   HiddenBound :: Signal Bool -> Attr c
+  -- | Where this overlay sits in its layers container's box
+  -- (docs\/layering-plan.md LY3). Any widget class.
+  Place :: Place -> Attr c
   -- | THE GRID THAT FITS (docs\/layout-knobs-plan.md §3): as many columns
   -- as fit this grid's width at that many DIP each, sharing the extra.
   -- Grids only; an explicit 'columnsWhen' still wins while its class holds.
@@ -3963,6 +3991,7 @@ applyAttr (FontItalic on) w = setFontItalic w on
 applyAttr (FontWidth wd) w = setFontWidth w wd
 applyAttr (Fill on) w = setFill w on
 applyAttr (Hidden on) (Widget n) = emitB (W.txSetHidden n on)
+applyAttr (Place p) (Widget n) = emitB (W.txSetPlace n (placeWire p))
 applyAttr (HiddenBound (Signal s)) (Widget n) = emitB (W.txBindHidden n s)
 applyAttr (ColumnsAuto minWidth) w = setColumnsAuto w minWidth
 applyAttr (Wrap on) w = setWrap w on
@@ -4103,6 +4132,13 @@ instance (a ~ Attr 'BoxW, k ~ Build Widget, r ~ Build Widget) => RowCol a ([k] -
 
 row :: (RowCol a r) => [a] -> r
 row = rowish W.kindRow
+
+-- | LAYERS (docs\/layering-plan.md): the first child is the base, laid out
+-- as it would be alone in this container's place; every later child is drawn
+-- over it, placed in the base's box by its 'Place' at this container's
+-- 'Inset', and takes every tap in its own box.
+layers :: [Attr 'BoxW] -> [Build Widget] -> Build Widget
+layers attrs = withAttrs attrs . containerOf W.kindLayers
 
 column :: (RowCol a r) => [a] -> r
 column = rowish W.kindColumn
@@ -5481,6 +5517,8 @@ data TplAttr where
   -- | A stamped copy off the screen and out of the layout (the live
   -- 'Hidden'); bound to the row's field, each copy hides on its own.
   TplHidden :: Bool -> TplAttr
+  -- | A stamped overlay's place (the live 'Place').
+  TplPlace :: Place -> TplAttr
   TplHiddenBound :: Signal Bool -> TplAttr
   TplHiddenField :: KField Bool -> TplAttr
   TplShapeAs :: Shape -> TplAttr
@@ -5544,6 +5582,7 @@ applyTplAttr (TplSelected on) (Node n) = emitT (W.txSetSelected n on)
 applyTplAttr (TplSelectedBound (Signal s)) (Node n) = emitT (W.txBindSelected n s)
 applyTplAttr (TplSelectedField (KField i)) (Node n) = emitT (W.txBindSelectedElement n 0 i)
 applyTplAttr (TplHidden on) (Node n) = emitT (W.txSetHidden n on)
+applyTplAttr (TplPlace p) (Node n) = emitT (W.txSetPlace n (placeWire p))
 applyTplAttr (TplHiddenBound (Signal s)) (Node n) = emitT (W.txBindHidden n s)
 applyTplAttr (TplHiddenField (KField i)) (Node n) = emitT (W.txBindHiddenElement n 0 i)
 applyTplAttr (TplShapeAs sh) (Node n) = emitT (W.txSetShape n (shapeWire sh))
@@ -5818,6 +5857,10 @@ rowOf = containerOf W.kindRow
 -- | A template column.
 columnOf :: [Tpl Node] -> Tpl Node
 columnOf = containerOf W.kindColumn
+
+-- | A template layers container (the live 'layers').
+layersOf :: [Tpl Node] -> Tpl Node
+layersOf = containerOf W.kindLayers
 
 -- | A template scroll viewport over EXACTLY ONE child — the signature says
 -- so, as the live 'scroll''s does.

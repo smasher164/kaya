@@ -493,3 +493,13 @@ by tools/scenes/chatcall.steps on five lanes. What it settled:
    2026-11-01 (the maintainer, 2026-11-01: "the four small ones are fine, go with them"). The maintainer wants the self-view floated over a corner of
    the peer's picture in the end, which needs a layering kind kaya lacks
    (docs/deferred.md, the GAP on layering one view over another).
+   DONE 2026-11-16 (docs/layering-plan.md LY14): the call's picture is a
+   `layers` container whose base is the peer's surface and which takes
+   `grow`, so the peer fills the call's room at its 4:3 until either axis is
+   used up; the self-view's 107 pt column floats over its bottom-trailing
+   corner at the container's inset of 12, keeping its 107x80 cover tile.
+   chatcall.steps reads the peer's box as 4:3, `expect_placed
+   column@selftile "bottom_trailing 12"`, the self-view's box and ink on top
+   of the peer's, the peer's ink at its centre, and `expect_ax_order
+   surface@peer video@selfview`. On Android the overlay self-view is a
+   TextureView (LY7).

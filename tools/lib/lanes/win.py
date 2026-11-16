@@ -58,6 +58,8 @@ SCENES = [
     "netimage", "netimage_http",
     # The skin (docs/styling-pass-plan.md §5).
     "grounds", "shapes", "cards", "tracks", "dock",
+    # Views over views (docs/layering-plan.md LY13).
+    "layers",
 ]
 
 # Scenes this lane declares off rather than wires (tools/check-steps.py
@@ -222,7 +224,7 @@ MILESTONE2_LEGS = ("rust", "python", "go", "csharp", "java", "js")
 # slot 0 (deploy-win's `_release_slot` sorts the free list), so the rule is
 # simply: a pointer leg is never pooled. tools/deploy-win.py refuses the
 # roster and tools/check-steps.py holds it.
-POINTER_VERBS = ("drag", "drag_file", "hover", "rest_pointer", "pointer_down", "pointer_up")
+POINTER_VERBS = ("drag", "drag_file", "hover", "rest_pointer", "pointer_down", "pointer_up", "tap_at")
 
 
 def pointer_scenes(scenes_dir):
@@ -518,6 +520,8 @@ ORDER = [
      # The range guest in Arabic (docs/range-plan.md §3 rules 5, 6): the range
      # mirrors, the vertical fader does not.
      "rangertl_rust",
+     # The layers guest in Arabic (docs/layering-plan.md LY13): no tap.
+     "layersrtl_rust",
      # THE RICH LABEL (docs/rich-text-plan.md §15). POOLED, unlike its
      # richtext neighbour: a label is read-only, so the scene clicks two
      # buttons and reads the runs back — no typed input, no composition, no
@@ -611,6 +615,13 @@ ORDER = [
     # mid-scene. check-steps' menu_serial pins the barrier.
     # THE CARDS ALONE: `hover` moves the VM's real pointer onto a card.
     ["cards_rust"],
+    # The layers scene's `tap_at` clicks the VM's real pointer (LY13).
+    ["layers_rust"],
+    ["layers_python"],
+    ["layers_js"],
+    ["layers_go"],
+    ["layers_csharp"],
+    ["layers_java"],
     ["cards_python"],
     ["cards_js"],
     ["cards_go"],
@@ -1013,7 +1024,7 @@ GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "taskspersist": "tasks", "links": "tasks", "tasksrtl": "tasks",
               "tasksbig": "tasks", "formatbig": "format", "codesurfacebig": "codesurface", "clock24": "format",
               "scrollrtl": "scroll", "numberfieldde": "numberfield", "numberfieldar": "numberfield",
-              "rangertl": "range", "colorpanel": "colorpicker",
+              "rangertl": "range", "colorpanel": "colorpicker", "layersrtl": "layers",
               "media_formats": "media", "media_delivery": "media", "media_session": "media",
               "media_tracks": "media", "media_feed": "media", "media_picked": "media",
               "media_timeout": "media", "media_reader": "media", "capture_denied": "capture",

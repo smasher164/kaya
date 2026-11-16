@@ -1,9 +1,24 @@
 # Layering: one view over another (design pass, 2026-11-15)
 
-Status: RULED 2026-11-16 (review page
-claude.ai/artifact/BF7TWX5Ue3b9dHKfvSEmQb): LY9 B with the fade form, every
-other ruling as recommended; the build started on the maintainer's word the
-same night ("you can start the build"). Nothing is built yet. The maintainer,
+Status: BUILT 2026-11-16 (rulings: review page
+claude.ai/artifact/BF7TWX5Ue3b9dHKfvSEmQb; LY9 B with the fade form, every
+other ruling as recommended). What the build settled, for the maintainer:
+the fade form is spelled tint `overlay_fade` (8); its panel is clear over a
+32 pt band on the side facing into the picture, then black at 0.6 under the
+light text (white text over it holds at least 5.7:1 on a white picture), no
+corner radius, and an overlay fade panel spans the box along its edge; its
+edge is an overlay's own place read as its nearest edge (a corner's vertical
+edge, the centre's bottom), and a fade panel that is not an overlay itself is
+told its edge by the core as a `place` (its overlay's, or in an image ground
+top when it is the first of several children, else bottom). The reading-order
+pin was measured needed on the Mac (unpinned SwiftUI read the overlays before
+the base) and had to be scoped by `.contain` (unscoped, the overlays sank
+below the window's other content); the SwiftUI content shape measured belt
+and braces; GTK caps each overlay at the box through get-child-position and
+WinUI reads an overlay as drawn inside its host's clip (docs/traps.md, the
+layering entries). §5 step 0 (a) and (c) were read through the arms with the
+guard cut rather than on a separate probe; the Android player-under-a-self-
+view leg is parked (docs/deferred.md). The maintainer,
 2026-11-15: "do layering first". This plan is the design pass for
 docs/deferred.md's GAP "kaya cannot float one view over another" (opened by
 the maintainer's call-screen ruling of 2026-11-01, docs/capture-plan.md §12

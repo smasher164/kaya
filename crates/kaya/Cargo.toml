@@ -650,6 +650,11 @@ path = "../../guests/rust/tints.rs"
 name = "icons"
 path = "../../guests/rust/icons.rs"
 
+# docs/layering-plan.md LY13.
+[[example]]
+name = "layers"
+path = "../../guests/rust/layers.rs"
+
 # docs/styling-pass-plan.md §5.
 [[example]]
 name = "grounds"

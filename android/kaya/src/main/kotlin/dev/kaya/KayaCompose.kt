@@ -318,6 +318,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.traversalIndex
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -790,7 +792,14 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var indeterminate by mutableStateOf(false)
     // One child's cross-axis stretch (docs/layout-knobs-plan.md §1); null
     // leaves the kind's default to KayaRenderCore's boxFill.
-    var fill by mutableStateOf<Boolean?>(null)
+    var ownFill by mutableStateOf<Boolean?>(null)
+    /** A layers base takes its container's fill and grow (docs/layering-plan.md LY2). */
+    var layersHost: KayaNode? = null
+    var fill: Boolean?
+        get() = layersHost?.fill ?: ownFill
+        set(v) { ownFill = v }
+    /** An overlay's place, or the edge a fade panel darkens toward (LY3, LY9). */
+    var place by mutableStateOf(0L)
     var columns by mutableStateOf(1)
     // An auto grid's floor, read when columns is 0 (docs/layout-knobs-plan.md §3).
     var minColumnWidth by mutableStateOf(0.0)
@@ -801,7 +810,10 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * natural size; positive weights divide the leftover main-axis space
      * in proportion. See Prop::Grow in protocol.rs.
      */
-    var grow by mutableStateOf(0.0)
+    var ownGrow by mutableStateOf(0.0)
+    var grow: Double
+        get() = layersHost?.grow ?: ownGrow
+        set(v) { ownGrow = v }
     /**
      * This container's inter-child gap on its main axis (containers
      * only; the normalized default is 8 dp). See Prop::Spacing.
@@ -909,6 +921,8 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * (a When showing no case, an empty For) is composed by no parent, so it
      * takes no extent and no gap. */
     val vacant: Boolean get() = hidden ||
+        // A hidden base leaves the box empty (docs/layering-plan.md LY10).
+        kind == KayaCompose.KIND_LAYERS && (children.firstOrNull()?.vacant ?: true) ||
         // A grown empty box is a spacer, which takes its share on purpose.
         (kind == KayaCompose.KIND_COLUMN || kind == KayaCompose.KIND_ROW) && grow == 0.0 && filled == 0L && ground == 0L &&
             !insetSet && insetX == null && !activatable && tableColumns.isEmpty() && children.all { it.vacant }
@@ -1056,6 +1070,9 @@ fun kayaTintPair(tint: Long, packed: Long = 0L): Pair<Color, Color> {
         2L -> kayaCustomPair(KAYA_SUCCESS_DESIGN)
         3L -> kayaCustomPair(KAYA_WARNING_DESIGN)
         4L -> Pair(scheme.error, scheme.onError)
+        // The fade form's scrim is drawn by kayaFadeScrim; its text is white
+        // (docs/layering-plan.md LY9).
+        KAYA_TINT_OVERLAY_FADE -> Pair(Color.Transparent, Color.White)
         // The platform's panel over media (docs/styling-pass-plan.md Y3).
         6L -> Pair(
             scheme.scrim.copy(alpha = KAYA_OVERLAY_SCRIM),
@@ -1067,6 +1084,50 @@ fun kayaTintPair(tint: Long, packed: Long = 0L): Pair<Color, Color> {
 
 /** docs/styling-pass-plan.md §3's Compose row: Material's scrim at 60%. */
 const val KAYA_OVERLAY_SCRIM = 0.6f
+
+/** THE FADE FORM (docs/layering-plan.md LY9): the overlay fill as a scrim,
+ * clear over KAYA_FADE_BAND from the side facing into the picture, then
+ * KAYA_FADE_SCRIM black under the text; check-verbs' LAYERS clause holds
+ * the pair to the other backends'. */
+const val KAYA_TINT_OVERLAY_FADE = 8L
+const val KAYA_FADE_BAND = 32
+const val KAYA_FADE_SCRIM = 0.6f
+
+/** The edge a fade panel sits against, from its place as the core's fade_edge reads it. */
+fun kayaFadeEdge(place: Long): Char = when (place) {
+    1L, 2L, 3L -> 't'
+    4L -> 's'
+    6L -> 'e'
+    else -> 'b'
+}
+
+/** The scrim behind a fade panel and the band its content clears. */
+fun kayaFadeScrim(node: KayaNode): Modifier {
+    val edge = kayaFadeEdge(node.place)
+    val solid = Color.Black.copy(alpha = KAYA_FADE_SCRIM)
+    val clear = Color.Black.copy(alpha = 0f)
+    return Modifier
+        .drawBehind {
+            val band = KAYA_FADE_BAND.dp.toPx()
+            val rtl = layoutDirection == LayoutDirection.Rtl
+            val brush = when (edge) {
+                't' -> Brush.verticalGradient(0f to solid, ((size.height - band) / size.height).coerceIn(0f, 1f) to solid, 1f to clear)
+                'b' -> Brush.verticalGradient(0f to clear, (band / size.height).coerceIn(0f, 1f) to solid, 1f to solid)
+                else -> {
+                    val atLeft = (edge == 's') != rtl
+                    if (atLeft) Brush.horizontalGradient(0f to solid, ((size.width - band) / size.width).coerceIn(0f, 1f) to solid, 1f to clear)
+                    else Brush.horizontalGradient(0f to clear, (band / size.width).coerceIn(0f, 1f) to solid, 1f to solid)
+                }
+            }
+            drawRect(brush)
+        }
+        .padding(
+            top = if (edge == 'b') KAYA_FADE_BAND.dp else 0.dp,
+            bottom = if (edge == 't') KAYA_FADE_BAND.dp else 0.dp,
+            start = if (edge == 'e') KAYA_FADE_BAND.dp else 0.dp,
+            end = if (edge == 's') KAYA_FADE_BAND.dp else 0.dp,
+        )
+}
 
 /** docs/looks-plan.md §3.2: the fill is the container's `color`. */
 const val KAYA_TINT_COLOR = 7L
@@ -1140,7 +1201,8 @@ fun kayaFilledSurface(node: KayaNode): Modifier {
                 r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
         }
         .then(kayaGroundSurface(node))
-    if (node.filled != 0L) surface = surface.background(kayaTintPair(node.filled, node.groundTops).first, kayaFillShape(node))
+    if (node.filled == KAYA_TINT_OVERLAY_FADE) surface = surface.then(kayaFadeScrim(node))
+    else if (node.filled != 0L) surface = surface.background(kayaTintPair(node.filled, node.groundTops).first, kayaFillShape(node))
     if (node.selected) surface = surface.background(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.shapes.medium)
     if (node.activatable) surface = surface.then(kayaActivatable(node))
     return surface
@@ -2272,6 +2334,7 @@ object KayaSceneModel {
     val segmenteds = ArrayList<KayaNode>()
     val expanders = ArrayList<KayaNode>()
     val icons = ArrayList<KayaNode>()
+    val layers = ArrayList<KayaNode>()
 
     // Every kind registry, so a destroyed node leaves all of them at once
     // (docs/traps.md 2026-09-14: a torn-down copy stayed addressable).
@@ -4072,6 +4135,7 @@ object KayaCompose {
     const val KIND_EXPANDER = 26
     const val KIND_SURFACE = 27
     const val KIND_ICON = 28
+    const val KIND_LAYERS = 29
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -4169,6 +4233,7 @@ object KayaCompose {
     private const val PROP_INSET = 17
     private const val PROP_INSET_X = 76
     private const val PROP_TITLED = 77
+    private const val PROP_PLACE = 78
 
     // The pickers' slots (docs/datetime-plan.md D2/D3/D4): three packed
     // decimal I64s — YYYYMMDD for a date, HHMM for a time — and a count.
@@ -5167,6 +5232,7 @@ object KayaCompose {
                         KIND_VIDEO -> KayaSceneModel.videos.add(node)
                         KIND_SURFACE -> KayaSceneModel.surfaces.add(node)
                         KIND_ICON -> KayaSceneModel.icons.add(node)
+                        KIND_LAYERS -> KayaSceneModel.layers.add(node)
                         KIND_SECURE_FIELD -> KayaSceneModel.secureFields.add(node)
                         KIND_SEGMENTED -> KayaSceneModel.segmenteds.add(node)
                         KIND_EXPANDER -> {
@@ -5269,6 +5335,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.symbol = readI64(b)
                         PROP_TITLED ->
                             KayaSceneModel.nodes[id]!!.titled = readBool(b)
+                        PROP_PLACE ->
+                            KayaSceneModel.nodes[id]!!.place = readI64(b)
                         PROP_MAX_WIDTH -> KayaSceneModel.nodes[id]!!.let { node ->
                             node.maxWidth = readF64(b)
                             if (node.kind == KIND_IMAGE) node.imageGen += 1
@@ -6122,6 +6190,9 @@ object KayaCompose {
                     KayaSceneModel.nodes[parent]!!.children
                         .add(KayaSceneModel.nodes[child]!!)
                     KayaSceneModel.parents[child] = parent
+                    if (KayaSceneModel.nodes[parent]!!.kind == KIND_LAYERS && KayaSceneModel.nodes[parent]!!.children.size == 1) {
+                        KayaSceneModel.nodes[child]!!.layersHost = KayaSceneModel.nodes[parent]!!
+                    }
                     // A choice widget's label children are its OPTIONS,
                     // not standalone widgets, so they leave the
                     // harness's label#N registry — their create arm
@@ -11109,6 +11180,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             "segmented" -> KayaSceneModel.segmenteds
             "expander" -> KayaSceneModel.expanders
             "icon" -> KayaSceneModel.icons
+            "layers" -> KayaSceneModel.layers
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -11257,6 +11329,131 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
      * SnapshotStateObserver's multithreaded-access check — measured, as
      * a hard crash rather than a wrong answer.
      */
+    /** expect_placed's read: the overlay's frame and its container's box,
+     * classified, or what is missing. MAIN THREAD. */
+    private fun kayaPlacedRead(activity: ComponentActivity, spec: String): String {
+        val node = kayaWidgetTarget(spec) ?: return "<no such target>"
+        val parent = KayaSceneModel.parents[node.id]?.let { KayaSceneModel.nodes[it] }
+        if (parent == null || parent.kind != KayaCompose.KIND_LAYERS || parent.children.firstOrNull() === node) {
+            return "<not an overlay of a layers container>"
+        }
+        val frame = kayaLayerFrames[node.id] ?: return "<no frame recorded for the overlay>"
+        val box = kayaLayerFrames[parent.id] ?: return "<no box recorded for its layers container>"
+        return kayaClassifyPlaced(frame, box, kayaRootDirection == LayoutDirection.Rtl, activity.resources.displayMetrics.density)
+    }
+
+    /** expect_ax_order's read: the tags in the order Compose's accessibility
+     * delegate chains the nodes for TalkBack (its traversal-before links, the
+     * test extra it serves them through). MAIN THREAD. */
+    private fun kayaAxOrder(activity: ComponentActivity, tags: List<String>): List<String> {
+        for (view in kayaComposeRoots(activity)) {
+            val root = view as RootForTest
+            // The delegate computes its traversal links only while it thinks a
+            // service listens; Compose's own test switch says one does.
+            // AND IT IS PUT BACK BEFORE THE LOOPER TURNS: left on, the
+            // delegate's event loop sent an event with accessibility off and
+            // the platform threw (measured, the layers leg's crash).
+            val forced = kayaForceAccessibility(view)
+            try {
+                kayaAxChain(view, root)?.let { (byTag, order, all) ->
+                    if (tags.all { it in byTag } && order.isEmpty()) {
+                        return listOf("<the delegate served no traversal links (switch: $forced)>")
+                    }
+                    if (tags.all { it in byTag }) {
+                        val ofTag = tags.associateWith { t -> order.indexOf(byTag[t]!!).takeIf { it >= 0 } ?: kayaAxContainerIndex(order, all, byTag[t]!!) }
+                        tags.firstOrNull { ofTag[it] == null }?.let { lost ->
+                            val n = all.first { it.id == byTag[lost] }
+                            val keys = n.config.map { it.key.name }.joinToString(",")
+                            val chain = order.mapNotNull { id -> all.firstOrNull { it.id == id } }
+                                .joinToString("|") { c -> c.config.getOrNull(SemanticsProperties.TestTag) ?: "#${c.id}" }
+                            return listOf("<$lost is on no traversal link: its node carries [$keys], merging=${n.config.isMergingSemanticsOfDescendants}; the chain is $chain of ${all.size} nodes>")
+                        }
+                        val shared = tags.filter { t -> ofTag[t] != null && tags.count { ofTag[it] == ofTag[t] } > 1 }
+                        if (shared.isNotEmpty()) return listOf("<${shared.joinToString(" and ")} reach a reader as one focus>")
+                        return tags.filter { ofTag[it] != null && ofTag[it]!! >= 0 }.sortedBy { ofTag[it] }
+                    }
+                }
+            } finally {
+                kayaForceAccessibility(view, false)
+            }
+        }
+        return listOf("<no compose root holds every tag>")
+    }
+
+    /** The semantics nodes by tag, the traversal chain, and every node. */
+    private fun kayaAxChain(view: android.view.View, root: RootForTest): Triple<Map<String, Int>, List<Int>, List<SemanticsNode>>? {
+        val key = "android.view.accessibility.extra.EXTRA_DATA_TEST_TRAVERSALBEFORE_VAL"
+        run {
+            root.measureAndLayoutForTest()
+            val provider = view.accessibilityNodeProvider ?: return null
+            val all = ArrayList<SemanticsNode>()
+            fun walk(n: SemanticsNode, depth: Int) {
+                if (depth > 64) return
+                all.add(n)
+                n.children.forEach { walk(it, depth + 1) }
+            }
+            walk(root.semanticsOwner.rootSemanticsNode, 0)
+            val next = HashMap<Int, Int>()
+            for (n in all) {
+                val info = provider.createAccessibilityNodeInfo(n.id) ?: continue
+                provider.addExtraDataToAccessibilityNodeInfo(n.id, info, key, null)
+                val before = info.extras.getInt(key, -1)
+                if (before >= 0) next[n.id] = before
+            }
+            val byTag = all.mapNotNull { n -> n.config.getOrNull(SemanticsProperties.TestTag)?.let { it to n.id } }.toMap()
+            val order = ArrayList<Int>()
+            for (head in all.map { it.id }.filter { k -> k in next && next.values.none { it == k } }) {
+                var at: Int? = head
+                while (at != null && at !in order) {
+                    order.add(at)
+                    at = next[at]
+                }
+            }
+            return Triple(byTag, order, all)
+        }
+    }
+
+    /** Compose's accessibility delegate's testing switch
+     * (`accessibilityForceEnabledForTesting`), set by reflection; what it
+     * found rides the diagnostic. */
+    private fun kayaForceAccessibility(view: android.view.View, on: Boolean = true): String {
+        var klass: Class<*>? = view.javaClass
+        while (klass != null) {
+            for (field in klass.declaredFields) {
+                if (!field.type.name.contains("AccessibilityDelegateCompat")) continue
+                field.isAccessible = true
+                val delegate = field.get(view) ?: continue
+                val flag = delegate.javaClass.declaredFields.firstOrNull { it.name.startsWith("accessibilityForceEnabledForTesting") }
+                    ?: return "the delegate ${delegate.javaClass.name} has no testing switch"
+                flag.isAccessible = true
+                flag.setBoolean(delegate, on)
+                return "forced $on"
+            }
+            klass = klass.superclass
+        }
+        return "no accessibility delegate field on ${view.javaClass.name}"
+    }
+
+    /** A tagged node that is not itself on the chain sits where its first
+     * descendant on the chain does. */
+    private fun kayaAxContainerIndex(order: List<Int>, all: List<SemanticsNode>, id: Int): Int? {
+        val node = all.firstOrNull { it.id == id } ?: return null
+        val under = ArrayList<Int>()
+        fun walk(n: SemanticsNode) {
+            under.add(n.id)
+            n.children.forEach { walk(it) }
+        }
+        walk(node)
+        under.mapNotNull { u -> order.indexOf(u).takeIf { it >= 0 } }.minOrNull()?.let { return it }
+        // A node merged into the one a reader focuses sits where that one does.
+        var up = node.parent
+        while (up != null) {
+            order.indexOf(up.id).takeIf { it >= 0 }?.let { return it }
+            up = up.parent
+        }
+        return null
+    }
+
     private fun kayaAx(activity: ComponentActivity, tag: String): KayaAxRead? {
         for (view in kayaComposeRoots(activity)) {
             val owner = (view as RootForTest).semanticsOwner
@@ -16851,6 +17048,45 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                 )
                         }
                     }
+                    "expect_placed" -> {
+                        // docs/layering-plan.md LY13: the overlay's drawn frame
+                        // against the box its base drew, classified.
+                        val want = quoted(parts.drop(2))
+                        val got = onUi(activity) { kayaPlacedRead(activity, parts[1]) }
+                        if (got == want) observed.add("${parts[1]} placed $want")
+                        else failures.add("${parts[1]} placed \"$got\", wanted \"$want\"")
+                    }
+                    "tap_at" -> {
+                        // A real touch at a place of the target's frame through
+                        // the window's own touch path; the scene reads which
+                        // handler answered with an ordinary expect.
+                        kayaAwaitQuiet()
+                        val place = parts.getOrElse(2) { "center" }
+                        val at = onUi(activity) {
+                            val node = kayaWidgetTarget(parts[1])
+                            val frame = node?.let { kayaLayerFrames[it.id] }
+                            frame?.let {
+                                kayaPlacePoint(it, place, kayaRootDirection == LayoutDirection.Rtl, activity.resources.displayMetrics.density)
+                            }
+                        }
+                        if (at == null) failures.add("tap_at ${parts[1]} $place: no such target, no layers frame recorded for it, or no such place")
+                        else {
+                            kayaTouchTap(activity, at.x, at.y)
+                            observed.add("tap_at ${parts[1]} $place")
+                        }
+                    }
+                    "expect_ax_order" -> {
+                        // The order TalkBack walks the targets (LY8, LY13).
+                        val nodes = parts.drop(1).map { kayaWidgetTarget(it) }
+                        val ids = nodes.map { it?.a11yId ?: "" }
+                        if (ids.any { it.isEmpty() }) {
+                            failures.add("expect_ax_order: ${parts.drop(1)[ids.indexOfFirst { it.isEmpty() }]} is no target with an a11y_id to find it by")
+                        } else {
+                            val got = onUi(activity) { kayaAxOrder(activity, ids) }
+                            if (got == ids) observed.add("ax order ${ids.joinToString(" ")}")
+                            else failures.add("ax order ${got.joinToString(" ")}, wanted ${ids.joinToString(" ")}")
+                        }
+                    }
                     "expect_aligned" -> {
                         // Classified from measured geometry, never the
                         // model's align field.
@@ -22343,6 +22579,7 @@ private fun KayaRenderCore(
         KayaCompose.KIND_EXPANDER -> KayaExpander(node, a11y, boxFill)
         KayaCompose.KIND_SURFACE -> KayaSurfaceView(node, a11y, boxFill)
         KayaCompose.KIND_ICON -> KayaIcon(node, a11y, boxFill)
+        KayaCompose.KIND_LAYERS -> KayaLayers(node, a11y, boxFill, flexVertical, flexStretch)
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded
@@ -28132,6 +28369,118 @@ internal fun kayaExpanderActionWord(context: android.content.Context, open: Bool
         if (open) "expand_button_content_description_expanded" else "expand_button_content_description_collapsed",
         "string", "android")
     return if (id == 0) null else context.getString(id)
+}
+
+/** Each layers child's frame and each container's box in window pixels, by
+ * node id: what expect_placed and tap_at read (docs/layering-plan.md LY13). */
+val kayaLayerFrames = HashMap<Long, androidx.compose.ui.geometry.Rect>()
+
+/** Whether this node draws over a layers container's base: it, or a
+ * container it sits in, is a later child of a layers container (LY7). */
+fun kayaInOverlay(node: KayaNode): Boolean {
+    var at = node.id
+    while (true) {
+        val parent = KayaSceneModel.parents[at]?.let { KayaSceneModel.nodes[it] } ?: return false
+        if (parent.kind == KayaCompose.KIND_LAYERS && parent.children.firstOrNull()?.id != at) return true
+        at = parent.id
+    }
+}
+
+fun kayaPlaceAlignment(place: Long): Alignment = when (place) {
+    1L -> Alignment.TopStart
+    2L -> Alignment.TopCenter
+    3L -> Alignment.TopEnd
+    4L -> Alignment.CenterStart
+    6L -> Alignment.CenterEnd
+    7L -> Alignment.BottomStart
+    8L -> Alignment.BottomCenter
+    9L -> Alignment.BottomEnd
+    else -> Alignment.Center
+}
+
+/**
+ * LAYERS (docs/layering-plan.md §3): the base laid out as it would be alone
+ * in this container's place, inside a wrap-content box so the box is the
+ * frame the base drew (LY2); each overlay over it in declaration order,
+ * placed in the box less the container's inset and clipped to it. Each
+ * overlay's box takes every pointer event (LY6: an empty pointer input makes
+ * it eligible, so a tap on a caption does not reach a button under it), and
+ * the reading order is pinned to declaration order (LY8: traversalIndex
+ * inside a traversal group).
+ */
+@Composable
+internal fun KayaLayers(node: KayaNode, a11y: Modifier, boxFill: Modifier, flexVertical: Boolean?, flexStretch: Boolean) {
+    val base = node.children.firstOrNull() ?: return
+    if (base.hidden) return
+    val inset = node.inset.dp
+    val insetX = (node.insetX ?: node.inset).dp
+    Box(boxFill.then(a11y).semantics { isTraversalGroup = true }, contentAlignment = Alignment.Center) {
+        Box(Modifier.onGloballyPositioned { kayaLayerFrames[node.id] = it.boundsInWindow() }) {
+            Box(
+                Modifier
+                    .semantics { isTraversalGroup = true; traversalIndex = 0f }
+                    .onGloballyPositioned { kayaLayerFrames[base.id] = it.boundsInWindow() }
+            ) {
+                KayaRender(base, flexVertical = flexVertical, flexStretch = flexStretch)
+            }
+            node.children.drop(1).filter { !it.hidden }.forEachIndexed { i, o -> androidx.compose.runtime.key(o.id) {
+                val edge = if (o.filled == KAYA_TINT_OVERLAY_FADE) kayaFadeEdge(o.place) else null
+                val wide = o.fill == true || edge == 't' || edge == 'b'
+                val tall = o.fill == true || edge == 's' || edge == 'e'
+                Box(Modifier.matchParentSize().clipToBounds().padding(horizontal = insetX, vertical = inset)) {
+                    Box(
+                        Modifier
+                            .align(kayaPlaceAlignment(o.place))
+                            .then(if (wide) Modifier.fillMaxWidth() else Modifier)
+                            .then(if (tall) Modifier.fillMaxHeight() else Modifier)
+                            .pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }
+                            .semantics { isTraversalGroup = true; traversalIndex = (i + 1).toFloat() }
+                            .onGloballyPositioned { kayaLayerFrames[o.id] = it.boundsInWindow() }
+                    ) {
+                        KayaRender(o, flexVertical = if (wide && !tall) true else null, flexStretch = wide || tall)
+                    }
+                }
+            } }
+        }
+    }
+}
+
+/** expect_placed's classification, harness.rs's classify_placed. */
+fun kayaClassifyPlaced(o: androidx.compose.ui.geometry.Rect, b: androidx.compose.ui.geometry.Rect, rtl: Boolean, density: Float): String {
+    val left = (o.left - b.left) / density
+    val right = (b.right - o.right) / density
+    val top = (o.top - b.top) / density
+    val bottom = (b.bottom - o.bottom) / density
+    val all = listOf(left, right, top, bottom)
+    if (all.max() - all.min() <= 2f) return "fill ${Math.round(left)}"
+    val words = ArrayList<String>()
+    val gaps = ArrayList<Float>()
+    if (Math.abs(top - bottom) > 2f) {
+        words.add(if (top < bottom) "top" else "bottom")
+        gaps.add(minOf(top, bottom))
+    }
+    if (Math.abs(left - right) > 2f) {
+        val atLeft = left < right
+        words.add(if (atLeft != rtl) "leading" else "trailing")
+        gaps.add(minOf(left, right))
+    }
+    if (words.isEmpty()) return "center"
+    val shown = gaps.map { Math.round(it).toString() }
+    val inset = if (gaps.max() - gaps.min() <= 2f) shown[0] else shown.joinToString("/")
+    return "${words.joinToString("_")} $inset"
+}
+
+/** tap_at's point: a place in the frame, 4dp in from the edges it names,
+ * mirrored right to left (harness.rs's place_point). */
+fun kayaPlacePoint(f: androidx.compose.ui.geometry.Rect, place: String, rtl: Boolean, density: Float): androidx.compose.ui.geometry.Offset? {
+    val words = place.split("_")
+    if (!words.all { it in listOf("top", "bottom", "leading", "trailing", "center") }) return null
+    val left = words.contains(if (rtl) "trailing" else "leading")
+    val right = words.contains(if (rtl) "leading" else "trailing")
+    val m = 4f * density
+    val x = if (left) f.left + m else if (right) f.right - m else f.center.x
+    val y = if (words.contains("top")) f.top + m else if (words.contains("bottom")) f.bottom - m else f.center.y
+    return androidx.compose.ui.geometry.Offset(x, y)
 }
 
 /** docs/looks-plan.md §3.1: a symbol on its own, Material's 24dp icon at the

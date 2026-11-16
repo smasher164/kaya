@@ -197,6 +197,9 @@ func (sc SumCase[K, V]) Row(body func()) Node { return sc.t.Row(body) }
 // Column likewise.
 func (sc SumCase[K, V]) Column(body func()) Node { return sc.t.Column(body) }
 
+// Layers is the arm's layers container (Tpl.Layers).
+func (sc SumCase[K, V]) Layers(body func()) Node { return sc.t.Layers(body) }
+
 // Scroll is the arm's viewport over exactly one child; see Tpl.Scroll.
 func (sc SumCase[K, V]) Scroll(body func()) Node { return sc.t.Scroll(body) }
 
@@ -568,6 +571,10 @@ func (sc SumCase[K, V]) BindHref(n Node, sel func(*V) *string) {
 // SetFill gives every stamped copy of this arm the same cross-axis
 // stretch (Tpl.SetFill; docs/layout-knobs-plan.md §1).
 func (sc SumCase[K, V]) SetFill(n Node, on bool) { sc.t.SetFill(n, on) }
+
+// SetPlace seats every stamped copy of this arm's overlay in its layers
+// container's box (Tpl.SetPlace; docs/layering-plan.md LY3).
+func (sc SumCase[K, V]) SetPlace(n Node, place Place) { sc.t.SetPlace(n, place) }
 
 // SetHidden hides every stamped copy of this arm's node (Tpl.SetHidden).
 func (sc SumCase[K, V]) SetHidden(n Node, on bool) { sc.t.SetHidden(n, on) }

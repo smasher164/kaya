@@ -67,7 +67,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu hiderows commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet doctabs submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock codesurface fontpick farend"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu hiderows commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet doctabs submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock codesurface fontpick farend layers"
 # Scenes this lane declares off rather than wires (tools/check-steps.py
 # reads this line): the phone keyboard scripts, since a desktop has no
 # software keyboard (docs/safe-area-plan.md A13); windowmem, since libadwaita's
@@ -1558,6 +1558,22 @@ for proto in x11 wayland; do
     # A symbol on its own (docs/looks-plan.md §3.1).
     run "$proto" icons-rust env KAYA_SELFTEST=icons \
         "$CARGO_TARGET_DIR/debug/examples/icons"
+    # Views over views (docs/layering-plan.md LY13) in every language, and
+    # in Arabic.
+    run "$proto" layers-rust env KAYA_SELFTEST=layers \
+        "$CARGO_TARGET_DIR/debug/examples/layers"
+    run "$proto" layers-python env KAYA_SELFTEST=layers KAYA_LIB="$LIB" python3 guests/python/layers.py
+    run "$proto" layers-js env KAYA_SELFTEST=layers KAYA_LIB="$LIB" node guests/js/layers.ts
+    run "$proto" layers-go env KAYA_SELFTEST=layers /tmp/go-guests/kaya-go
+    run "$proto" layers-csharp env KAYA_SELFTEST=layers KAYA_LIB="$LIB" dotnet exec "$CS_GUEST"
+    run "$proto" layers-ocaml env KAYA_SELFTEST=layers KAYA_LIB="$LIB" \
+        _build-linux/default/guests/ocaml/layers.exe
+    run "$proto" layers-haskell env KAYA_SELFTEST=layers "$(hs_bin layers)"
+    run "$proto" layers-java env KAYA_SELFTEST=layers KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" layers-c env KAYA_SELFTEST=layers /tmp/c-guests/layers
+    run "$proto" layersrtl-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=layersrtl \
+        "$CARGO_TARGET_DIR/debug/examples/layers"
     # THE CLOSED-APP CLICK'S DOOR ON THIS LANE (docs/tasks-s9-plan.md R6):
     # the tasks scene's `relaunch` is answered by the daemon's ActionInvoked,
     # which xdg-desktop-portal-gtk reads as the notification's `app.`-prefixed

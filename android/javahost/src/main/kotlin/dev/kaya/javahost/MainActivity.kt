@@ -76,6 +76,7 @@ object GuestStart : KayaGuestStart {
             "netimage" -> Netimage::app
             "netimage_http" -> NetimageHttp::app
             "grounds" -> Grounds::app
+            "layers" -> Layers::app
             "shapes" -> Shapes::app
             "cards" -> Cards::app
             "tracks" -> Tracks::app

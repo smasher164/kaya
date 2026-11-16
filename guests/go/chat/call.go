@@ -256,12 +256,16 @@ func (k *calls) start(tx *kaya.Tx, c *conversation, video bool) {
 	pane := tx.Column(func() {
 		tx.Label(state).A11yID("callstate")
 		if video {
-			peerView := tx.Surface().A11yLabel(c.name).A11yID("peer")
-			cl.frames = k.app.SurfaceFrames(peerView)
-			// docs/capture-plan.md §12 item 7.
-			tx.Column(func() {
-				tx.VideoCapture(cl.capture).Aspect(4, 3).Fit(kaya.FitCover).A11yLabel("You").A11yID("selfview")
-			}).MaxWidth(selfViewWidth)
+			// docs/capture-plan.md §12 item 7, docs/layering-plan.md LY14: the
+			// peer fills the call's room and the self-view floats over its
+			// bottom-trailing corner.
+			tx.Layers(func() {
+				peerView := tx.Surface().A11yLabel(c.name).A11yID("peer")
+				cl.frames = k.app.SurfaceFrames(peerView)
+				tx.Column(func() {
+					tx.VideoCapture(cl.capture).Aspect(4, 3).Fit(kaya.FitCover).A11yLabel("You").A11yID("selfview")
+				}).MaxWidth(selfViewWidth).Place(kaya.PlaceBottomTrailing).A11yID("selftile")
+			}).Inset(12).Grow(1).A11yID("callpicture")
 		}
 		tx.Row(func() {
 			if video {

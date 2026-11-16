@@ -36,6 +36,7 @@ import (
 	"dev.kaya/guests/go/gallery"
 	"dev.kaya/guests/go/grid"
 	"dev.kaya/guests/go/grounds"
+	"dev.kaya/guests/go/layers"
 	"dev.kaya/guests/go/grow"
 	"dev.kaya/guests/go/hiderows"
 	"dev.kaya/guests/go/identity"
@@ -142,6 +143,8 @@ var scenes = map[string]func() *kaya.App{
 	"nav":              nav.App,
 	"netimage":         netimage.App,
 	"grounds":          grounds.App,
+	"layers":           layers.App,
+	"layersrtl":        layers.App,
 	"shapes":           shapes.App,
 	"cards":            cards.App,
 	"tracks":           tracks.App,

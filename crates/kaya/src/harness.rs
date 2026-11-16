@@ -1356,6 +1356,16 @@ pub enum Step {
     /// the commonest colour inside a run's cells as the window drew them, in
     /// the current appearance (docs/highlight-plan.md §4).
     ExpectTextGround(Target, TextRange, String),
+    /// `expect_placed <overlay> "<place> <inset>"` — the overlay's drawn frame
+    /// against the box its layers container's base drew, classified by
+    /// [`classify_placed`] (docs/layering-plan.md LY13).
+    ExpectPlaced(Target, String),
+    /// `tap_at <target> <place>` — a real pointer event at that place of the
+    /// target's frame; the scene reads which handler answered.
+    TapAt(Target, String),
+    /// `expect_ax_order <target> <target> ...` — the targets in the order the
+    /// platform's own screen reader traversal reaches them (LY8).
+    ExpectAxOrder(Vec<Target>),
 }
 
 /// A range in a harness assertion, in the same UTF-8 byte offsets the
@@ -1487,7 +1497,10 @@ impl Step {
             | Step::ClickMarker(t, _)
             | Step::PickTextColor(t, _)
             | Step::ExpectTextInk(t, ..)
-            | Step::ExpectTextGround(t, ..) => vec![t],
+            | Step::ExpectTextGround(t, ..)
+            | Step::ExpectPlaced(t, _)
+            | Step::TapAt(t, _) => vec![t],
+            Step::ExpectAxOrder(ts) => ts.iter_mut().collect(),
             // BOTH ENDS OF A DRAG NORMALIZE. Handing the loop above the
             // source alone left `drag label#0 to label@row[a]` reaching every
             // rust-native backend as index 0 with the id still on it —
@@ -1875,6 +1888,8 @@ impl Step {
             Step::Hover(_) | Step::RestPointer(_) => false,
             Step::PointerDown(_) | Step::PointerUp => false,
             Step::ExpectBackHelp(..) => true,
+            Step::ExpectPlaced(..) | Step::ExpectAxOrder(..) => true,
+            Step::TapAt(..) => false,
         }
     }
 }
@@ -1883,6 +1898,59 @@ impl Step {
 /// The actions `session_send` can send, the remote commands every
 /// platform's media controls carry (docs/media-plan.md §5).
 pub const SESSION_SENDS: [&str; 6] = ["play", "pause", "toggle", "stop", "next", "previous"];
+
+/// A frame as `(x, y, width, height)`, y down.
+pub type Frame = (f64, f64, f64, f64);
+
+/// expect_placed's classification (docs/layering-plan.md LY13), one copy of
+/// it in each interpreter (kayaClassifyPlaced, classifyPlaced): `fill N` when
+/// all four gaps agree, else the edges it sits nearer, in the layout's
+/// direction, and its gap from them ("bottom_trailing 12"), or `center`.
+pub fn classify_placed(o: Frame, b: Frame, rtl: bool) -> String {
+    let left = o.0 - b.0;
+    let right = (b.0 + b.2) - (o.0 + o.2);
+    let top = o.1 - b.1;
+    let bottom = (b.1 + b.3) - (o.1 + o.3);
+    let all = [left, right, top, bottom];
+    let spread = all.iter().cloned().fold(f64::MIN, f64::max) - all.iter().cloned().fold(f64::MAX, f64::min);
+    if spread <= 2.0 {
+        return format!("fill {}", left.round() as i64);
+    }
+    let mut words: Vec<&str> = Vec::new();
+    let mut gaps: Vec<f64> = Vec::new();
+    if (top - bottom).abs() > 2.0 {
+        words.push(if top < bottom { "top" } else { "bottom" });
+        gaps.push(top.min(bottom));
+    }
+    if (left - right).abs() > 2.0 {
+        let at_left = left < right;
+        words.push(if at_left != rtl { "leading" } else { "trailing" });
+        gaps.push(left.min(right));
+    }
+    if words.is_empty() {
+        return "center".into();
+    }
+    let shown: Vec<String> = gaps.iter().map(|g| (g.round() as i64).to_string()).collect();
+    let max = gaps.iter().cloned().fold(f64::MIN, f64::max);
+    let min = gaps.iter().cloned().fold(f64::MAX, f64::min);
+    let inset = if max - min <= 2.0 { shown[0].clone() } else { shown.join("/") };
+    format!("{} {inset}", words.join("_"))
+}
+
+/// The point tap_at presses: the place's position in the frame, 4 units in
+/// from the edges it names, mirrored right to left; None for no place.
+pub fn place_point(f: Frame, place: &str, rtl: bool) -> Option<(f64, f64)> {
+    let words: Vec<&str> = place.split('_').collect();
+    if !words.iter().all(|w| matches!(*w, "top" | "bottom" | "leading" | "trailing" | "center")) {
+        return None;
+    }
+    let has = |w: &str| words.contains(&w);
+    let left = has(if rtl { "trailing" } else { "leading" });
+    let right = has(if rtl { "leading" } else { "trailing" });
+    let x = if left { f.0 + 4.0 } else if right { f.0 + f.2 - 4.0 } else { f.0 + f.2 / 2.0 };
+    let y = if has("top") { f.1 + 4.0 } else if has("bottom") { f.1 + f.3 - 4.0 } else { f.1 + f.3 / 2.0 };
+    Some((x, y))
+}
 
 /// `expect_video_ink`'s tolerance per channel, in sRGB: a video's picture
 /// is decoded and colour-managed before the window server has it (±2
@@ -3768,6 +3836,21 @@ pub trait Stage: Send + 'static {
     /// The field's text as the platform's accessibility tree gives it.
     fn ax_text(&self, _target: Target) -> Result<String, String> {
         Err(not_built_yet("expect_ax_text"))
+    }
+    /// An overlay's drawn frame and its layers container's box as
+    /// `(x, y, width, height)` in one space, and whether the layout runs right
+    /// to left (docs/layering-plan.md LY13).
+    fn placed(&self, _target: Target) -> Result<(Frame, Frame, bool), String> {
+        Err(not_built_yet("expect_placed"))
+    }
+    /// A real pointer press and release at [`place_point`] of the target's frame.
+    fn tap_at(&self, _target: Target, _place: &str) -> Result<(), String> {
+        Err(not_built_yet("tap_at"))
+    }
+    /// The targets' specs in the order the platform's screen reader reaches
+    /// them; a target it never reaches is left out.
+    fn ax_order(&self, _targets: &[Target]) -> Result<Vec<String>, String> {
+        Err(not_built_yet("expect_ax_order"))
     }
     /// A real click on a paragraph's drawn marker.
     fn click_marker(&self, _target: Target, _start: u64) -> Result<(), String> {
@@ -6033,6 +6116,29 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 } else {
                     Step::ExpectAxText(target, parse_string(text)?)
                 }
+            }
+            "expect_placed" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_placed wants an overlay target and \"<place> <inset>\": {line:?}")
+                })?;
+                Step::ExpectPlaced(parse_target(target)?, parse_string(text)?)
+            }
+            "tap_at" => {
+                let (target, place) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("tap_at wants a target and a place: {line:?}")
+                })?;
+                let place = place.trim();
+                if place_point((0.0, 0.0, 100.0, 100.0), place, false).is_none() {
+                    return Err(format!("tap_at's place is center or a place's words (top_leading, bottom, ...): {line:?}"));
+                }
+                Step::TapAt(parse_target(target)?, place.to_owned())
+            }
+            "expect_ax_order" => {
+                let targets = rest.split_whitespace().map(parse_target).collect::<Result<Vec<_>, _>>()?;
+                if targets.len() < 2 {
+                    return Err(format!("expect_ax_order wants two targets or more: {line:?}"));
+                }
+                Step::ExpectAxOrder(targets)
             }
             "click_marker" => {
                 let (target, start) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -9567,6 +9673,32 @@ fn run_with_log(
                 await_answer(answered);
                 done.err().map(|why| Err(format!("select_text: {why}")))
             }
+            Step::ExpectPlaced(t, want) => Some(poll(|| match stage.placed(*t) {
+                Err(why) => Err(format!("{} placed: {why}", target_spec(t))),
+                Ok((overlay, frame, rtl)) => {
+                    let got = classify_placed(overlay, frame, rtl);
+                    if got == *want {
+                        Ok(format!("{} placed {want}", target_spec(t)))
+                    } else {
+                        Err(format!(
+                            "{} placed {got:?}, wanted {want:?} (the overlay's frame {overlay:?} in the base's {frame:?})",
+                            target_spec(t)
+                        ))
+                    }
+                }
+            })),
+            Step::TapAt(t, place) => {
+                await_quiet();
+                stage.tap_at(*t, place).err().map(|why| Err(format!("tap_at {} {place}: {why}", target_spec(t))))
+            }
+            Step::ExpectAxOrder(targets) => {
+                let want: Vec<String> = targets.iter().map(target_spec).collect();
+                Some(poll(|| match stage.ax_order(targets) {
+                    Err(why) => Err(format!("ax order: {why}")),
+                    Ok(got) if got == want => Ok(format!("ax order {}", want.join(" "))),
+                    Ok(got) => Err(format!("ax order {}, wanted {}", got.join(" "), want.join(" "))),
+                }))
+            }
             Step::ClickMarker(target, start) => {
                 await_quiet();
                 let answered = crate::scene::answers();
@@ -12000,6 +12132,35 @@ mod tests {
         assert!(parse("expect_expanded checkbox#0 on").is_err());
         assert!(parse("expect_expanded expander#0 maybe").is_err());
         MOCK_EXPANDED.with(|e| e.set((false, false)));
+    }
+
+    /// docs/layering-plan.md LY13: the three verbs parse, and the placement
+    /// reads each of the nine places, the veil and a mirrored layout.
+    #[test]
+    fn layering_verbs_parse_and_classify() {
+        let o = parse_target("button@share").unwrap();
+        assert_eq!(
+            parse("expect_placed button@share \"bottom_trailing 12\"").unwrap()[0],
+            Step::ExpectPlaced(o, "bottom_trailing 12".into())
+        );
+        assert_eq!(parse("tap_at button@share top_leading").unwrap()[0], Step::TapAt(o, "top_leading".into()));
+        assert!(parse("tap_at button@share upper_left").is_err());
+        assert!(parse("expect_ax_order button@share").is_err());
+        assert!(matches!(&parse("expect_ax_order image@a label@b").unwrap()[0], Step::ExpectAxOrder(t) if t.len() == 2));
+        let b = (100.0, 50.0, 320.0, 200.0);
+        let at = |x: f64, y: f64| (x, y, 40.0, 20.0);
+        assert_eq!(classify_placed(at(112.0, 62.0), b, false), "top_leading 12");
+        assert_eq!(classify_placed(at(240.0, 62.0), b, false), "top 12");
+        assert_eq!(classify_placed(at(368.0, 218.0), b, false), "bottom_trailing 12");
+        assert_eq!(classify_placed(at(112.0, 140.0), b, false), "leading 12");
+        assert_eq!(classify_placed(at(240.0, 140.0), b, false), "center");
+        assert_eq!(classify_placed(at(112.0, 218.0), b, true), "bottom_trailing 12");
+        assert_eq!(classify_placed(at(368.0, 62.0), b, false), "top_trailing 12");
+        assert_eq!(classify_placed(at(368.0, 56.0), b, false), "top_trailing 6/12");
+        assert_eq!(classify_placed((108.0, 58.0, 304.0, 184.0), b, false), "fill 8");
+        assert_eq!(place_point(b, "top_leading", false), Some((104.0, 54.0)));
+        assert_eq!(place_point(b, "top_leading", true), Some((416.0, 54.0)));
+        assert_eq!(place_point(b, "center", false), Some((260.0, 150.0)));
     }
 
     /// docs/rich-document-plan.md §9 step 2: the rich document's verbs parse

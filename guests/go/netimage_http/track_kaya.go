@@ -95,6 +95,7 @@ func (r trackRow) Phase() kaya.Field[kaya.ImagePhase] { return kaya.FieldAt[kaya
 func (r trackRow) Row(body func()) kaya.Node { return r.t.Row(body) }
 
 func (r trackRow) Column(body func()) kaya.Node { return r.t.Column(body) }
+func (r trackRow) Layers(body func()) kaya.Node { return r.t.Layers(body) }
 
 func (r trackRow) Label(f kaya.Field[string]) kaya.Node { return r.c.Label(r.t, f) }
 
@@ -188,6 +189,7 @@ func (r trackRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.Se
 func (r trackRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
 func (r trackRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
 func (r trackRow) SetShape(n kaya.Node, shape kaya.Shape)               { r.t.SetShape(n, shape) }
+func (r trackRow) SetPlace(n kaya.Node, place kaya.Place)               { r.t.SetPlace(n, place) }
 func (r trackRow) SetTint(n kaya.Node, tint kaya.Tint)                  { r.t.SetTint(n, tint) }
 func (r trackRow) BindTint(n kaya.Node, f kaya.Field[kaya.Tint])        { r.t.BindTint(n, f) }
 func (r trackRow) SetSelected(n kaya.Node, on bool)                     { r.t.SetSelected(n, on) }

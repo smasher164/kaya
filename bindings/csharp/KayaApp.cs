@@ -915,6 +915,25 @@ enum Tint : long
     None = KayaWire.TintNone,
     /// The platform's panel over media (docs/styling-pass-plan.md Y3).
     Overlay = KayaWire.TintOverlay,
+    /// The overlay panel as a scrim, kaya choosing its darkness
+    /// (docs/layering-plan.md LY9).
+    OverlayFade = KayaWire.TintOverlayFade,
+}
+
+/// Where an overlay of a layers container sits in its base's box
+/// (docs/layering-plan.md LY3); leading and trailing follow the layout's
+/// direction.
+enum Place : long
+{
+    TopLeading = KayaWire.PlaceTopLeading,
+    Top = KayaWire.PlaceTop,
+    TopTrailing = KayaWire.PlaceTopTrailing,
+    Leading = KayaWire.PlaceLeading,
+    Center = KayaWire.PlaceCenter,
+    Trailing = KayaWire.PlaceTrailing,
+    BottomLeading = KayaWire.PlaceBottomLeading,
+    Bottom = KayaWire.PlaceBottom,
+    BottomTrailing = KayaWire.PlaceBottomTrailing,
 }
 
 /// An image's clip (docs/styling-pass-plan.md Y6): Rounded is the
@@ -6362,6 +6381,20 @@ sealed class Tx : IDisposable
         }, grow, spacing, align, inset, stackWhen, filled, groundGradient, groundImage,
             onActivate, onSelect);
 
+    /// LAYERS (docs/layering-plan.md): the body's first child is the base,
+    /// laid out as it would be alone in this container's place; every later
+    /// child is drawn over it, placed in the base's box by SetPlace at this
+    /// container's inset, and takes every tap in its own box.
+    public void Layers(Action<Widget> body, double? grow = null, Inset? inset = null) =>
+        Layers<object?>(c => { body(c); return null; }, grow, inset);
+
+    public T Layers<T>(Func<Widget, T> body, double? grow = null, Inset? inset = null) =>
+        ContainerOf(KayaWire.KindLayers, body, grow, null, null, inset);
+
+    /// Where an overlay sits in its layers container's box (docs/layering-plan.md LY3).
+    public void SetPlace(Widget w, Place place) =>
+        Records.Add(KayaWire.TxSetPlace(w.Id, (long)place));
+
     /// A scroll viewport over EXACTLY ONE child. Pass grow: so the
     /// enclosing track CONSTRAINS it — an unconstrained viewport hugs its
     /// content and nothing overflows. `axis:` is the direction it scrolls,
@@ -7983,6 +8016,10 @@ sealed class Tpl
     public void SetFill(Node n, bool on) =>
         tx.Records.Add(KayaWire.TxSetFill(n.Id, on));
 
+    /// A stamped overlay's place (Tx.SetPlace).
+    public void SetPlace(Node n, Place place) =>
+        tx.Records.Add(KayaWire.TxSetPlace(n.Id, (long)place));
+
     /// A stamped textarea that SENDS on Return (docs/submit-plan.md S2).
     public void SetSubmits(Node n, bool on) =>
         tx.Records.Add(KayaWire.TxSetSubmits(n.Id, on));
@@ -8993,6 +9030,9 @@ sealed class Tpl
     public Node Column(Action body) => ContainerOf(KayaWire.KindColumn, body);
 
     public Node Row(Action body) => ContainerOf(KayaWire.KindRow, body);
+
+    /// A stamped layers container (Tx.Layers).
+    public Node Layers(Action body) => ContainerOf(KayaWire.KindLayers, body);
 
     /// A vertical scroll viewport over EXACTLY ONE child, per stamped
     /// copy. SetGrow it so the enclosing track CONSTRAINS it — an

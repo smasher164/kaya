@@ -391,7 +391,10 @@ internal fun KayaCapturePreview(node: KayaNode) {
         AndroidView(
             factory = { context ->
                 PreviewView(context).apply {
-                    implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+                    // LY7 (docs/layering-plan.md): an overlay self-view is a
+                    // TextureView, window content that composes over any video.
+                    implementationMode = if (kayaInOverlay(node)) PreviewView.ImplementationMode.COMPATIBLE
+                        else PreviewView.ImplementationMode.PERFORMANCE
                     layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                 }
             },

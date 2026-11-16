@@ -85,7 +85,8 @@ internal fun KayaSurfaceView(node: KayaNode, a11y: Modifier, boxFill: Modifier) 
     Box(
         modifier = sized.then(kayaBleed(node)).clipToBounds()
             .then(a11y)
-            .semantics { role = Role.Image }
+            // One focus, merging: the media arm's reason (docs/traps.md).
+            .semantics(mergeDescendants = true) { role = Role.Image }
             .onGloballyPositioned { c ->
                 kayaVideoBoxes[node.id] = c.boundsInWindow()
                 kayaVideoFrames[node.id] = androidx.compose.ui.geometry.Rect(

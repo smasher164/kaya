@@ -1507,6 +1507,8 @@ BRIDGE_VERBS = frozenset((
     # the text colour's as well; a checklist box is the driver's tap
     # (docs/rich-document-plan.md §11).
     "pick_color", "pick_text_color", "click_marker",
+    # A tap at a place of a frame is the driver's touch (docs/layering-plan.md LY13).
+    "tap_at",
     # `press tab|space|up|down` is the driver's hardware key (kayaPressFocusKey),
     # and the menu bar read sends one (kayaAwaitMenuBuild).
     "press", "expect_menu_bar",

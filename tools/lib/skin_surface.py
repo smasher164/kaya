@@ -192,7 +192,7 @@ ROWS = [
     ("java image_dominant", JV, r"public static java\.util\.Optional<Color> imageDominant\(byte\[\] bytes\) \{", "imageDominant"),
     ("java image_palette", JV, r"public static java\.util\.Optional<List<PaletteColor>> imagePalette\(byte\[\] bytes, int n\) \{", "imagePalette"),
     ("java tint none", JV, r"^        NONE\(KayaWire\.TINT_NONE\),", "TINT_NONE"),
-    ("java tint overlay", JV, r"^        OVERLAY\(KayaWire\.TINT_OVERLAY\);", "TINT_OVERLAY"),
+    ("java tint overlay", JV, r"^        OVERLAY\(KayaWire\.TINT_OVERLAY\),", "TINT_OVERLAY"),
     ("java shape vocabulary", JV, r"public enum Shape \{\n\s+RECT\(KayaWire\.SHAPE_RECT\), ROUNDED\(KayaWire\.SHAPE_ROUNDED\), CIRCLE\(KayaWire\.SHAPE_CIRCLE\);", "Shape"),
 
     ("swift ground gradient", SW, r"public func setGroundGradient\(_ w: KayaWidget, _ color: KayaColor\) \{", "setGroundGradient"),

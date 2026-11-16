@@ -67,6 +67,10 @@ public final class Main {
             case "grounds":
                 app = Grounds::app;
                 break;
+            case "layers":
+            case "layersrtl":
+                app = Layers::app;
+                break;
             case "shapes":
                 app = Shapes::app;
                 break;
