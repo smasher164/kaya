@@ -412,6 +412,10 @@ not kaya's alpha.
 Refused: text bare on an image ground; a repeating or positioned image; a
 blur radius or scrim opacity knob; a video as a ground.
 
+AMENDED 2026-11-16 (docs/layering-plan.md LY9, ruled B): the `overlay` fill
+gains a fade form, a gradient scrim darkening toward the picture's edge the
+panel sits against, its darkness kaya's; still no opacity knob.
+
 ### Y4: A container that takes a click as a whole, with the platform's hover and selection (RULED 2026-10-15)
 
 RECOMMEND an `on_activate` handler on row and column in both zones, where

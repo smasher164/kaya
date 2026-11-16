@@ -1,7 +1,9 @@
 # Layering: one view over another (design pass, 2026-11-15)
 
-Status: PROPOSED 2026-11-15, rulings open (review page
-claude.ai/artifact/BF7TWX5Ue3b9dHKfvSEmQb). Nothing is built. The maintainer,
+Status: RULED 2026-11-16 (review page
+claude.ai/artifact/BF7TWX5Ue3b9dHKfvSEmQb): LY9 B with the fade form, every
+other ruling as recommended; the build started on the maintainer's word the
+same night ("you can start the build"). Nothing is built yet. The maintainer,
 2026-11-15: "do layering first". This plan is the design pass for
 docs/deferred.md's GAP "kaya cannot float one view over another" (opened by
 the maintainer's call-screen ruling of 2026-11-01, docs/capture-plan.md §12
@@ -245,7 +247,7 @@ The lowering, per backend (a sketch for the build; §6 rules the semantics):
 - **check-targets** and **check-gtk.py**: every backend compiles the arm.
 - **check-stubs**: the scene's legs are not wired on a backend while its arm
   still calls `depth_stub`.
-- **The scene on every lane in every language** (tools/scenes/layers.steps,
+- **The scene on every lane in every language** (a new `layers.steps` scene,
   §6 LY13), which is the wall a broken arm walks into; and chatcall.steps'
   reads of the call screen (LY14).
 - **Watched negatives for the scene's reads**, each perturbation's
@@ -463,6 +465,16 @@ an image-grounded container, unless a `filled` container lies between them
 naming the label; buttons, icons, images and canvases stay legal bare, as in
 Y3. A badge is a filled label and passes.
 
+RULED 2026-11-16: B, the recommendation above plus a fade form of the
+`overlay` fill (the maintainer: "option B it is then"). The fade is a
+gradient scrim: clear at the edge of the panel facing into the picture,
+darkening toward the picture's edge the panel sits against, the light
+`overlay` foreground on it; kaya picks the darkness so the text's contrast
+is promised, and the app names only the form, no direction and no opacity.
+It is the same fill Y3 allows on an image ground, so it reaches Y3 too
+(docs/styling-pass-plan.md). The build measures the contrast under the text
+on every lane.
+
 ### LY10. Safe areas, scroll, hidden and grow
 
 - **Safe areas**: overlays are placed in the box the base was given inside
@@ -529,7 +541,7 @@ Three new verbs, each read off the platform:
   order on Compose, AT-SPI child order on GTK, the UIA control-view walk on
   WinUI.
 
-tools/scenes/layers.steps, a guest in every language: an image base with a
+a new `layers.steps` scene, a guest in every language: an image base with a
 filled caption at `bottom`, a filled badge at `top_trailing` inset 0, a
 button at `bottom_trailing`; a second container with a button base and a
 filled label overlay over its centre. Reads: `expect_placed` for each
