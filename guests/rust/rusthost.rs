@@ -178,6 +178,7 @@ mod mountfocus;
 mod tints;
 mod icons;
 mod layers;
+mod layersvideo;
 
 #[path = "submit.rs"]
 mod submit;
@@ -312,6 +313,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("icons") => icons::app(ctx),
         // And its right-to-left half under KAYA_LOCALE=ar-EG (tools/scenes/layersrtl.steps).
         Ok("layers") | Ok("layersrtl") => layers::app(ctx),
+        Ok("layersvideo") => layersvideo::app(ctx),
         Ok("submit") => submit::app(ctx),
         Ok("tooltips") => tooltips::app(ctx),
         Ok("search") => search::app(ctx),

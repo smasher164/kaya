@@ -129,7 +129,7 @@ TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200, "codesurfacebig_
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext", "flexshrink",
-                "listrow", "stampbefore", "mountfocus", "tints", "icons", "badge", "emoji",
+                "listrow", "stampbefore", "mountfocus", "tints", "icons", "badge", "emoji", "layersvideo",
                 "ownundo", "richlabel", "notes", "richrows", "richdoc"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
@@ -305,6 +305,8 @@ ORDER = [
      "capture_csharp", "capture_java",
      "capture_denied_rust", "capture_denied_python", "capture_denied_js",
      "capture_denied_go", "capture_denied_csharp", "capture_denied_java",
+     # A self-view over a player (docs/layering-plan.md LY7).
+     "layersvideo_rust",
      "rust", "python", "js", "go", "csharp", "java",
      "entry_rust", "entry_python", "entry_js", "entry_go", "entry_csharp", "entry_java",
      "gallery_rust", "gallery_python", "gallery_js", "gallery_go", "gallery_csharp", "gallery_java",
@@ -617,6 +619,8 @@ ORDER = [
     ["cards_rust"],
     # The layers scene's `tap_at` clicks the VM's real pointer (LY13).
     ["layers_rust"],
+    # And in the dark (docs/layering-plan.md LY9).
+    ["layersdark_rust"],
     ["layers_python"],
     ["layers_js"],
     ["layers_go"],
@@ -987,7 +991,7 @@ ORDER = [
 # The flyout group: two context-menu legs at once take the foreground from
 # each other at every open (docs/traps.md, the flyout a neighbour dismissed);
 # identity's window menu is one more (its caption mark's press).
-SERIAL_GROUPS = {"camera": ("capture", "capture_denied", "chatcall"),
+SERIAL_GROUPS = {"camera": ("capture", "capture_denied", "chatcall", "layersvideo"),
                  "flyout": ("music_context", "rowmenu", "identity", "colorpanel")}
 
 
@@ -1053,7 +1057,7 @@ CODEC_EXTENSIONS = ("Microsoft.HEVCVideoExtension", "Microsoft.AV1VideoExtension
 
 
 def capture_leg(leg):
-    return scene_lang(leg)[0] in ("capture", "capture_denied", "chatcall")
+    return scene_lang(leg)[0] in ("capture", "capture_denied", "chatcall", "layersvideo")
 
 
 # THE CAPTURE LEGS' DEVICES (docs/HACKING.md, the Windows capture install):

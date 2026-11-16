@@ -73,7 +73,9 @@ DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "not
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
                 "capture",
                 # The far end of a call (docs/capture-plan.md §5), rust-only at depth.
-                "farend"]
+                "farend",
+                # A self-view over a player (docs/layering-plan.md LY7), rust-only.
+                "layersvideo"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -174,7 +176,9 @@ DARK_LEGS = (("canvasdark-rust-swiftui", "canvas", "rust"),
              # The dock in the dark (docs/media-player-plan.md M16 (22)).
              ("music_dockdark-python-swiftui", "music_dock", "python"),
              # A document colour drawn through the dark map (docs/rich-document-plan.md RD5).
-             ("richdocdark-rust-swiftui", "richdoc", "rust"))
+             ("richdocdark-rust-swiftui", "richdoc", "rust"),
+             # Overlays and the fade form in the dark (docs/layering-plan.md LY9).
+             ("layersdark-rust-swiftui", "layers", "rust"))
 
 # EXCLUSIVE and the idle wait are below, after legs() — the set is derived
 # from the queue rather than spelled.
@@ -354,6 +358,7 @@ ORDER = [
     # Views over views (docs/layering-plan.md LY13), and in Arabic.
     ("layers", LANGS + ("c",)),
     ("layersrtl", ("rust",)),
+    ("layersvideo", ("rust",)),
     ("codesurface", LANGS),
     # docs/font-picker-plan.md §7.
     ("fontpick", LANGS),

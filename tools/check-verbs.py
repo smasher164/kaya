@@ -6597,7 +6597,8 @@ for line in layers_out:
     layers_status = 1
 for label, rel, pattern, repl, finding in (
     ("the swiftui hit opacity cut", SWIFT,
-     r"(KayaRender\(node: o, [^\n]*\n[^\n]*\n[^\n]*\n)                    \.contentShape\(Rectangle\(\)\)\n", "",
+     r"(KayaRender\(node: o, [^\n]*\n[^\n]*\n[^\n]*\n)"
+     r"                    \.contentShape\(Rectangle\(\)\)\n", "",
      r"^KayaSwiftUI\.swift's site for the overlays' hit opacity"),
     ("the swiftui reading-order pin cut", SWIFT,
      r"(\.modifier\(KayaLayerReader\(id: o\.id\)\)\n)                    \.accessibilitySortPr"

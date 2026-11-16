@@ -1,0 +1,9 @@
+# A self-view over a player's picture (docs/layering-plan.md LY7, LY13): the
+# overlay video is drawn over the base video. On Android both would be
+# SurfaceViews behind the window with no defined order between them, so an
+# overlay video draws through its TextureView route instead.
+expect_title "layersvideo"
+expect_video_ink video@picture "C83C1E"
+expect_video_ink video@selfview "1E5AC8"
+expect_placed column@selftile "bottom_trailing 12"
+expect_ax_order video@picture video@selfview

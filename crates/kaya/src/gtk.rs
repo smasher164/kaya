@@ -2398,15 +2398,52 @@ fn mark_aspect_box(widget: &gtk4::Widget) {
     unsafe { widget.set_data(ASPECT_BOX_KEY, true) }
 }
 
-/// A growing aspect box's natural box, read off its picture's measure.
+fn is_aspect_box(widget: &gtk4::Widget) -> bool {
+    // SAFETY: the key is private to this module and only ever holds a bool.
+    unsafe { widget.data::<bool>(ASPECT_BOX_KEY) }.is_some()
+}
+
+/// A layers container (docs/layering-plan.md LY2): a growing aspect box as
+/// its base grows by the container's weight, and the container is the box.
+const LAYERS_KEY: &str = "kaya-layers";
+
+fn mark_layers(widget: &gtk4::Widget) {
+    // SAFETY: the only writer of the key.
+    unsafe { widget.set_data(LAYERS_KEY, true) }
+}
+
+fn layers_base(widget: &gtk4::Widget) -> Option<gtk4::Widget> {
+    // SAFETY: the key is private to this module and only ever holds a bool.
+    unsafe { widget.data::<bool>(LAYERS_KEY) }?;
+    widget.downcast_ref::<gtk4::Overlay>()?.child()
+}
+
+/// The weight an aspect box grows by: its own, or as a layers base its container's.
+fn aspect_grow_weight(aspect: &gtk4::Widget) -> f64 {
+    use gtk4::prelude::WidgetExt;
+    let own = grow_weight(aspect);
+    if own > 0.0 {
+        return own;
+    }
+    match aspect.parent() {
+        Some(p) if layers_base(&p).as_ref() == Some(aspect) => grow_weight(&p),
+        _ => 0.0,
+    }
+}
+
+/// A growing aspect box's natural box, read off its picture's measure; a
+/// layers container whose base is one answers for it.
 fn grown_aspect(widget: &gtk4::Widget) -> Option<(u32, u32)> {
     use gtk4::prelude::WidgetExt;
-    // SAFETY: the key is private to this module and only ever holds a bool.
-    unsafe { widget.data::<bool>(ASPECT_BOX_KEY) }?;
+    let aspect = if is_aspect_box(widget) {
+        widget.clone()
+    } else {
+        layers_base(widget).filter(is_aspect_box)?
+    };
     if grow_weight(widget) <= 0.0 {
         return None;
     }
-    let picture = widget.downcast_ref::<gtk4::Overlay>()?.child()?;
+    let picture = aspect.downcast_ref::<gtk4::Overlay>()?.child()?;
     let (_, w, _, _) = picture.measure(gtk4::Orientation::Horizontal, -1);
     let (_, h, _, _) = picture.measure(gtk4::Orientation::Vertical, -1);
     (w > 0 && h > 0).then_some((w as u32, h as u32))
@@ -17081,6 +17118,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         let left = if widget.direction() == gtk4::TextDirection::Rtl { me } else { ms };
                         Some(gdk::Rectangle::new(x - left, y - mt, w + ms + me, h + mt + mb))
                     });
+                    mark_layers(overlay.upcast_ref());
                     core.layers.push(overlay.clone());
                     core.layer_children.insert(id.0, Vec::new());
                     NativeWidget::Layers(overlay)
@@ -20205,6 +20243,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 kids.push(child.0);
                 if kids.len() == 1 {
                     overlay.set_child(Some(&child_widget));
+                    // A growing aspect base makes the container a growing box.
+                    reconcile_grow_align(overlay.upcast_ref());
                 } else {
                     overlay.add_overlay(&child_widget);
                     overlay.set_clip_overlay(&child_widget, true);
@@ -33118,7 +33158,7 @@ mod gtk_media {
                 if for_size < 0 {
                     return (0, h, -1, -1);
                 }
-                let grows = widget.parent().is_some_and(|p| super::super::grow_weight(&p) > 0.0);
+                let grows = widget.parent().is_some_and(|p| super::super::aspect_grow_weight(&p) > 0.0);
                 let at = crate::media::video_view_height((w.max(0) as u32, h.max(0) as u32), for_size, grows);
                 // A growing box takes its room, never a floor of its own
                 // (docs/media-plan.md §3, a growing box).
@@ -34746,18 +34786,47 @@ mod gtk_media {
         use gtk4::prelude::WidgetExt;
         let widget: gtk4::Widget = view.picture.clone().upcast();
         let (w, h) = (f64::from(widget.width()), f64::from(widget.height()));
-        window_pixel(&widget, w + crate::harness::VIDEO_GROUND_OFFSET, h / 2.0)
+        let (x, y) = (w + crate::harness::VIDEO_GROUND_OFFSET, h / 2.0);
+        // Where a `none` read looked, once per place (docs/traps.md, layering's
+        // camera-off self-view): the colour alone cannot say it read off the picture.
+        thread_local!(static SAID: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) });
+        let place = widget.root().and_then(|root| {
+            let bounds = widget.compute_bounds(&root)?;
+            Some(format!(
+                "KAYA_DIAG video ground: the picture at {},{} {}x{} in the toplevel, its ground read at {},{}",
+                bounds.x(),
+                bounds.y(),
+                bounds.width(),
+                bounds.height(),
+                bounds.x() as f64 + x,
+                bounds.y() as f64 + y
+            ))
+        });
+        let place = place.unwrap_or_else(|| "KAYA_DIAG video ground: the picture is in no toplevel".to_owned());
+        SAID.with_borrow_mut(|said| {
+            if *said != place {
+                eprintln!("{place}");
+                *said = place;
+            }
+        });
+        window_pixel(&widget, x, y)
     }
 
-    /// One pixel of the whole toplevel as GSK renders it, at a point in
-    /// `widget`'s own coordinates, as `RRGGBB`.
+    /// One pixel of the window's content as GSK renders it, at a point in
+    /// `widget`'s own coordinates, as `RRGGBB`. The content, never the window:
+    /// an X11 window's paintable carries its CSD shadow and was scaled into the
+    /// window's size, 4 px off at its trailing edge (docs/traps.md, layering's
+    /// camera-off self-view).
     #[cfg(feature = "harness")]
     fn window_pixel(widget: &gtk4::Widget, x: f64, y: f64) -> String {
-        use gtk4::prelude::{NativeExt, SnapshotExt, WidgetExt};
+        use gtk4::prelude::{GtkWindowExt, NativeExt, SnapshotExt, WidgetExt};
         let Some(root) = widget.root() else {
             return "<the video view is in no toplevel>".to_owned();
         };
-        let root: gtk4::Widget = root.upcast();
+        let root: gtk4::Widget = match root.downcast_ref::<gtk4::Window>().and_then(|w| w.child()) {
+            Some(content) => content,
+            None => root.upcast(),
+        };
         let Some(renderer) = widget.native().and_then(|n| n.renderer()) else {
             return "<this toplevel has no GSK renderer>".to_owned();
         };

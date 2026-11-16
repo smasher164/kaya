@@ -3704,6 +3704,19 @@ fn laid_out(core: &CoreState, parent: WidgetId) -> Vec<WidgetId> {
         .collect()
 }
 
+/// The aspect box a child grows as (docs/media-plan.md §3): a video view or
+/// a surface, or the base of a layers container when it is one (LY2).
+fn grown_aspect_id(core: &CoreState, child: WidgetId) -> Option<WidgetId> {
+    match core.widgets.get(&child)? {
+        NativeWidget::Video { .. } => Some(child),
+        NativeWidget::Layers { .. } => {
+            let base = WidgetId(*core.layer_children.get(&child.0)?.first()?);
+            matches!(core.widgets.get(&base), Some(NativeWidget::Video { .. })).then_some(base)
+        }
+        _ => None,
+    }
+}
+
 /// A growing video view or surface in a column (docs/media-plan.md §3, a
 /// growing box): its row stops at its box, and while one does, every
 /// grower's row is capped at its own share so the rest stays with the
@@ -3746,7 +3759,7 @@ fn fit_grown_rows(core: &CoreState, parent: WidgetId) -> windows_core::Result<()
         }
         let share = leftover * weight(child) / pool;
         caps[i] = share;
-        if let Some(natural) = media::grown_natural(core, child.0) {
+        if let Some(natural) = grown_aspect_id(core, *child).and_then(|a| media::grown_natural(core, a.0)) {
             let (_, h) = crate::media::grown_box(natural, (width, share));
             if h < share - 0.5 {
                 caps[i] = h;
@@ -4076,18 +4089,25 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     // A growing box is centred across its slot (docs/media-plan.md §3).
     let mut grown = false;
     for child in order {
-        let Some(widget @ NativeWidget::Video { .. }) = core.widgets.get(child) else { continue };
+        let Some(aspect) = grown_aspect_id(core, *child) else { continue };
         let grows = core.grow.get(child).copied().unwrap_or(0.0) > 0.0;
-        media::set_grows(core, child.0, grows)?;
+        media::set_grows(core, aspect.0, grows)?;
         if !grows {
             continue;
         }
         grown = true;
-        let element: FrameworkElement = widget.element()?.cast()?;
-        if vertical {
-            element.SetHorizontalAlignment(bindings::Microsoft::UI::Xaml::HorizontalAlignment::Center)?;
-        } else {
-            element.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
+        // A layers base takes its own box, never its cell's: the cell is as
+        // wide as the overlay host, which follows the base (LY2).
+        let mut centred: Vec<FrameworkElement> = vec![core.widgets[child].element()?.cast()?];
+        if aspect != *child {
+            centred.push(core.widgets[&aspect].element()?.cast()?);
+        }
+        for element in centred {
+            if vertical {
+                element.SetHorizontalAlignment(bindings::Microsoft::UI::Xaml::HorizontalAlignment::Center)?;
+            } else {
+                element.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
+            }
         }
     }
     if grown && vertical && table.is_none() && GROWN_WIRED.with_borrow_mut(|w| w.insert(parent.0)) {

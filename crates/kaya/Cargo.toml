@@ -655,6 +655,11 @@ path = "../../guests/rust/icons.rs"
 name = "layers"
 path = "../../guests/rust/layers.rs"
 
+# docs/layering-plan.md LY7.
+[[example]]
+name = "layersvideo"
+path = "../../guests/rust/layersvideo.rs"
+
 # docs/styling-pass-plan.md §5.
 [[example]]
 name = "grounds"

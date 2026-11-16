@@ -91,6 +91,9 @@ LEGS = {
         "icons-compose",
         # Views over views (docs/layering-plan.md LY13), and in Arabic.
         "layers-compose", "layersrtl-compose",
+        # A self-view over a player, LY7's TextureView route.
+        "layersvideo-compose",
+        "layersdark-compose",
         "scrollto-compose",
         # The number field in the everyday locale and in German
         # (docs/number-field-plan.md §5); MODS cuts the steps.
@@ -382,6 +385,8 @@ FLAGS = {
     "tintsdark-compose": {"scene": "tints", "appearance": "dark"},
     "groundsdark-compose": {"scene": "grounds", "appearance": "dark"},
     "richdocdark-compose": {"scene": "richdoc", "appearance": "dark"},
+    # Overlays and the fade form in the dark (docs/layering-plan.md LY9).
+    "layersdark-compose": {"scene": "layers", "appearance": "dark"},
     "music_headerdark-python": {"scene": "music_header", "appearance": "dark"},
     "music_artistdark-python": {"scene": "music_artist", "appearance": "dark"},
     "music_dockdark-python": {"scene": "music_dock", "appearance": "dark"},

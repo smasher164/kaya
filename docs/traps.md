@@ -21105,3 +21105,28 @@ back before the looper turns. And the peer's surface and the self-view were
 on no TalkBack traversal link at all: their box carries the content
 description over a child node, so unmerged it is no leaf; both now merge
 their descendants.
+
+A growing aspect base (the call's peer) was stretched to its track on GTK and
+WinUI (chatcall read 320x482 and 320x492), because both backends apply the
+growing-box rule (docs/media-plan.md §3) in their row and column layouts, which
+see the layers container and not its base. GTK's flex now asks a layers
+container whose base is an aspect box for that base's box, and the base's
+VideoLayout drops its minimum when its container grows; WinUI resolves a
+layers child to its video base for the row cap and centres both the container
+and the base, since a base left at Stretch filled a cell the overlay host had
+widened (674 for a 656 picture, the self-view tile drawn past the picture's
+edge). With the box right, chatcall's camera-off read on the x11 leg still
+failed: `none` read the self-view's centre as the peer (correct, the self-view
+draws nothing then) and its ground 8 px beside it as the window, 4 px inside
+the peer. GTK's window_pixel snapshotted the WINDOW's paintable, whose X11
+size carries the CSD shadow, scaled into the window's 890 px, so every read
+landed a few px off toward the trailing edge; it now renders the window's
+content, as the fail shot always did, and prints where it read
+(`KAYA_DIAG video ground: the picture at ...`).
+
+LY7, measured on the Android pool (§5 step 0 (a)): a capture self-view on a
+SurfaceView (PERFORMANCE mode, KayaCapture's COMPATIBLE switch cut) over a
+player's SurfaceView still composed on top (layersvideo-compose green, the
+self-view's ink 1E5AC8 at its centre). The order the platform does not
+promise held on this emulator in attach order, so the TextureView route is
+kept by the ruling, not by a red read; that negative was never watched red.

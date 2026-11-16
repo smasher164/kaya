@@ -86,7 +86,7 @@ OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland editork
 # waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
 # `richtext`, `ownundo` and `richlabel` wait on the eight other bindings'
 # Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14, §15).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext richdoc ownundo richlabel notes richrows format flexshrink listrow stampbefore mountfocus tints icons badge emoji"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext richdoc ownundo richlabel notes richrows format flexshrink listrow stampbefore mountfocus tints icons badge emoji layersvideo"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1574,6 +1574,8 @@ for proto in x11 wayland; do
     run "$proto" layers-c env KAYA_SELFTEST=layers /tmp/c-guests/layers
     run "$proto" layersrtl-rust env KAYA_LOCALE=ar-EG KAYA_SELFTEST=layersrtl \
         "$CARGO_TARGET_DIR/debug/examples/layers"
+    run "$proto" layersdark-rust env KAYA_APPEARANCE=dark KAYA_SELFTEST=layers \
+        "$CARGO_TARGET_DIR/debug/examples/layers"
     # THE CLOSED-APP CLICK'S DOOR ON THIS LANE (docs/tasks-s9-plan.md R6):
     # the tasks scene's `relaunch` is answered by the daemon's ActionInvoked,
     # which xdg-desktop-portal-gtk reads as the notification's `app.`-prefixed
@@ -2457,6 +2459,9 @@ for proto in x11 wayland; do
         python3 tools/linux/capture-leg.py "$capture_regime" java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" capture-c env KAYA_SELFTEST=capture \
         python3 tools/linux/capture-leg.py "$capture_regime" /tmp/c-guests/capture
+    # A self-view over a player (docs/layering-plan.md LY7).
+    run "$proto" layersvideo-rust env KAYA_SELFTEST=layersvideo \
+        python3 tools/linux/capture-leg.py "$capture_regime" "$CARGO_TARGET_DIR/debug/examples/layersvideo"
     run "$proto" capture_denied-rust env KAYA_SELFTEST=capture_denied \
         python3 tools/linux/capture-leg.py "$capture_regime" "$CARGO_TARGET_DIR/debug/examples/capture"
     run "$proto" capture_denied-python env KAYA_SELFTEST=capture_denied KAYA_LIB="$LIB" \

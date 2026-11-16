@@ -156,6 +156,17 @@ def quiet(argv, env, timeout=10):
     return done.returncode, (done.stdout + done.stderr).strip()
 
 
+def start_guest(guest, env):
+    """The guest's process, or the sentence saying why it never started: the
+    run's sys.exit in its finally would otherwise swallow the OSError, and the
+    leg went red in 1 s with no line naming the missing example (2026-11-16)."""
+    try:
+        return subprocess.Popen(guest, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, errors="replace"), None
+    except OSError as e:
+        return None, f"FAILED — the guest {guest[0]} did not start: {e}"
+
+
 def self_test():
     checks = 0
     failed = []
@@ -171,6 +182,7 @@ def self_test():
     expect("direct regime, portal route", route_findings("direct", [ROUTE + "portal (granted)"]), True)
     expect("portal regime, a denied portal", route_findings("portal", [ROUTE + "portal-denied (response 1)"]), True)
     expect("no route printed", route_findings("portal", ["KAYA_SELFTEST: OK"]), False)
+    expect("a guest that is not there", start_guest(["/nonexistent/kaya-guest"], dict(os.environ))[1], True)
     addr, pid = parse_launch("DBUS_SESSION_BUS_ADDRESS='unix:abstract=/tmp/x,guid=1';\n"
                              "export DBUS_SESSION_BUS_ADDRESS;\nDBUS_SESSION_BUS_PID=42;\n")
     checks += 1
@@ -179,7 +191,7 @@ def self_test():
     for f in failed:
         say(f"SELF-TEST {f}")
     say(f"self-test: {checks} checks, {len(failed)} failed")
-    return 1 if failed or checks < 6 else 0
+    return 1 if failed or checks < 7 else 0
 
 
 def main(argv):
@@ -303,8 +315,10 @@ def main(argv):
 
         sampler = threading.Thread(target=sample_graph, daemon=True)
         sampler.start()
-        guest_proc = subprocess.Popen(guest, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                      text=True, errors="replace")
+        guest_proc, refused = start_guest(guest, env)
+        if refused:
+            findings.append(refused)
+            return status
         voice_graph = []
         for line in guest_proc.stdout:
             sys.stdout.write(line)
@@ -384,4 +398,4 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    main(sys.argv)
+    sys.exit(main(sys.argv))

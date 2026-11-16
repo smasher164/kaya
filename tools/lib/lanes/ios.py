@@ -231,6 +231,8 @@ RUST_SCENES = [
     # devices, the simulator having no camera and its microphone being the
     # host's.
     "capture", "capture_denied",
+    # A self-view over a player (docs/layering-plan.md LY7).
+    "layersvideo",
     # The far end (docs/capture-plan.md §5): the voice output on the
     # harness's offline engine, as the capture's devices are in-process.
     "farend",
