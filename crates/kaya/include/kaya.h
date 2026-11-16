@@ -3205,6 +3205,11 @@ typedef struct KayaHostApi {
   uint32_t (*ink_for_dark)(uint32_t);
   uint32_t (*ink_from_dark)(uint32_t);
   uintptr_t (*text_item_speech)(uint64_t, uint64_t, uint8_t*, uintptr_t);
+  /**
+   * docs/highlight-plan.md H1 and H4: the palette and the ink on a ground.
+   */
+  uint32_t (*ink_on)(uint32_t, uint32_t);
+  uint32_t (*highlight_ground)(uint32_t, uint32_t);
 } KayaHostApi;
 
 

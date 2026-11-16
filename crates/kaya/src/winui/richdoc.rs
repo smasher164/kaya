@@ -98,6 +98,15 @@ pub(super) fn paragraph_formats(
 
 /// A run's `color`, as this page draws it: the stored colour on a light
 /// page, `brand::ink_for_dark` of it on a dark one (RD5).
+/// A run's ink as the display draws it: under a highlight, re-mapped against
+/// the highlight's ground for this appearance (docs/highlight-plan.md H4).
+pub(super) fn drawn_ink(attrs: &BTreeMap<String, String>, dark: bool) -> Option<bindings::Windows::UI::Color> {
+    let ground = attrs.get("highlight").and_then(|name| crate::richdoc::highlight_ground(name, dark));
+    let Some(ground) = ground else { return drawn_color(attrs, dark) };
+    let rgb = crate::brand::ink_on(crate::richdoc::parse_color(attrs.get("color")?).ok()?, ground);
+    Some(bindings::Windows::UI::Color { A: 255, R: (rgb >> 16) as u8, G: (rgb >> 8) as u8, B: rgb as u8 })
+}
+
 pub(super) fn drawn_color(attrs: &BTreeMap<String, String>, dark: bool) -> Option<bindings::Windows::UI::Color> {
     let rgb = crate::richdoc::parse_color(attrs.get("color")?).ok()?;
     let rgb = if dark { crate::brand::ink_for_dark(rgb) } else { rgb };

@@ -27,3 +27,12 @@ appearance each time with nothing invalidated by hand.
 So the Mac arm needs no appearance observer for the mark: a dynamic colour in
 the attribute is enough, as for the code ground and the document ink. A
 pixel read of the mark (`expect_text_ground`) must allow one step per channel.
+
+**The selection under an opaque mark** (added the same day, for H3's ruling).
+Three more renders with the marked word selected (`setSelectedRange`): with
+the mark painted, the word's commonest pixel is still the mark (`F7E8AF`,
+`594C19`), so TextKit 2 draws the selection BELOW the layout fragments and an
+opaque mark hides it entirely; with no mark, the same selection reads
+`DCDCDC` (the inactive selection colour of a view with no window). The arm
+therefore leaves the selected bytes out of the mark it paints, which is also
+what H3's ruling asks.

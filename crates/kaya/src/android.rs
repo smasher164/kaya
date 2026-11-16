@@ -1365,6 +1365,16 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "(I)I".into(),
                 fn_ptr: present_ink_from_dark as *mut _,
             },
+            NativeMethod {
+                name: "inkOn".into(),
+                sig: "(II)I".into(),
+                fn_ptr: present_ink_on as *mut _,
+            },
+            NativeMethod {
+                name: "highlightGround".into(),
+                sig: "(IZ)I".into(),
+                fn_ptr: present_highlight_ground as *mut _,
+            },
         ],
     )
 }
@@ -2021,6 +2031,14 @@ extern "system" fn present_ink_for_dark(_env: JNIEnv, _class: JClass, rgb: jint)
 
 extern "system" fn present_ink_from_dark(_env: JNIEnv, _class: JClass, rgb: jint) -> jint {
     crate::capi::kaya_ink_from_dark(rgb as u32) as jint
+}
+
+extern "system" fn present_ink_on(_env: JNIEnv, _class: JClass, rgb: jint, ground: jint) -> jint {
+    crate::capi::kaya_ink_on(rgb as u32, ground as u32) as jint
+}
+
+extern "system" fn present_highlight_ground(_env: JNIEnv, _class: JClass, color: jint, dark: jni::sys::jboolean) -> jint {
+    crate::capi::kaya_highlight_ground(color as u32, u32::from(dark)) as jint
 }
 
 // --- Row windowing (docs/virtualization-plan.md §3) ------------------

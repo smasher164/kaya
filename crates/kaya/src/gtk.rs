@@ -493,6 +493,9 @@ const RICH_VALUED_PREFIX: &str = "kaya-rich-v-";
 /// The derived left margin of a paragraph (docs/rich-document-plan.md §6):
 /// tag margins replace and never add, so one tag per sum, never read back.
 const RICH_GEOM_PREFIX: &str = "kaya-geom-";
+/// A colour run's ink under a highlight (docs/highlight-plan.md H4), derived
+/// over each overlap as `kaya-ink-RRGGBB-<name>` and never read back.
+const RICH_INK_PREFIX: &str = "kaya-ink-";
 const LIST_INDENT_STEP: i32 = 24;
 const MARKER_GAP: f32 = 6.0;
 const CHECK_BOX: f32 = 14.0;
@@ -592,7 +595,83 @@ fn rich_tag(
     if name == "color" {
         tag.set_priority(0);
     }
+    order_rich_grounds(&table);
     tag
+}
+
+/// THE GROUNDS' ORDER (docs/highlight-plan.md H3): a highlight over a code
+/// run's ground, find's tag over both. Priority wins outright for the colour
+/// and for `bg-full-height`, and a tag minted later lands on top, so the
+/// order is put back after EVERY mint (docs/measurements/highlight-gtk-2026-11-15.md).
+fn order_rich_grounds(table: &gtk4::TextTagTable) {
+    use gtk4::prelude::TextTagExt;
+    let mut marks = Vec::new();
+    table.foreach(|tag| {
+        if tag.name().is_some_and(|n| n.starts_with(&format!("{RICH_VALUED_PREFIX}highlight="))) {
+            marks.push(tag.clone());
+        }
+    });
+    let top = table.size() - 1;
+    for tag in marks {
+        tag.set_priority(top);
+    }
+    if let Some(find) = table.lookup(HIGHLIGHT_TAG) {
+        find.set_priority(top);
+    }
+}
+
+/// Each colour run's ink over each highlight it sits under, recomputed whole.
+fn apply_rich_inks(view: &gtk4::TextView) {
+    use gtk4::prelude::{TextBufferExt, TextTagExt};
+    let buffer = view.buffer();
+    let table = buffer.tag_table();
+    let mut old = Vec::new();
+    table.foreach(|tag| {
+        if tag.name().is_some_and(|n| n.starts_with(RICH_INK_PREFIX)) {
+            old.push(tag.clone());
+        }
+    });
+    let (start, end) = buffer.bounds();
+    for tag in old {
+        buffer.remove_tag(&tag, &start, &end);
+    }
+    let mut it = buffer.start_iter();
+    while !it.is_end() {
+        let mut next = it.clone();
+        if !next.forward_to_tag_toggle(None::<&gtk4::TextTag>) {
+            next = buffer.end_iter();
+        }
+        let (mut rgb, mut mark) = (None, None);
+        for tag in it.tags() {
+            let Some(name) = tag.name() else { continue };
+            if let Some(v) = name.strip_prefix(&format!("{RICH_VALUED_PREFIX}color=")) {
+                rgb = rich_rgb(v);
+            } else if let Some(v) = name.strip_prefix(&format!("{RICH_VALUED_PREFIX}highlight=")) {
+                mark = Some(v.to_owned());
+            }
+        }
+        if let (Some(rgb), Some(mark)) = (rgb, mark) {
+            let name = format!("{RICH_INK_PREFIX}{rgb:06X}-{mark}");
+            let tag = table.lookup(&name).unwrap_or_else(|| {
+                let tag = gtk4::TextTag::new(Some(&name));
+                style_ink_tag(&tag, &name);
+                table.add(&tag);
+                tag
+            });
+            buffer.apply_tag(&tag, &it, &next);
+        }
+        it = next;
+    }
+}
+
+/// An ink tag's foreground off its own name, for this appearance.
+fn style_ink_tag(tag: &gtk4::TextTag, name: &str) {
+    use gtk4::prelude::TextTagExt;
+    let Some((rgb, mark)) = name.strip_prefix(RICH_INK_PREFIX).and_then(|r| r.split_once('-')) else { return };
+    let dark = adw::StyleManager::default().is_dark();
+    if let (Some(rgb), Some(ground)) = (rich_rgb(&format!("#{rgb}")), crate::richdoc::highlight_ground(mark, dark)) {
+        tag.set_foreground_rgba(Some(&rgba_of_rgb(crate::brand::ink_on(rgb, ground))));
+    }
 }
 
 /// `#RRGGBB` as a packed colour; None for anything else.
@@ -637,6 +716,17 @@ fn style_rich_tag(view: &gtk4::TextView, tag: &gtk4::TextTag, tag_name: &str) {
             if let Some(rgb) = rich_rgb(value) {
                 tag.set_foreground_rgba(Some(&rgba_of_rgb(rich_ink(rgb))));
             }
+        }
+        // THE HIGHLIGHT (docs/highlight-plan.md H2): its own ground, never
+        // full height, so the highlights read (keyed on bg-full-height) sees
+        // find's tag alone; order_rich_grounds keeps it under find's.
+        "highlight" => {
+            let value = tag_name.split_once('=').map(|(_, v)| v).unwrap_or_default();
+            let dark = adw::StyleManager::default().is_dark();
+            if let Some(rgb) = crate::richdoc::highlight_ground(value, dark) {
+                tag.set_background_rgba(Some(&rgba_of_rgb(rgb)));
+            }
+            tag.set_background_full_height(false);
         }
         "align" => tag.set_justification(match tag_name.split_once('=').map(|(_, v)| v) {
             Some("center") => gtk4::Justification::Center,
@@ -714,6 +804,11 @@ fn restyle_rich_grounds() {
                 for (tag, tag_name) in rich_tags(&view.buffer()) {
                     style_rich_tag(&view, &tag, &tag_name);
                 }
+                view.buffer().tag_table().foreach(|tag| {
+                    if let Some(name) = tag.name().filter(|n| n.starts_with(RICH_INK_PREFIX)) {
+                        style_ink_tag(tag, &name);
+                    }
+                });
                 view.queue_draw();
             }
             let labels: Vec<(u64, Vec<crate::protocol::NativeRun>)> =
@@ -869,6 +964,7 @@ fn refresh_rich_view(core: &CoreState, id: WidgetId) {
     let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else { return };
     let Some(rich) = view.downcast_ref::<rich_view::KayaRichTextView>() else { return };
     apply_rich_geometry(view);
+    apply_rich_inks(view);
     let markers = core.scene.rich_markers(id).unwrap_or_default();
     rich.set_markers(markers);
     refresh_item_description(core, id);
@@ -23317,6 +23413,88 @@ impl GtkStage {
     /// laid out, since `compute_bounds` answers with the last frame's
     /// transform. A tick callback keeps the clock running while it is
     /// installed and removes itself when the count is reached.
+    /// The run's drawn ink off the window's own picture: the pixel farthest
+    /// from the commonest colour inside the run's character cells.
+    fn text_pixels(t: crate::harness::Target, range: crate::harness::TextRange, want_ground: bool) -> Result<String, String> {
+        Self::await_frames(2);
+        Self::on_main(move |core| {
+            use gtk4::prelude::{TextBufferExt, TextViewExt, WidgetExt};
+            let id = rich_target_id(core, t).ok_or("no such textarea")?;
+            let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else {
+                return Err("the target is no textarea".to_owned());
+            };
+            let buffer = view.buffer();
+            let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
+            let (from, to) = (buffer_offset_of_byte(&raw, range.start), buffer_offset_of_byte(&raw, range.stop));
+            if let Some((a, z)) = buffer.selection_bounds() {
+                if a.offset() < to && z.offset() > from {
+                    return Err(format!(
+                        "the selection {}:{} covers the run, so its ground is the selection's",
+                        guest_byte_of(&raw, a.offset()),
+                        guest_byte_of(&raw, z.offset())
+                    ));
+                }
+            }
+            let shot = skin::shot_of(view.upcast_ref())?;
+            // The caret is the view's ink, not the run's.
+            let (caret, _) = view.cursor_locations(None);
+            let (cx, _) = view.buffer_to_window_coords(gtk4::TextWindowType::Widget, caret.x(), caret.y());
+            let caret_x = view
+                .compute_point(&shot.content, &gtk4::graphene::Point::new(cx as f32, 0.0))
+                .map_or(f64::NAN, |p| f64::from(p.x()));
+            let mut cells = Vec::new();
+            for at in from..to {
+                let it = buffer.iter_at_offset(at);
+                if it.char() == '\n' {
+                    continue;
+                }
+                let r = view.iter_location(&it);
+                let (wx, wy) = view.buffer_to_window_coords(gtk4::TextWindowType::Widget, r.x(), r.y());
+                let Some(p) = view.compute_point(&shot.content, &gtk4::graphene::Point::new(wx as f32, wy as f32)) else {
+                    continue;
+                };
+                let cell = [f64::from(p.x()), f64::from(p.y()), f64::from(r.width()), f64::from(r.height())];
+                if let Some(why) = unseen_in_shot(view.upcast_ref(), &shot.content, cell) {
+                    return Err(format!("the run is outside the viewport: {why}"));
+                }
+                cells.push(cell);
+            }
+            if cells.is_empty() {
+                return Err(format!("no laid-out character in {}:{}", range.start, range.stop));
+            }
+            let step = 1.0 / shot.scale;
+            let mut pixels = Vec::new();
+            for [x0, y0, w, h] in &cells {
+                let mut y = *y0;
+                while y < y0 + h {
+                    let mut x = *x0;
+                    while x < x0 + w {
+                        if (x - caret_x).abs() > 2.0 {
+                            if let Some(c) = shot.at(x, y) {
+                                pixels.push(c.map(|v| (v * 255.0).round() as i32));
+                            }
+                        }
+                        x += step;
+                    }
+                    y += step;
+                }
+            }
+            let mut counts: HashMap<[i32; 3], usize> = HashMap::new();
+            for p in &pixels {
+                *counts.entry(*p).or_default() += 1;
+            }
+            let ground = counts.iter().max_by_key(|(_, n)| **n).map(|(c, _)| *c).ok_or("no pixels in the run's cells")?;
+            let far = |p: &[i32; 3]| (0..3).map(|i| (p[i] - ground[i]).abs()).sum::<i32>();
+            let ink = if want_ground { ground } else { pixels.iter().max_by_key(|p| far(p)).copied().unwrap_or(ground) };
+            Ok(format!(
+                "{} {:02X}{:02X}{:02X}",
+                if shot.dark { "dark" } else { "light" },
+                ink[0],
+                ink[1],
+                ink[2]
+            ))
+        })
+    }
     fn await_frames(frames: usize) {
         use std::sync::atomic::{AtomicUsize, Ordering};
         let seen = std::sync::Arc::new(AtomicUsize::new(0));
@@ -24200,84 +24378,12 @@ impl crate::harness::Stage for GtkStage {
     /// The run's drawn ink off the window's own picture: the pixel farthest
     /// from the commonest colour inside the run's character cells.
     fn text_ink(&self, t: crate::harness::Target, range: crate::harness::TextRange) -> Result<String, String> {
-        Self::await_frames(2);
-        Self::on_main(move |core| {
-            use gtk4::prelude::{TextBufferExt, TextViewExt, WidgetExt};
-            let id = rich_target_id(core, t).ok_or("no such textarea")?;
-            let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&id) else {
-                return Err("the target is no textarea".to_owned());
-            };
-            let buffer = view.buffer();
-            let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
-            let (from, to) = (buffer_offset_of_byte(&raw, range.start), buffer_offset_of_byte(&raw, range.stop));
-            if let Some((a, z)) = buffer.selection_bounds() {
-                if a.offset() < to && z.offset() > from {
-                    return Err(format!(
-                        "the selection {}:{} covers the run, so its ground is the selection's",
-                        guest_byte_of(&raw, a.offset()),
-                        guest_byte_of(&raw, z.offset())
-                    ));
-                }
-            }
-            let shot = skin::shot_of(view.upcast_ref())?;
-            // The caret is the view's ink, not the run's.
-            let (caret, _) = view.cursor_locations(None);
-            let (cx, _) = view.buffer_to_window_coords(gtk4::TextWindowType::Widget, caret.x(), caret.y());
-            let caret_x = view
-                .compute_point(&shot.content, &gtk4::graphene::Point::new(cx as f32, 0.0))
-                .map_or(f64::NAN, |p| f64::from(p.x()));
-            let mut cells = Vec::new();
-            for at in from..to {
-                let it = buffer.iter_at_offset(at);
-                if it.char() == '\n' {
-                    continue;
-                }
-                let r = view.iter_location(&it);
-                let (wx, wy) = view.buffer_to_window_coords(gtk4::TextWindowType::Widget, r.x(), r.y());
-                let Some(p) = view.compute_point(&shot.content, &gtk4::graphene::Point::new(wx as f32, wy as f32)) else {
-                    continue;
-                };
-                let cell = [f64::from(p.x()), f64::from(p.y()), f64::from(r.width()), f64::from(r.height())];
-                if let Some(why) = unseen_in_shot(view.upcast_ref(), &shot.content, cell) {
-                    return Err(format!("the run is outside the viewport: {why}"));
-                }
-                cells.push(cell);
-            }
-            if cells.is_empty() {
-                return Err(format!("no laid-out character in {}:{}", range.start, range.stop));
-            }
-            let step = 1.0 / shot.scale;
-            let mut pixels = Vec::new();
-            for [x0, y0, w, h] in &cells {
-                let mut y = *y0;
-                while y < y0 + h {
-                    let mut x = *x0;
-                    while x < x0 + w {
-                        if (x - caret_x).abs() > 2.0 {
-                            if let Some(c) = shot.at(x, y) {
-                                pixels.push(c.map(|v| (v * 255.0).round() as i32));
-                            }
-                        }
-                        x += step;
-                    }
-                    y += step;
-                }
-            }
-            let mut counts: HashMap<[i32; 3], usize> = HashMap::new();
-            for p in &pixels {
-                *counts.entry(*p).or_default() += 1;
-            }
-            let ground = counts.iter().max_by_key(|(_, n)| **n).map(|(c, _)| *c).ok_or("no pixels in the run's cells")?;
-            let far = |p: &[i32; 3]| (0..3).map(|i| (p[i] - ground[i]).abs()).sum::<i32>();
-            let ink = pixels.iter().max_by_key(|p| far(p)).copied().unwrap_or(ground);
-            Ok(format!(
-                "{} {:02X}{:02X}{:02X}",
-                if shot.dark { "dark" } else { "light" },
-                ink[0],
-                ink[1],
-                ink[2]
-            ))
-        })
+        Self::text_pixels(t, range, false)
+    }
+    /// The run's drawn ground: the commonest colour inside its cells
+    /// (docs/highlight-plan.md §4).
+    fn text_ground(&self, t: crate::harness::Target, range: crate::harness::TextRange) -> Result<String, String> {
+        Self::text_pixels(t, range, true)
     }
     fn rich_runs(&self, target: crate::harness::Target) -> String {
         Self::on_main(move |core| match rich_target_id(core, target) {

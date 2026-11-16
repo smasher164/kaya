@@ -2858,7 +2858,7 @@ POLISH_DRAWS = [
     ("KayaSwiftUI.swift", SWIFT, "the code ground and quote rule",
      r"class KayaRichFragment", r"\n}\n",
      [r"kayaGroundKey", r"kayaRuleKey", r"kayaCodeGround", r"kayaQuoteRule",
-      r"renderingSurfaceBounds", r"\.fill\("]),
+      r"renderingSurfaceBounds", r"\.fill\(\s*CGRect\(\s*x: point\.x - lead"]),
     # WinUI: ITextCharacterFormat has ONE BackgroundColor and find's
     # highlight already owned it, so the order is stated in rich_ground
     # (highlight > code > quote) and the highlights read compares the
@@ -2892,7 +2892,7 @@ POLISH_DRAWS = [
      [r"== HIGHLIGHT_BACKGROUND"]),
     ("KayaCompose.kt", KOTLIN, "the code ground",
      r"fun kayaRichSpanStyle\(", r"\n}\n",
-     [r"background = if \(mono\) palette\.code"]),
+     [r"background = if \(mono && !attrs\.containsKey\(\"highlight\"\)\) palette\.code"]),
     ("KayaCompose.kt", KOTLIN, "the quote rule",
      r"fun (?:[\w.]+\.)?DrawScope\.kayaRichQuoteRule\(", r"\n}\n",
      [r"drawRect\(", r"getLineTop\(", r"getLineBottom\("]),
@@ -2912,6 +2912,41 @@ POLISH_DRAWS = [
     ("KayaCompose.kt", KOTLIN, "the list markers drawn",
      r"fun (?:[\w.]+\.)?DrawScope\.kayaRichMarkers\(", r"\n}\n",
      [r"drawText\(", r"kayaRichCheckBox\("]),
+    # THE HIGHLIGHT MARK (docs/highlight-plan.md H2-H4): a ground no read
+    # but expect_text_ground sees, drawn under find's and never under the
+    # selection, its ink re-mapped by the core. Each arm's draw site names
+    # its door, and the order is a pattern, not a hope.
+    ("KayaSwiftUI.swift", SWIFT, "the highlight mark",
+     r"class KayaRichFragment", r"\n}\n",
+     [r"kayaMarkKey[\s\S]*super\.draw\(", r"kayaMarkSelectionInElement\(self\)",
+      r"kayaRangeMinus\("]),
+    ("KayaSwiftUI.swift", SWIFT, "the highlight's ink",
+     r"func kayaDocumentInk\(_ value: String, on mark: String\?\)", r"\n}\n",
+     [r"KayaHost\.inkOn\("]),
+    ("gtk.rs", GTK, "the highlight tag",
+     r"fn style_rich_tag\(", r"\n}\n",
+     [r'"highlight" =>', r"set_background_full_height\(false\)", r"highlight_ground\("]),
+    ("gtk.rs", GTK, "the grounds' order kept on every mint",
+     r"fn rich_tag\(", r"\n}\n",
+     [r"order_rich_grounds\(&table\)"]),
+    ("gtk.rs", GTK, "find's tag over the marks",
+     r"fn order_rich_grounds\(", r"\n}\n",
+     [r"HIGHLIGHT_TAG", r"set_priority\(top\)"]),
+    ("gtk.rs", GTK, "the highlight's ink",
+     r"fn refresh_rich_view\(", r"\n}\n",
+     [r"apply_rich_inks\(view\)"]),
+    ("winui/mod.rs", WINUI, "the highlight over the code ground",
+     r"fn rich_ground\(", r"\n}\n",
+     [r"highlight_ground\([\s\S]*code_ground"]),
+    ("winui/mod.rs", WINUI, "the highlight's ink",
+     r"fn rich_write_format\(", r"\n}\n",
+     [r"richdoc::drawn_ink\("]),
+    ("KayaCompose.kt", KOTLIN, "the highlight mark under find's",
+     r"fun KayaHighlightLayer\(", r"\n}\n",
+     [r"kayaRichMarks\(", r"kayaRangeMinus\([\s\S]*KAYA_HIGHLIGHT_COLOR"]),
+    ("KayaCompose.kt", KOTLIN, "the highlight's ink",
+     r"fun kayaRichSpanStyle\(", r"\n}\n",
+     [r"kayaMarkedInk\("]),
     ("KayaCompose.kt", KOTLIN, "the boundary newline repair",
      r"fun kayaRichTransformation\(", r"\n}\n",
      [r"KAYA_RICH_BOUNDARY_NEWLINE"]),
@@ -2985,9 +3020,22 @@ for line in polish_out:
 for label, kwargs, finding in (
     ("the compose code ground dropped",
      dict(kotlin_src=perturb("polish (compose ground dropped)", KOTLIN,
-                             r"(background = if \(mono\) )palette\.code",
+                             r"(background = if \(mono && !attrs\.containsKey\(\"highlight\"\)\) )"
+                             r"palette\.code",
                              "Color.Unspecified")),
      r"^KayaCompose\.kt's site for the code ground does not name"),
+    ("the apple mark painted under the selection",
+     dict(swift_src=perturb("polish (apple mark ignores the selection)", SWIFT,
+                            r"(for piece in )kayaRangeMinus\(sub, selected\)",
+                            "[sub]")),
+     r"^KayaSwiftUI\.swift's site for the highlight mark does not name /kayaRangeMinus"),
+    ("the gtk marks left wherever they were minted",
+     dict(gtk_src=perturb("polish (gtk order dropped)", GTK,
+                          r"(    if name == \"color\" \{\n        tag\.set_priority\(0\);"
+                          r"\n    \}\n)"
+                          r"    order_rich_grounds\(&table\);\n",
+                          "")),
+     r"^gtk\.rs's site for the grounds' order kept on every mint does not name"),
     ("the gtk quote rule drawing nothing",
      dict(gtk_src=perturb("polish (gtk rule cut)", GTK,
                           r"(fn snapshot_layer\([\s\S]*?)snapshot\.append_color\(",
@@ -2995,7 +3043,8 @@ for label, kwargs, finding in (
      r"^gtk\.rs's site for the quote rule does not name /snapshot"),
     ("the apple fragment painting nothing",
      dict(swift_src=perturb("polish (apple fragment fill cut)", SWIFT,
-                            r"(class KayaRichFragment[\s\S]*?)\.fill\(",
+                            r"(class KayaRichFragment[\s\S]*?context)\.fill\("
+                            r"(?=\s*CGRect\(\s*x: point\.x - lead)",
                             ".stroke(")),
      r"^KayaSwiftUI\.swift's site for the code ground and quote rule does not name /\\.fill"),
     ("the winui highlights read keyed on any colour again",
@@ -6290,6 +6339,61 @@ check_band_routes(g)
 from dragbegin_routes import run as check_dragbegin_routes
 check_dragbegin_routes(g)
 
+# THE RICH VOCABULARY'S COPIES (docs/highlight-plan.md §4): each interpreter
+# keeps its own list of the rich_attr names it lets through and of RD7's
+# marks that grow at their end. A name missing from one is refused there as
+# "not a rich attribute" while the core and the other arms take it (the mac
+# arm refused `highlight` that way, 2026-11-15, with every gate green).
+def rich_vocab(spec_text, richdoc_text, swift_text, kotlin_text):
+    out = []
+    enum = re.search(r'name: "rich_attr",\s*variants: &\[(.*?)\]', spec_text, re.S)
+    grow = re.search(r"fn expands_at_end\(name: &str\) -> bool \{\s*matches!\(name, ([^)]*)\)",
+                     richdoc_text)
+    if not enum or not grow:
+        return ["cannot find the spec's rich_attr enum or richdoc.rs's expands_at_end"]
+    names = set(re.findall(r'\("(\w+)", \d+\)', enum.group(1)))
+    grows = set(re.findall(r'"(\w+)"', grow.group(1)))
+    copies = [
+        ("KayaSwiftUI.swift's kayaRichNames", swift_text, r"let kayaRichNames = \[(.*?)\]", names),
+        ("KayaSwiftUI.swift's kayaRichExpandsAtEnd", swift_text,
+         r"func kayaRichExpandsAtEnd\(_ name: String\) -> Bool \{\s*\[(.*?)\]", grows),
+        ("KayaCompose.kt's KAYA_RICH_NAMES", kotlin_text,
+         r"val KAYA_RICH_NAMES = listOf\((.*?)\)", names),
+        ("KayaCompose.kt's kayaRichExpandsAtEnd", kotlin_text,
+         r"fun kayaRichExpandsAtEnd\(name: String\): Boolean =(.*?)\n\n", grows),
+    ]
+    for label, text, pattern, want in copies:
+        m = re.search(pattern, text, re.S)
+        if not m:
+            out.append(f"{label} is not where this clause reads it")
+            continue
+        got = set(re.findall(r'"(\w+)"', m.group(1)))
+        if got != want:
+            out.append(f"{label} lacks {sorted(want - got)} and adds {sorted(got - want)} "
+                       "against the core")
+    return out
+
+
+rich_texts = [real(r) for r in
+              ("crates/kaya/src/spec.rs", "crates/kaya/src/richdoc.rs", SWIFT, KOTLIN)]
+failures.extend(rich_vocab(*rich_texts))
+for label, slot, old, new in (
+    ("the mac name table without highlight", 2, '"color", "highlight",\n]', '"color",\n]'),
+    ("Compose's grow rule without highlight", 3, ' ||\n        name == "highlight"', ""),
+):
+    doctored = list(rich_texts)
+    if doctored[slot].count(old) != 1:
+        failures.append(f"SELF-TEST rich vocabulary: {label} matched "
+                        f"{doctored[slot].count(old)} times, not once")
+        continue
+    doctored[slot] = doctored[slot].replace(old, new)
+    found = rich_vocab(*doctored)
+    if len(found) != 1 or "highlight" not in found[0]:
+        failures.append(f"SELF-TEST rich vocabulary: {label} gave {found}")
+    else:
+        print(f"check-verbs: rich vocabulary negative ({label}): 1 substitution, "
+              f"refused: {found[0]}")
+
 # The SELF-TEST fail() calls below the drain at "EVERY SELF-TEST FAILURE
 # BELOW THE FIRST DRAIN" reach the exit here.
 if failures:
@@ -6346,4 +6450,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the iOS screen read (one pixel of a BMP, each ask's own answer) "
           f"+ a linux drag that never began naming who got the press "
           f"+ the resize verb's shape wait and the choice refusal's server reading "
+          f"+ the rich vocabulary and its grow rule in 2 interpreters "
           f"+ spec hash against 2 interpreters")

@@ -628,7 +628,7 @@ struct KayaRichRun: Equatable {
 /// on the storage, so a read-back never guesses from a font.
 let kayaRichNames = [
     "bold", "italic", "underline", "strike", "code", "link", "block",
-    "list", "indent", "checked", "start", "align", "color",
+    "list", "indent", "checked", "start", "align", "color", "highlight",
 ]
 
 /// docs/rich-document-plan.md §11: the attributes that cover whole paragraphs,
@@ -650,7 +650,7 @@ func kayaRichNameKept(_ name: String) -> Bool {
 
 /// RD7's table (richdoc::expands_at_end).
 func kayaRichExpandsAtEnd(_ name: String) -> Bool {
-    ["bold", "italic", "underline", "strike", "color"].contains(name)
+    ["bold", "italic", "underline", "strike", "color", "highlight"].contains(name)
 }
 
 let kayaRichPrefix = "kaya.rich."
@@ -668,6 +668,10 @@ func kayaRichKey(_ name: String) -> NSAttributedString.Key {
 /// (`expect_highlights 0:6=Héllo` over a document with none declared).
 let kayaGroundKey = NSAttributedString.Key("kaya.draw.ground")
 let kayaRuleKey = NSAttributedString.Key("kaya.draw.rule")
+/// The highlight mark's ground (docs/highlight-plan.md H2), painted by
+/// KayaRichFragment and left out under the selection (H3 as ruled;
+/// docs/measurements/highlight-mac-2026-11-15.md).
+let kayaMarkKey = NSAttributedString.Key("kaya.draw.mark")
 
 #if os(macOS)
     let kayaCodeGround = NSColor.quaternaryLabelColor
@@ -826,6 +830,20 @@ final class KayaRichFragment: NSTextLayoutFragment {
                     offset: attributed.length)
             }
             guard range.length > 0, NSMaxRange(range) <= attributed.length else { continue }
+            let selected = kayaMarkSelectionInElement(self)
+            attributed.enumerateAttribute(kayaMarkKey, in: range, options: []) { value, sub, _ in
+                guard let colour = value as? KayaPlatformColor, sub.length > 0 else { return }
+                context.setFillColor(colour.cgColor)
+                for piece in kayaRangeMinus(sub, selected) {
+                    let from = line.locationForCharacter(at: piece.location).x
+                    let to = line.locationForCharacter(at: NSMaxRange(piece)).x
+                    guard to > from else { continue }
+                    context.fill(
+                        CGRect(
+                            x: point.x + bounds.minX + from, y: point.y + bounds.minY,
+                            width: to - from, height: bounds.height))
+                }
+            }
             attributed.enumerateAttribute(kayaRuleKey, in: range, options: []) { value, _, stop in
                 guard let colour = value as? KayaPlatformColor else { return }
                 context.setFillColor(colour.cgColor)
@@ -897,10 +915,96 @@ let kayaRichLayoutDelegate = KayaRichLayoutDelegate()
 /// docs/rich-text-plan.md §18). A label declares no highlights, so the
 /// attribute collides with nothing here.
 @MainActor func kayaMergeGround(_ doc: NSMutableAttributedString, _ range: NSRange) {
-    doc.enumerateAttribute(kayaGroundKey, in: range, options: []) { value, sub, _ in
-        guard let colour = value as? KayaPlatformColor else { return }
-        doc.addAttribute(.backgroundColor, value: colour, range: sub)
+    for key in [kayaGroundKey, kayaMarkKey] {
+        doc.enumerateAttribute(key, in: range, options: []) { value, sub, _ in
+            guard let colour = value as? KayaPlatformColor else { return }
+            doc.addAttribute(.backgroundColor, value: colour, range: sub)
+        }
     }
+}
+
+/// Each text view's selection in document UTF-16 units, by layout manager,
+/// for the fragment's mark (H3 as ruled).
+let kayaMarkSelectionsLock = NSLock()
+nonisolated(unsafe) var kayaMarkSelections: [ObjectIdentifier: NSRange] = [:]
+
+/// The selection inside a fragment's own element, in the element's units.
+func kayaMarkSelectionInElement(_ fragment: NSTextLayoutFragment) -> NSRange {
+    guard let manager = fragment.textLayoutManager, let content = manager.textContentManager else {
+        return NSRange(location: NSNotFound, length: 0)
+    }
+    kayaMarkSelectionsLock.lock()
+    let selection = kayaMarkSelections[ObjectIdentifier(manager)]
+    kayaMarkSelectionsLock.unlock()
+    guard let selection, selection.length > 0 else { return NSRange(location: NSNotFound, length: 0) }
+    let start = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
+    return NSRange(location: selection.location - start, length: selection.length)
+}
+
+/// `range` with `cut` taken out: none, one or two pieces.
+func kayaRangeMinus(_ range: NSRange, _ cut: NSRange) -> [NSRange] {
+    guard cut.location != NSNotFound, NSIntersectionRange(range, cut).length > 0 else { return [range] }
+    var out: [NSRange] = []
+    if cut.location > range.location { out.append(NSRange(location: range.location, length: cut.location - range.location)) }
+    if NSMaxRange(cut) < NSMaxRange(range) {
+        out.append(NSRange(location: NSMaxRange(cut), length: NSMaxRange(range) - NSMaxRange(cut)))
+    }
+    return out
+}
+
+/// A selection move redraws the marked text it entered or left.
+@MainActor func kayaMarkSelectionMoved(_ manager: NSTextLayoutManager, _ storage: NSTextStorage, _ now: NSRange) {
+    kayaMarkSelectionsLock.lock()
+    let was = kayaMarkSelections[ObjectIdentifier(manager)]
+    kayaMarkSelections[ObjectIdentifier(manager)] = now
+    kayaMarkSelectionsLock.unlock()
+    guard let content = manager.textContentManager else { return }
+    for range in [was, now].compactMap({ $0 }) where range.length > 0 && NSMaxRange(range) <= storage.length {
+        var marked = false
+        storage.enumerateAttribute(kayaMarkKey, in: range, options: []) { value, _, stop in
+            if value != nil {
+                marked = true
+                stop.pointee = true
+            }
+        }
+        guard marked, let from = content.location(content.documentRange.location, offsetBy: range.location),
+            let to = content.location(from, offsetBy: range.length), let text = NSTextRange(location: from, end: to)
+        else { continue }
+        manager.invalidateLayout(for: text)
+    }
+}
+
+/// A highlight name's number in the spec's highlight_color vocabulary.
+let kayaHighlightNames: [String: UInt32] = [
+    "yellow": UInt32(KAYA_HIGHLIGHT_YELLOW), "orange": UInt32(KAYA_HIGHLIGHT_ORANGE),
+    "pink": UInt32(KAYA_HIGHLIGHT_PINK), "purple": UInt32(KAYA_HIGHLIGHT_PURPLE),
+    "blue": UInt32(KAYA_HIGHLIGHT_BLUE), "green": UInt32(KAYA_HIGHLIGHT_GREEN),
+]
+
+/// A highlight's ground in one appearance, from the core's palette.
+func kayaMarkRGB(_ name: String, dark: Bool) -> UInt32? {
+    guard let color = kayaHighlightNames[name] else { return nil }
+    let rgb = KayaHost.highlightGround(color, dark: dark)
+    return rgb == UInt32.max ? nil : rgb
+}
+
+/// A highlight's ground as one colour that follows the appearance.
+nonisolated(unsafe) var kayaMarkGrounds: [String: KayaPlatformColor] = [:]
+func kayaMarkGround(_ name: String) -> KayaPlatformColor? {
+    if let made = kayaMarkGrounds[name] { return made }
+    guard let light = kayaMarkRGB(name, dark: false), let dark = kayaMarkRGB(name, dark: true) else { return nil }
+    let made = kayaAppearancePair(kayaColorFromRGB(light), kayaColorFromRGB(dark))
+    kayaMarkGrounds[name] = made
+    return made
+}
+
+/// One colour per appearance, resolved by whoever draws it.
+func kayaAppearancePair(_ light: KayaPlatformColor, _ dark: KayaPlatformColor) -> KayaPlatformColor {
+    #if os(macOS)
+        return NSColor(name: nil) { appearance in kayaAppearanceIsDark(appearance) ? dark : light }
+    #else
+        return UIColor { traits in traits.userInterfaceStyle == .dark ? dark : light }
+    #endif
 }
 
 /// `#RRGGBB` as 0xRRGGBB, or nil.
@@ -935,6 +1039,20 @@ func kayaRGBOf(_ colour: KayaPlatformColor) -> UInt32? {
 /// map, the stored colour on a light page and `kaya_ink_for_dark` of it on a
 /// dark one, so an appearance change redraws by itself.
 nonisolated(unsafe) var kayaDocumentInks: [UInt32: KayaPlatformColor] = [:]
+/// Under a highlight the core re-maps the ink against the highlight's ground
+/// in each appearance (docs/highlight-plan.md H4, `kaya_ink_on`).
+nonisolated(unsafe) var kayaMarkedInks: [String: KayaPlatformColor] = [:]
+func kayaDocumentInk(_ value: String, on mark: String?) -> KayaPlatformColor? {
+    guard let mark, let stored = kayaHexRGB(value), let light = kayaMarkRGB(mark, dark: false),
+        let dark = kayaMarkRGB(mark, dark: true)
+    else { return kayaDocumentInk(value) }
+    let key = value + " " + mark
+    if let made = kayaMarkedInks[key] { return made }
+    let made = kayaAppearancePair(
+        kayaColorFromRGB(KayaHost.inkOn(stored, light)), kayaColorFromRGB(KayaHost.inkOn(stored, dark)))
+    kayaMarkedInks[key] = made
+    return made
+}
 func kayaDocumentInk(_ value: String) -> KayaPlatformColor? {
     guard let light = kayaHexRGB(value) else { return nil }
     if let made = kayaDocumentInks[light] { return made }
@@ -1271,7 +1389,7 @@ func kayaRichClip(_ widget: UInt64, _ text: String, _ range: NSRange) -> (String
 
 /// The ink of a run's picture in sRGB: the ground taken as its commonest
 /// colour and the ink as the pixel farthest from it; nil when it will not decode.
-func kayaInkOfPicture(_ picture: CGImage) -> UInt32? {
+func kayaInkOfPicture(_ picture: CGImage, ground wantGround: Bool = false) -> UInt32? {
     let (w, h) = (picture.width, picture.height)
     var px = [UInt8](repeating: 0, count: w * h * 4)
     let drawn = px.withUnsafeMutableBytes { raw -> Bool in
@@ -1285,14 +1403,21 @@ func kayaInkOfPicture(_ picture: CGImage) -> UInt32? {
     }
     guard drawn, w * h > 0 else { return nil }
     var counts: [UInt32: Int] = [:]
+    // THE INK IS AN OPAQUE PIXEL: iOS pictures a clear text view over
+    // transparency, where a mark's anti-aliased edge read as the ink
+    // (docs/traps.md, the clear text view's picture).
+    var opaque = Set<UInt32>()
     for i in stride(from: 0, to: px.count, by: 4) {
-        counts[(UInt32(px[i]) << 16) | (UInt32(px[i + 1]) << 8) | UInt32(px[i + 2]), default: 0] += 1
+        let rgb = (UInt32(px[i]) << 16) | (UInt32(px[i + 1]) << 8) | UInt32(px[i + 2])
+        counts[rgb, default: 0] += 1
+        if px[i + 3] == 255 { opaque.insert(rgb) }
     }
     let ground = counts.max { $0.value < $1.value }!.key
+    if wantGround { return ground }
     func distance(_ c: UInt32) -> Int {
         [16, 8, 0].reduce(0) { $0 + abs(Int((c >> UInt32($1)) & 0xFF) - Int((ground >> UInt32($1)) & 0xFF)) }
     }
-    return counts.keys.max { distance($0) < distance($1) }!
+    return (opaque.isEmpty ? Set(counts.keys) : opaque).max { distance($0) < distance($1) }!
 }
 
 @Observable
@@ -6948,6 +7073,8 @@ enum KayaHost {
 
     static func inkForDark(_ rgb: UInt32) -> UInt32 { api.ink_for_dark(rgb) }
     static func inkFromDark(_ rgb: UInt32) -> UInt32 { api.ink_from_dark(rgb) }
+    static func inkOn(_ rgb: UInt32, _ ground: UInt32) -> UInt32 { api.ink_on(rgb, ground) }
+    static func highlightGround(_ color: UInt32, dark: Bool) -> UInt32 { api.highlight_ground(color, dark ? 1 : 0) }
 
     /// An entry edit, with the three facts the core's undo ledger cannot derive
     /// (docs/undo-plan.md §3): the window, focus, and whether the edit is
@@ -18006,6 +18133,26 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("text ink \(gotTextInk) at \(parts[2]), wanted \(wantTextInk)")
                 }
+            case "expect_text_ground":
+                // `expect_text_ground <target> <start:end> "light RRGGBB dark RRGGBB"`
+                // (docs/highlight-plan.md §4): the commonest colour inside the
+                // run's own segments as the window drew them.
+                let wantGround = kayaQuoted(Array(parts[3...]))
+                var gotGround = ""
+                let groundDeadline = Date().addingTimeInterval(3)
+                repeat {
+                    gotGround = DispatchQueue.main.sync { () -> String in
+                        guard let node = kayaTextTarget(parts[1]) else { return "<no such target \(parts[1])>" }
+                        return kayaTextInk(node, String(parts[2]), ground: true)
+                    }
+                    if kayaTextInkMatches(gotGround, wantGround) { break }
+                    usleep(50_000)
+                } while Date() < groundDeadline
+                if kayaTextInkMatches(gotGround, wantGround) {
+                    observed.append("text ground \(parts[2]) \(wantGround)")
+                } else {
+                    failures.append("text ground \(gotGround) at \(parts[2]), wanted \(wantGround)")
+                }
             case "format":
                 // `format <target> <start:end> <name>[=<value>] [off]`, bytes:
                 // select the range, then the widget's own act (R9).
@@ -25163,6 +25310,15 @@ struct KayaFlex: Layout {
                     extents[i] = share
                     spent += share
                 }
+            }
+        }
+        // A GROWN TEXTAREA GETS ITS FLOOR: placed in less, it drew over the
+        // siblings below and SwiftUI took no touch there (docs/traps.md, the
+        // grown textarea under its floor).
+        if vertical {
+            for i in subviews.indices where weight(i) > 0 && i < nodes.count {
+                let floor = MainActor.assumeIsolated { kayaTextareaFloor(nodes[i]) }
+                extents[i] = max(extents[i], floor)
             }
         }
         // docs/media-plan.md §3, a growing box: the rest of the share stays
@@ -39614,6 +39770,20 @@ struct KayaTextareaPlaceholder: ViewModifier {
     }
 }
 
+let kayaTextareaFloorPt: CGFloat = 96
+func kayaTextareaFloorHeight(_ cap: CGFloat?) -> CGFloat { min(kayaTextareaFloorPt, cap ?? kayaTextareaFloorPt) }
+
+/// kayaTextareaFrame's floor for a node, which KayaFlex honours for a grower.
+@MainActor func kayaTextareaFloor(_ node: KayaNode) -> CGFloat {
+    guard node.kind == kindTextarea, node.maxLines <= 0 else { return 0 }
+    #if os(iOS)
+        let cap = kayaScene.keyboardFieldCap[node.id]
+    #else
+        let cap: CGFloat? = nil
+    #endif
+    return kayaTextareaFloorHeight(cap)
+}
+
 /// THE TEXTAREA'S LAYOUT FLOOR, AND THE ONE PLACE `grow` REACHES IT. A FLOOR,
 /// NOT A FIXED FRAME, as GTK's `set_size_request` and WinUI's MinWidth are: a
 /// fixed frame refuses the assigned track, so a full-window buffer with grow(1)
@@ -39635,7 +39805,7 @@ extension View {
         let grows_lines = maxLines > 0
         return frame(
             minWidth: 240, maxWidth: fillsWidth ? .infinity : 240,
-            minHeight: grows_lines ? nil : min(96, cap ?? 96),
+            minHeight: grows_lines ? nil : kayaTextareaFloorHeight(cap),
             maxHeight: cap ?? (grows_lines ? nil : (fillsHeight ? .infinity : 96))
         )
         .fixedSize(horizontal: false, vertical: grows_lines)
@@ -40139,6 +40309,9 @@ private struct KayaMacTextarea: NSViewRepresentable {
             guard let node, let view = notification.object as? NSTextView else { return }
             if restored, !view.hasMarkedText() { node.keptSelection = view.selectedRange }
             guard node.rich else { return }
+            if let manager = view.textLayoutManager, let storage = view.textStorage {
+                kayaMarkSelectionMoved(manager, storage, view.selectedRange())
+            }
             let text = view.string
             let range = view.selectedRange
             let start = kayaByteOffset(text, range.location)
@@ -40669,7 +40842,8 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         var out: [NSAttributedString.Key: Any] = [.font: font]
         if synthBold { out[.strokeWidth] = kayaSyntheticBoldStroke } else { storage.removeAttribute(.strokeWidth, range: sub) }
         let link = attrs[kayaRichKey("link")] as? String
-        let ink = (attrs[kayaRichKey("color")] as? String).flatMap(kayaDocumentInk)
+        let mark = attrs[kayaRichKey("highlight")] as? String
+        let ink = (attrs[kayaRichKey("color")] as? String).flatMap { kayaDocumentInk($0, on: mark) }
         out[.foregroundColor] =
             link != nil
             ? NSColor.linkColor : ink ?? (block == "quote" ? NSColor.secondaryLabelColor : NSColor.textColor)
@@ -40684,8 +40858,14 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             storage.removeAttribute(.strikethroughStyle, range: sub)
         }
         if let link { out[.link] = link } else { storage.removeAttribute(.link, range: sub) }
-        // The two decorations, painted by KayaRichFragment (docs/rich-text-plan.md §18).
-        if has("code") || block == "code_block" {
+        // The decorations, painted by KayaRichFragment (docs/rich-text-plan.md
+        // §18); a code run under a highlight loses its grey (highlight-plan H3).
+        if let mark, let ground = kayaMarkGround(mark) {
+            out[kayaMarkKey] = ground
+        } else {
+            storage.removeAttribute(kayaMarkKey, range: sub)
+        }
+        if (has("code") || block == "code_block") && out[kayaMarkKey] == nil {
             out[kayaGroundKey] = kayaCodeGround
         } else {
             storage.removeAttribute(kayaGroundKey, range: sub)
@@ -40810,7 +40990,7 @@ func kayaRichKeyFor(_ selector: Selector) -> UInt32? {
 /// A run's drawn ink, `<mode> RRGGBB`: the window server's picture of the
 /// run's own segments, the ground taken as the picture's commonest colour and
 /// the ink as the pixel farthest from it; or what was measured instead.
-@MainActor func kayaTextInk(_ node: KayaNode, _ spec: String) -> String {
+@MainActor func kayaTextInk(_ node: KayaNode, _ spec: String, ground: Bool = false) -> String {
     guard let view = kayaMacTextViews[node.id]?.view, let manager = view.textLayoutManager,
         let content = manager.textContentManager, let window = view.window, let root = window.contentView
     else { return "<no text view>" }
@@ -40844,7 +41024,7 @@ func kayaRichKeyFor(_ selector: Selector) -> UInt32? {
         : CGRect(x: inRoot.minX, y: root.bounds.height - inRoot.maxY, width: inRoot.width, height: inRoot.height)
     let (picture, why) = kayaWindowServerImage(window, root, down)
     guard let picture else { return "<no picture of the window: \(why)>" }
-    guard let ink = kayaInkOfPicture(picture) else { return "<the picture would not decode>" }
+    guard let ink = kayaInkOfPicture(picture, ground: ground) else { return "<the picture would not decode>" }
     let mode = kayaAppearanceIsDark(view.effectiveAppearance) ? "dark" : "light"
     return "\(mode) " + String(format: "%06X", ink)
 }
@@ -41237,6 +41417,9 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
                 (textView as? KayaTextView)?.selectionChangedAt = Date()
                 DispatchQueue.main.async { kayaKeepCaretShown(textView) }
                 guard node.rich else { return }
+                if let manager = textView.textLayoutManager {
+                    kayaMarkSelectionMoved(manager, textView.textStorage, textView.selectedRange)
+                }
                 kayaRearmTyping(textView)
                 let text = textView.text ?? ""
                 let range = textView.selectedRange
@@ -42247,7 +42430,8 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
                 storage.removeAttribute(.strokeWidth, range: sub)
             }
             let link = attrs[kayaRichKey("link")] as? String
-            let ink = (attrs[kayaRichKey("color")] as? String).flatMap(kayaDocumentInk)
+            let mark = attrs[kayaRichKey("highlight")] as? String
+            let ink = (attrs[kayaRichKey("color")] as? String).flatMap { kayaDocumentInk($0, on: mark) }
             out[.foregroundColor] =
                 link != nil
                 ? UIColor.link : ink ?? (block == "quote" ? UIColor.secondaryLabel : UIColor.label)
@@ -42262,8 +42446,14 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
                 storage.removeAttribute(.strikethroughStyle, range: sub)
             }
             if let link { out[.link] = link } else { storage.removeAttribute(.link, range: sub) }
-            // The two decorations, painted by KayaRichFragment (docs/rich-text-plan.md §18).
-            if has("code") || block == "code_block" {
+            // The decorations, painted by KayaRichFragment (docs/rich-text-plan.md
+            // §18); a code run under a highlight loses its grey (highlight-plan H3).
+            if let mark, let ground = kayaMarkGround(mark) {
+                out[kayaMarkKey] = ground
+            } else {
+                storage.removeAttribute(kayaMarkKey, range: sub)
+            }
+            if (has("code") || block == "code_block") && out[kayaMarkKey] == nil {
                 out[kayaGroundKey] = kayaCodeGround
             } else {
                 storage.removeAttribute(kayaGroundKey, range: sub)
@@ -42457,7 +42647,7 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
     /// A run's drawn ink, `<mode> RRGGBB`: the text view's own picture of the
     /// run's segments in sRGB, the ground its commonest colour and the ink the
     /// pixel farthest from it; or what was measured instead.
-    @MainActor func kayaTextInk(_ node: KayaNode, _ spec: String) -> String {
+    @MainActor func kayaTextInk(_ node: KayaNode, _ spec: String, ground: Bool = false) -> String {
         guard let view = kayaLiveUITextView(node.id), let manager = view.textLayoutManager,
             let content = manager.textContentManager
         else { return "<no text view>" }
@@ -42491,7 +42681,9 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
         let picture = UIGraphicsImageRenderer(bounds: inView, format: format).image { _ in
             _ = view.drawHierarchy(in: view.bounds, afterScreenUpdates: true)
         }
-        guard let cg = picture.cgImage, let ink = kayaInkOfPicture(cg) else { return "<the picture would not decode>" }
+        guard let cg = picture.cgImage, let ink = kayaInkOfPicture(cg, ground: ground) else {
+            return "<the picture would not decode>"
+        }
         let mode = view.traitCollection.userInterfaceStyle == .dark ? "dark" : "light"
         return "\(mode) " + String(format: "%06X", ink)
     }

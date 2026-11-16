@@ -2739,11 +2739,12 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/richtext"
     # THE RICH DOCUMENT (docs/rich-document-plan.md §9 step 4): rust alone at
     # depth, light and dark (its colour is drawn through the core's map on a
-    # dark page, RD5); every read is the core's or the arm's own record.
+    # dark page, RD5). Through a11y-leg.sh since the highlighter: its find
+    # step reads expect_highlights off the bus (docs/highlight-plan.md §4).
     run "$proto" richdoc-rust env KAYA_SELFTEST=richdoc \
-        "$CARGO_TARGET_DIR/debug/examples/richdoc"
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/richdoc"
     run "$proto" richdocdark-rust env KAYA_APPEARANCE=dark KAYA_SELFTEST=richdoc \
-        "$CARGO_TARGET_DIR/debug/examples/richdoc"
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/richdoc"
     # What Orca is told of a drawn list marker, off the bus (RD18).
     run "$proto" richdocax-rust env KAYA_SELFTEST=richdocax \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/richdoc"

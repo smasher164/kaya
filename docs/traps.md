@@ -21017,3 +21017,36 @@ holds its method and output.
   view's appearance inside `draw(at:in:)`, and a pixel read of the dark value
   comes back one step off (`594C19` for `594C1A`)
   (docs/measurements/highlight-mac-2026-11-15.md).
+
+## The grown textarea under its floor took no touches (measured 2026-11-15)
+
+richdoc-swiftui and richdocdark-swiftui went red on iOS at `click_marker
+textarea#0 73` once richdoc gained a second row of buttons: the step answered
+ok and the checkbox never toggled. With the keyboard up the column was full,
+KayaFlex gave the grown textarea the leftover (28 pt) and placed label#0 right
+after it, while kayaTextareaFrame's 96 pt floor drew the text view on past
+that, under the labels. Traced in the app: the driver's touch at (32, 251) pt
+reached UIKit, the KayaTextView's own hitTest ran and returned its canvas, the
+check tap was attached with its delegate set, and the delegate's
+shouldReceive was never called. With the second row removed it was called
+and the box toggled. SwiftUI gates a UIViewRepresentable's touches by the frame
+the Layout PLACED, not the frame the view draws, so a hit test in UIKit
+(window.hitTest in every scene window said "the text view") cannot see it.
+KayaFlex now gives a grown textarea in a column at least kayaTextareaFloor,
+the floor kayaTextareaFrame declares, so the siblings start below it and run
+off the bottom instead of being drawn over it, as GTK's set_size_request does.
+Before the second row the textarea had 69 pt, still under its floor; the box
+it tapped happened to sit inside the placed part.
+
+## The clear text view's picture (measured 2026-11-15)
+
+expect_text_ink on iOS read a highlighted run as `light 524D3A` where the ink
+is C90015. The reader pictures the text view with drawHierarchy, and the view
+is `.clear`, so the picture's ground outside the drawing is TRANSPARENT (the
+commonest colour of every unmarked run's picture was 000000). The farthest
+pixel was the picture's whole rightmost column, the mark's anti-aliased right
+edge over transparency: 0.33 x F7E8AF = 524D3A. Drawing the picture over
+systemBackground first is wrong too: the transparent ground was what hid the
+black neighbouring glyphs inside a run's box, and over white they read as
+the ink (`light 474747` for 016FEF). The ink is now picked among OPAQUE pixels
+only. The Mac's window-server picture is opaque, so it never showed.

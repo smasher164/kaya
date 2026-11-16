@@ -720,4 +720,10 @@ object KayaPresent {
      *  back. kaya_ink_for_dark's and kaya_ink_from_dark's JNI spellings. */
     @JvmStatic external fun inkForDark(rgb: Int): Int
     @JvmStatic external fun inkFromDark(rgb: Int): Int
+
+    /** docs/highlight-plan.md H1 and H4: a highlight colour's ground
+     *  (KAYA_HIGHLIGHT_*, -1 for none) and a document colour on a ground.
+     *  kaya_highlight_ground's and kaya_ink_on's JNI spellings. */
+    @JvmStatic external fun highlightGround(color: Int, dark: Boolean): Int
+    @JvmStatic external fun inkOn(rgb: Int, ground: Int): Int
 }

@@ -13174,15 +13174,20 @@ fn label_palette(block: &TextBlock) -> RichPalette {
     rich_palette_of(matches!(block.ActualTheme(), Ok(ElementTheme::Dark)), None)
 }
 
-/// THE GROUND ONE RUN WEARS, or none. ONE ATTRIBUTE, THREE CLAIMANTS: this
+/// THE GROUND ONE RUN WEARS, or none. ONE ATTRIBUTE, FOUR CLAIMANTS: this
 /// control has a single `BackgroundColor` and find's highlight ranges own it
-/// too (docs/ranges-plan.md D1), so the order is stated here — the highlight
-/// over a `code` ground over a `quote` tint — and `rich_repaint_highlights`
-/// puts the top one back after every restyle wrote the ones under it
-/// (docs/rich-text-plan.md §18).
+/// too (docs/ranges-plan.md D1), so the order is stated here — find's
+/// highlight over the highlight mark over a `code` ground over a `quote`
+/// tint (docs/highlight-plan.md H3) — and `rich_repaint_highlights` puts
+/// find's back after every restyle wrote the ones under it
+/// (docs/rich-text-plan.md §18). No palette value equals
+/// `HIGHLIGHT_BACKGROUND`, so `painted_runs` never reads the mark as find's.
 fn rich_ground(
     attrs: &BTreeMap<String, String>, palette: RichPalette,
 ) -> Option<bindings::Windows::UI::Color> {
+    if let Some(rgb) = attrs.get("highlight").and_then(|name| crate::richdoc::highlight_ground(name, palette.dark)) {
+        return Some(bindings::Windows::UI::Color { A: 255, R: (rgb >> 16) as u8, G: (rgb >> 8) as u8, B: rgb as u8 });
+    }
     let block = attrs.get("block").map(String::as_str).unwrap_or("body");
     if attrs.contains_key("code") || block == "code_block" {
         return Some(palette.code_ground);
@@ -13378,7 +13383,7 @@ fn rich_write_format(
     })?;
     character.SetSize(size)?;
     character.SetName(&HSTRING::from(if monospace { base.code_face.as_str() } else { base.face.as_str() }))?;
-    character.SetForegroundColor(match (linked, richdoc::drawn_color(attrs, palette.dark), palette.text) {
+    character.SetForegroundColor(match (linked, richdoc::drawn_ink(attrs, palette.dark), palette.text) {
         (true, _, _) => palette.link,
         (false, Some(ink), _) => ink,
         (false, None, Some(text)) => text,
@@ -25017,6 +25022,58 @@ fn drag_file_plan(
 static POINTER_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(feature = "harness")]
+impl WinUiStage {
+    fn text_pixels(t: crate::harness::Target, range: crate::harness::TextRange, want_ground: bool) -> Result<String, String> {
+        Self::on_ui_read(move |core| {
+            let Some(widget) = rich_target_id(core, t) else {
+                return Ok(Err("no such target".to_owned()));
+            };
+            let Some(field) = textarea_by_id(core, widget) else {
+                return Ok(Err(format!("widget {widget} is not a textarea")));
+            };
+            let mode = if richdoc::dark_now(&field) { "dark" } else { "light" };
+            let text = lf(Editable::Textarea(field.clone()).text()?);
+            let (Some(a), Some(b)) =
+                (utf16_offset(&text, range.start as usize), utf16_offset(&text, range.stop as usize))
+            else {
+                return Ok(Err(format!("{}:{} is not on a character boundary", range.start, range.stop)));
+            };
+            let at = element_placement(core, &field.cast::<FrameworkElement>()?)?;
+            let grab = match grab_canvas(&at) {
+                Ok(grab) => grab,
+                Err(why) => return Ok(Err(format!("no picture of the window: {why}"))),
+            };
+            let mut pixels: Vec<[u8; 3]> = Vec::new();
+            for i in a..b {
+                let Some((x, y, w, h)) = richdoc::char_rect(&field, widget, i, 1)? else {
+                    return Ok(Err("the textarea's template has not run".to_owned()));
+                };
+                let (x0, y0) = ((x * at.scale).ceil() as i32, (y * at.scale).ceil() as i32);
+                let (x1, y1) = (((x + w) * at.scale).floor() as i32, ((y + h) * at.scale).floor() as i32);
+                for py in y0.max(0)..y1.min(grab.height) {
+                    for px in x0.max(0)..x1.min(grab.width) {
+                        let o = ((py * grab.width + px) * 4) as usize;
+                        pixels.push([grab.pixels[o + 2], grab.pixels[o + 1], grab.pixels[o]]);
+                    }
+                }
+            }
+            if pixels.is_empty() {
+                return Ok(Err(format!("the run {}:{} has no pixels inside the textarea", range.start, range.stop)));
+            }
+            let mut counts: HashMap<[u8; 3], usize> = HashMap::new();
+            for p in &pixels {
+                *counts.entry(*p).or_default() += 1;
+            }
+            let ground = counts.into_iter().max_by_key(|(_, n)| *n).map(|(p, _)| p).unwrap_or([0, 0, 0]);
+            let far = |p: &[u8; 3]| -> i32 { (0..3).map(|c| (i32::from(p[c]) - i32::from(ground[c])).abs()).sum() };
+            let ink = if want_ground { ground } else { pixels.iter().max_by_key(|p| far(p)).copied().unwrap_or(ground) };
+            Ok(Ok(format!("{mode} {:02X}{:02X}{:02X}", ink[0], ink[1], ink[2])))
+        })
+        .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
+    }
+}
+
+#[cfg(feature = "harness")]
 impl crate::harness::Stage for WinUiStage {
     fn menu_activate(&self, path: &str) {
         let spec = path.to_owned();
@@ -26023,52 +26080,12 @@ impl crate::harness::Stage for WinUiStage {
     /// ink's camera): inside the run's own TOM rectangles, the pixel
     /// farthest from their commonest colour, which is the ground.
     fn text_ink(&self, t: crate::harness::Target, range: crate::harness::TextRange) -> Result<String, String> {
-        Self::on_ui_read(move |core| {
-            let Some(widget) = rich_target_id(core, t) else {
-                return Ok(Err("no such target".to_owned()));
-            };
-            let Some(field) = textarea_by_id(core, widget) else {
-                return Ok(Err(format!("widget {widget} is not a textarea")));
-            };
-            let mode = if richdoc::dark_now(&field) { "dark" } else { "light" };
-            let text = lf(Editable::Textarea(field.clone()).text()?);
-            let (Some(a), Some(b)) =
-                (utf16_offset(&text, range.start as usize), utf16_offset(&text, range.stop as usize))
-            else {
-                return Ok(Err(format!("{}:{} is not on a character boundary", range.start, range.stop)));
-            };
-            let at = element_placement(core, &field.cast::<FrameworkElement>()?)?;
-            let grab = match grab_canvas(&at) {
-                Ok(grab) => grab,
-                Err(why) => return Ok(Err(format!("no picture of the window: {why}"))),
-            };
-            let mut pixels: Vec<[u8; 3]> = Vec::new();
-            for i in a..b {
-                let Some((x, y, w, h)) = richdoc::char_rect(&field, widget, i, 1)? else {
-                    return Ok(Err("the textarea's template has not run".to_owned()));
-                };
-                let (x0, y0) = ((x * at.scale).ceil() as i32, (y * at.scale).ceil() as i32);
-                let (x1, y1) = (((x + w) * at.scale).floor() as i32, ((y + h) * at.scale).floor() as i32);
-                for py in y0.max(0)..y1.min(grab.height) {
-                    for px in x0.max(0)..x1.min(grab.width) {
-                        let o = ((py * grab.width + px) * 4) as usize;
-                        pixels.push([grab.pixels[o + 2], grab.pixels[o + 1], grab.pixels[o]]);
-                    }
-                }
-            }
-            if pixels.is_empty() {
-                return Ok(Err(format!("the run {}:{} has no pixels inside the textarea", range.start, range.stop)));
-            }
-            let mut counts: HashMap<[u8; 3], usize> = HashMap::new();
-            for p in &pixels {
-                *counts.entry(*p).or_default() += 1;
-            }
-            let ground = counts.into_iter().max_by_key(|(_, n)| *n).map(|(p, _)| p).unwrap_or([0, 0, 0]);
-            let far = |p: &[u8; 3]| -> i32 { (0..3).map(|c| (i32::from(p[c]) - i32::from(ground[c])).abs()).sum() };
-            let ink = pixels.iter().max_by_key(|p| far(p)).copied().unwrap_or(ground);
-            Ok(Ok(format!("{mode} {:02X}{:02X}{:02X}", ink[0], ink[1], ink[2])))
-        })
-        .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
+        Self::text_pixels(t, range, false)
+    }
+    /// The run's drawn ground: the commonest colour inside its rectangles
+    /// (docs/highlight-plan.md §4).
+    fn text_ground(&self, t: crate::harness::Target, range: crate::harness::TextRange) -> Result<String, String> {
+        Self::text_pixels(t, range, true)
     }
     fn rich_runs(&self, t: crate::harness::Target) -> String {
         let (answer, held) = Self::on_ui_read(move |core| {

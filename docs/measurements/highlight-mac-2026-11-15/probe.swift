@@ -49,9 +49,10 @@ let delegate = Delegate()
     view.textLayoutManager!.ensureLayout(for: view.textLayoutManager!.documentRange)
     return view
 }
-@MainActor func run(_ name: NSAppearance.Name, _ given: NSTextView? = nil, _ label: String = "fresh") {
+@MainActor func run(_ name: NSAppearance.Name, _ given: NSTextView? = nil, _ label: String = "fresh", select: Bool = false) {
     let view = given ?? makeView()
     view.appearance = NSAppearance(named: name)
+    view.setSelectedRange(select ? NSRange(location: 6, length: 6) : NSRange(location: 0, length: 0))
     seen = []
     let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
     view.cacheDisplay(in: view.bounds, to: rep)
@@ -76,4 +77,10 @@ MainActor.assumeIsolated {
     run(.aqua, same, "same-view")
     run(.darkAqua, same, "same-view-switched")
     run(.aqua, same, "same-view-switched-back")
+    // Does an opaque mark painted in the fragment hide TextKit 2's selection?
+    run(.aqua, nil, "selected", select: true)
+    run(.darkAqua, nil, "selected", select: true)
+    let plain = makeView()
+    plain.textStorage!.removeAttribute(markKey, range: NSRange(location: 0, length: plain.textStorage!.length))
+    run(.aqua, plain, "selected-no-mark", select: true)
 }

@@ -1656,6 +1656,11 @@ private val kayaHarnessDrivesFrames = System.getenv("KAYA_SELFTEST") != null
  */
 val kayaSelectionWash = HashMap<Long, Int>()
 
+/** The highlight marks the layer DREW, (start, stop, ARGB), published beside
+ * kayaPaintedRanges: find's paint lands on a mark's ground there, and the
+ * witness composites against what was drawn (docs/highlight-plan.md H3). */
+val kayaDrawnMarks = HashMap<Long, List<Triple<Int, Int, Int>>>()
+
 /**
  * How many apply batches this interpreter has finished — the signal an
  * ACTION verb waits on (KayaCompose.kayaAwaitAnswer). `@Volatile`
@@ -8596,7 +8601,7 @@ object KayaCompose {
      * angle brackets, what was measured instead. OFF THE UI THREAD
      * (PixelCopy answers on it).
      */
-    private fun kayaTextInkRead(activity: ComponentActivity, spec: String, range: String): String {
+    private fun kayaTextInkRead(activity: ComponentActivity, spec: String, range: String, ground: Boolean = false): String {
         class Aim(val trouble: String?, val boxes: List<android.graphics.Rect>, val caret: android.graphics.Rect?,
                   val viewport: android.graphics.Rect?, val read: KayaHighlights?)
         val aim = onUi(activity) {
@@ -8651,9 +8656,10 @@ object KayaCompose {
                     counts[rgb] = (counts[rgb] ?: 0) + 1
                 }
             }
-            val ground = counts.maxByOrNull { it.value }?.key ?: return "<the picture held no pixel of $range>"
+            val commonest = counts.maxByOrNull { it.value }?.key ?: return "<the picture held no pixel of $range>"
+            if (ground) return "%06X".format(commonest)
             fun distance(c: Int) = (0 until 3).sumOf { k ->
-                val d = ((c shr (8 * k)) and 0xFF) - ((ground shr (8 * k)) and 0xFF)
+                val d = ((c shr (8 * k)) and 0xFF) - ((commonest shr (8 * k)) and 0xFF)
                 d * d
             }
             val ink = pixels.maxByOrNull { distance(it) }!!
@@ -8694,6 +8700,8 @@ object KayaCompose {
         // The platform's selection background, ARGB, as the composition
         // resolved it — the wash this layer is painted under.
         val wash: Int = 0,
+        // The marks the layer drew, (start, stop, ARGB).
+        val marks: List<Triple<Int, Int, Int>> = emptyList(),
     )
 
     private fun kayaGatherHighlights(
@@ -8737,7 +8745,8 @@ object KayaCompose {
         }
         return KayaHighlights(
             text = text, ranges = ranges, viewport = box, onScreen = rects,
-            surfaceOffset = offset, surfaceSize = surface, wash = wash)
+            surfaceOffset = offset, surfaceSize = surface, wash = wash,
+            marks = kayaDrawnMarks[node.id] ?: emptyList())
     }
 
     /** The photograph, with the space it was taken in carried beside
@@ -8781,6 +8790,11 @@ object KayaCompose {
         val base = kayaModalColour(shot, box, read.onScreen)
         val deco = kayaOver(KAYA_HIGHLIGHT_COLOR.toArgb(), base)
         val washed = kayaOver(read.wash, deco)
+        // A RANGE OVER A DRAWN MARK is find's paint on the mark's ground,
+        // which is what that range's pixels hold (docs/highlight-plan.md H3).
+        fun overMarks(r: KayaRange): List<Int> = read.marks
+            .filter { (a, b, _) -> a < r.stop && b > r.start }
+            .map { (_, _, ground) -> kayaOver(KAYA_HIGHLIGHT_COLOR.toArgb(), ground) }
         // AND WHAT THE FIELD PAINTS WITH NO DECORATION AT ALL, both
         // ways: a colour the witness cannot TELL APART from that is one
         // it must not accept. Watched — with the highlight's alpha at
@@ -8796,6 +8810,7 @@ object KayaCompose {
             if (rect == null) continue
             var found = false
             var seen = false
+            val onMarks = overMarks(read.ranges[i])
             var y = rect.top
             while (y < rect.bottom && !found) {
                 var x = rect.left
@@ -8804,7 +8819,8 @@ object KayaCompose {
                     if (p != null) {
                         seen = true
                         if ((decoShows && kayaSameColour(p, deco)) ||
-                            (washedShows && kayaSameColour(p, washed))) {
+                            (washedShows && kayaSameColour(p, washed)) ||
+                            onMarks.any { kayaSameColour(p, it) }) {
                             found = true
                             break
                         }
@@ -16224,6 +16240,21 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             else -> failures.add("ink at ${parts[2]} reads $mode $got, wanted $want")
                         }
                     }
+                    "expect_text_ground" -> {
+                        // The commonest colour inside the run's own boxes
+                        // (docs/highlight-plan.md §4), the ink read's tolerance.
+                        val want = quoted(parts.drop(3))
+                        val dark = KayaSceneModel.presentationDark
+                        val got = kayaTextInkRead(activity, parts[1], parts[2], ground = true)
+                        val wanted = kayaAppearanceColor(want, dark)
+                        val mode = if (dark) "dark" else "light"
+                        when {
+                            wanted == null -> failures.add("expect_text_ground \"$want\" names no $mode colour")
+                            got.startsWith("<") -> failures.add("text ground at ${parts[2]}: $got, wanted $want")
+                            kayaInkClose(got, wanted) -> observed.add("text ground at ${parts[2]} $mode $got")
+                            else -> failures.add("text ground at ${parts[2]} reads $mode $got, wanted $want")
+                        }
+                    }
                     "format" -> {
                         // `format <target> <start:end> <name>[=<value>] [off]`
                         // in BYTES (docs/rich-text-plan.md R9): select the
@@ -18496,7 +18527,7 @@ data class KayaRichRun(
 /** kaya's vocabulary (docs/rich-text-plan.md R3, docs/rich-document-plan.md §2). */
 internal val KAYA_RICH_NAMES = listOf(
     "bold", "italic", "underline", "strike", "code", "link", "block",
-    "list", "indent", "checked", "start", "align", "color")
+    "list", "indent", "checked", "start", "align", "color", "highlight")
 
 /** The attributes that cover whole paragraphs (richdoc::PARAGRAPH_ATTRS). */
 internal val KAYA_RICH_PARAGRAPH = setOf("block", "list", "indent", "checked", "start", "align")
@@ -18515,7 +18546,8 @@ internal fun kayaRichNameKept(name: String): Boolean =
 
 /** RD7's table: the marks that grow over text typed at their end. */
 internal fun kayaRichExpandsAtEnd(name: String): Boolean =
-    name == "bold" || name == "italic" || name == "underline" || name == "strike" || name == "color"
+    name == "bold" || name == "italic" || name == "underline" || name == "strike" || name == "color" ||
+        name == "highlight"
 
 /**
  * Per attribute: disjoint, sorted, never adjacent-and-equal, a later run
@@ -18755,6 +18787,30 @@ internal fun kayaDocumentInk(value: String, dark: Boolean): Color? {
     return Color(0xFF000000.toInt() or drawn)
 }
 
+/** The highlighter's names, by the spec's highlight_color numbers. */
+internal val KAYA_HIGHLIGHT_NAMES = mapOf(
+    "yellow" to 1, "orange" to 2, "pink" to 3, "purple" to 4, "blue" to 5, "green" to 6)
+
+private val kayaMarkGrounds = HashMap<String, Int>()
+
+/** A highlight's ground for this appearance, from the core's palette. */
+internal fun kayaMarkGround(name: String, dark: Boolean): Color? {
+    val color = KAYA_HIGHLIGHT_NAMES[name] ?: return null
+    val rgb = kayaMarkGrounds.getOrPut("$name $dark") { KayaPresent.highlightGround(color, dark) }
+    if (rgb == -1) return null
+    return Color(0xFF000000.toInt() or rgb)
+}
+
+private val kayaMarkedInks = HashMap<String, Int>()
+
+/** A document colour under a highlight: the core's ink on that ground
+ * (docs/highlight-plan.md H4). */
+internal fun kayaMarkedInk(value: String, mark: String, dark: Boolean): Color? {
+    val rgb = kayaParseDocumentColor(value) ?: return null
+    val ground = kayaMarkGround(mark, dark)?.toArgb()?.and(0xFFFFFF) ?: return kayaDocumentInk(value, dark)
+    return Color(0xFF000000.toInt() or kayaMarkedInks.getOrPut("$rgb $mark $dark") { KayaPresent.inkOn(rgb, ground) })
+}
+
 internal fun kayaParseDocumentColor(value: String): Int? {
     if (value.length != 7 || value[0] != '#') return null
     return value.substring(1).toIntOrNull(16)
@@ -18801,13 +18857,16 @@ internal fun kayaRichSpanStyle(
     return SpanStyle(
         color = when {
             attrs.containsKey("link") -> palette.link
+            attrs.containsKey("color") && attrs.containsKey("highlight") ->
+                kayaMarkedInk(attrs.getValue("color"), attrs.getValue("highlight"), palette.dark) ?: Color.Unspecified
             attrs.containsKey("color") ->
                 kayaDocumentInk(attrs.getValue("color"), palette.dark) ?: Color.Unspecified
             block == "quote" -> palette.quote
             else -> Color.Unspecified
         },
-        // A CODE RUN'S GROUND (docs/rich-text-plan.md §18).
-        background = if (mono) palette.code else Color.Unspecified,
+        // A CODE RUN'S GROUND (docs/rich-text-plan.md §18), lost under a
+        // highlight, which KayaHighlightLayer draws (docs/highlight-plan.md H3).
+        background = if (mono && !attrs.containsKey("highlight")) palette.code else Color.Unspecified,
         fontSize = when (block) {
             "heading1" -> 1.6.em
             "heading2" -> 1.35.em
@@ -23244,16 +23303,18 @@ private fun KayaHighlightLayer(
             val paint =
                 if (node.highlightsFor == live) node.highlights else emptyList()
             val quotes = kayaRichQuoteExtents(runs, live)
+            val marks = kayaRichMarks(runs, live.length, palette.dark)
             // WHAT WAS ACTUALLY PAINTED, published from the only place
             // the answer is true. expect_highlights reads this and not
             // the declaration, so a verb cannot pass on kaya's intent.
             kayaPaintedRanges[node.id] = paint
             kayaSelectionWash[node.id] = wash
+            kayaDrawnMarks[node.id] = marks.map { (a, b, ground) -> Triple(a, b, ground.toArgb()) }
             if (markers.isEmpty()) {
                 kayaDrawnMarkers.remove(node.id)
                 kayaPhantomLines.remove(node.id)
             }
-            if (paint.isEmpty() && quotes.isEmpty() && markers.isEmpty()) return@drawBehind
+            if (paint.isEmpty() && quotes.isEmpty() && markers.isEmpty() && marks.isEmpty()) return@drawBehind
             val layout = kayaTextLayouts[node.id]?.invoke() ?: return@drawBehind
             // The field scrolls its text inside this box, so the paint
             // moves with it. Clipped for the same reason: a range below
@@ -23262,6 +23323,15 @@ private fun KayaHighlightLayer(
             clipRect {
                 translate(top = -scrolled) {
                     kayaRichQuoteRule(quotes, layout, palette.quote)
+                    // THE HIGHLIGHT MARK, before find's paint in this one
+                    // function, so find lands on top (docs/highlight-plan.md
+                    // H2, H3); never under the selection, as ruled.
+                    val selection = node.textState.selection
+                    for ((from, to, ground) in marks) {
+                        for ((a, b) in kayaRangeMinus(from, to, selection.min, selection.max)) {
+                            drawPath(layout.getPathForRange(a, b), ground)
+                        }
+                    }
                     if (markers.isNotEmpty()) {
                         kayaPhantomLines[node.id] = kayaRichPhantomLines(layout)
                         kayaDrawnMarkers[node.id] = kayaRichMarkers(
@@ -23279,6 +23349,23 @@ private fun KayaHighlightLayer(
     ) {
         inner()
     }
+}
+
+/** Each highlighted stretch of the run table with its ground for this
+ * appearance, clamped to the live text. */
+internal fun kayaRichMarks(runs: List<KayaRichRun>, length: Int, dark: Boolean): List<Triple<Int, Int, Color>> =
+    kayaRichSegments(runs, length).mapNotNull { (from, to, attrs) ->
+        val ground = attrs["highlight"]?.let { kayaMarkGround(it, dark) } ?: return@mapNotNull null
+        if (from >= length) null else Triple(from, minOf(to, length), ground)
+    }
+
+/** `from..to` with `cutFrom..cutTo` taken out: none, one or two pieces. */
+internal fun kayaRangeMinus(from: Int, to: Int, cutFrom: Int, cutTo: Int): List<Pair<Int, Int>> {
+    if (cutTo <= cutFrom || cutTo <= from || cutFrom >= to) return listOf(Pair(from, to))
+    val out = ArrayList<Pair<Int, Int>>(2)
+    if (cutFrom > from) out.add(Pair(from, cutFrom))
+    if (cutTo < to) out.add(Pair(cutTo, to))
+    return out
 }
 
 /** [base] with its vertical padding given up, down to KAYA_CAPPED_PAD, while

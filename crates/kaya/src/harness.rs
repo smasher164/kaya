@@ -1351,6 +1351,10 @@ pub enum Step {
     /// `expect_text_ink <target> <start:end> "light RRGGBB dark RRGGBB"` — a
     /// run's glyphs as the window drew them in the current appearance.
     ExpectTextInk(Target, TextRange, String),
+    /// `expect_text_ground <target> <start:end> "light RRGGBB dark RRGGBB"` —
+    /// the commonest colour inside a run's cells as the window drew them, in
+    /// the current appearance (docs/highlight-plan.md §4).
+    ExpectTextGround(Target, TextRange, String),
 }
 
 /// A range in a harness assertion, in the same UTF-8 byte offsets the
@@ -1481,7 +1485,8 @@ impl Step {
             | Step::ExpectAxText(t, _)
             | Step::ClickMarker(t, _)
             | Step::PickTextColor(t, _)
-            | Step::ExpectTextInk(t, ..) => vec![t],
+            | Step::ExpectTextInk(t, ..)
+            | Step::ExpectTextGround(t, ..) => vec![t],
             // BOTH ENDS OF A DRAG NORMALIZE. Handing the loop above the
             // source alone left `drag label#0 to label@row[a]` reaching every
             // rust-native backend as index 0 with the id still on it —
@@ -1864,7 +1869,7 @@ impl Step {
             Step::ExpectEdit { .. } => true,
             Step::Press { .. } => false,
             Step::SelectText(..) | Step::ClickMarker(..) | Step::PickTextColor(..) => false,
-            Step::ExpectMarkers(..) | Step::ExpectTextInk(..) => true,
+            Step::ExpectMarkers(..) | Step::ExpectTextInk(..) | Step::ExpectTextGround(..) => true,
             Step::ExpectAxItem(..) | Step::ExpectAxText(..) => true,
             Step::Hover(_) | Step::RestPointer(_) => false,
             Step::PointerDown(_) | Step::PointerUp => false,
@@ -3775,6 +3780,10 @@ pub trait Stage: Send + 'static {
     /// A run's drawn ink as `<light|dark> RRGGBB`.
     fn text_ink(&self, _target: Target, _range: TextRange) -> Result<String, String> {
         Err(not_built_yet("expect_text_ink"))
+    }
+    /// A run's drawn ground as `<light|dark> RRGGBB`.
+    fn text_ground(&self, _target: Target, _range: TextRange) -> Result<String, String> {
+        Err(not_built_yet("expect_text_ground"))
     }
     /// Report the verdict and end the process (backends own their exit
     /// discipline: process::exit, request_exit, _exit after finishing
@@ -6049,18 +6058,20 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 }
                 Step::PickTextColor(parse_target(target)?, want)
             }
-            "expect_text_ink" => {
+            "expect_text_ink" | "expect_text_ground" => {
                 let mut parts = rest.splitn(3, char::is_whitespace);
                 let (Some(target), Some(range), Some(want)) = (parts.next(), parts.next(), parts.next()) else {
                     return Err(format!(
-                        "expect_text_ink wants a target, a start:end byte range and \"light RRGGBB dark RRGGBB\": {line:?}"
+                        "{op} wants a target, a start:end byte range and \"light RRGGBB dark RRGGBB\": {line:?}"
                     ));
                 };
-                Step::ExpectTextInk(
-                    parse_target(target)?,
-                    parse_range(range).map_err(|e| format!("{e}: {line:?}"))?,
-                    parse_string(want)?,
-                )
+                let (target, range, want) =
+                    (parse_target(target)?, parse_range(range).map_err(|e| format!("{e}: {line:?}"))?, parse_string(want)?);
+                if op == "expect_text_ink" {
+                    Step::ExpectTextInk(target, range, want)
+                } else {
+                    Step::ExpectTextGround(target, range, want)
+                }
             }
             other => return Err(format!("unknown step {other:?}")),
         };
@@ -9592,6 +9603,14 @@ fn run_with_log(
                     Err(format!("text ink {got} at {}:{}, wanted {want}", range.start, range.stop))
                 }
             })),
+            Step::ExpectTextGround(target, range, want) => Some(poll(|| {
+                let got = stage.text_ground(*target, *range).map_err(|why| format!("text ground: {why}"))?;
+                if text_ink_matches(&got, want) {
+                    Ok(format!("text ground {}:{} {want}", range.start, range.stop))
+                } else {
+                    Err(format!("text ground {got} at {}:{}, wanted {want}", range.start, range.stop))
+                }
+            })),
             Step::ExpectRuns(target, want) => Some(poll(|| {
                 let got = stage.rich_runs(*target);
                 if got == *want {
@@ -12026,6 +12045,11 @@ mod tests {
         assert!(stage.select_text(t, TextRange { start: 0, stop: 0 }).unwrap_err().contains("select_text is not built"));
         assert!(stage.drawn_markers(t).unwrap_err().contains("expect_markers is not built on this backend yet"));
         assert!(stage.text_ink(t, TextRange { start: 0, stop: 1 }).unwrap_err().contains("expect_text_ink is not built"));
+        assert!(stage.text_ground(t, TextRange { start: 0, stop: 1 }).unwrap_err().contains("expect_text_ground is not built"));
+        assert_eq!(
+            parse(r#"expect_text_ground textarea#0 0:5 "light F7E8AF dark 594C1A""#).unwrap()[0],
+            Step::ExpectTextGround(t, TextRange { start: 0, stop: 5 }, "light F7E8AF dark 594C1A".into())
+        );
         assert!(stage.click_marker(t, 0).unwrap_err().contains("click_marker is not built"));
         assert!(stage.pick_text_color(t, "8D4DE0").unwrap_err().contains("pick_text_color is not built"));
     }

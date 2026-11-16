@@ -2551,8 +2551,11 @@ def ax_bus(root):
                     (root / "tools/linux/run-suites.sh").read_text(encoding="utf-8"), re.M)
     linux_exempt |= set(off.group(1).split()) if off else set()
     for scene, verbs in ax_scenes:
+        # BY THE SCENE IT RUNS, not only its name: `richdocdark-rust`
+        # runs richdoc and slipped past a name match (2026-11-15).
         mine = {n: c for n, c in legs.items()
-                if n == scene or n.startswith(scene + "-")}
+                if n == scene or n.startswith(scene + "-")
+                or re.search(r"KAYA_SELFTEST=" + re.escape(scene) + r"(\s|$)", c)}
         if not mine and scene in linux_exempt:
             continue
         if not mine:

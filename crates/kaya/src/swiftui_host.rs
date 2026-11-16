@@ -492,6 +492,9 @@ pub struct KayaHostApi {
     pub ink_for_dark: extern "C" fn(u32) -> u32,
     pub ink_from_dark: extern "C" fn(u32) -> u32,
     pub text_item_speech: unsafe extern "C" fn(u64, u64, *mut u8, usize) -> usize,
+    /// docs/highlight-plan.md H1 and H4: the palette and the ink on a ground.
+    pub ink_on: extern "C" fn(u32, u32) -> u32,
+    pub highlight_ground: extern "C" fn(u32, u32) -> u32,
 }
 
 /// # Safety
@@ -825,6 +828,8 @@ pub(crate) fn run() -> i32 {
         ink_for_dark: crate::capi::kaya_ink_for_dark,
         ink_from_dark: crate::capi::kaya_ink_from_dark,
         text_item_speech: crate::capi::kaya_text_item_speech,
+        ink_on: crate::capi::kaya_ink_on,
+        highlight_ground: crate::capi::kaya_highlight_ground,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather
