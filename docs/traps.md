@@ -21164,6 +21164,23 @@ nested MaterialTheme for the panel rewrote the harness's record of the tint
 fills (kayaTintFills, read by expect_fill) with the dark scheme's colours, and
 the badge outside it read "neutral": the record is the app scheme's only.
 
+## The emoji panel read before it composed, or after it closed (measured 2026-11-16)
+
+Matrix at 2056c7c9, `emoji-compose`: `click button@emoji` was answered by
+batch #5 at t=4087, `pick_emoji` read the panel's pick 26 ms later after
+waiting only for the batch, and found none ("no emoji picker is open"), with
+frames running 300 to 800 ms under the matrix (Choreographer skipped 30). The
+picker view was being built by then (emoji2's FileCache at +900 ms) and the
+IME was hidden at +1150 ms as the sheet's window took focus, so the bundle
+could not say whether the read beat the panel's composition or the sheet had
+already been dismissed: the fail shot is the activity's window, which never
+shows the sheet's. pick_emoji now waits for the composition of the last batch
+and two frames, as tap_at does (check-verbs' LAYERS clause, its negative
+watched red), and its failure prints the model's panel, the composition it
+waited on, and when the panel's pick was set, dismissed and cleared, each
+branch made to print on the Android pool ("never set" with the click cut;
+"set ..., sheet dismissed ..., cleared" with the panel dismissing itself).
+
 ## Compose's tap_at raced a hide (measured 2026-11-16)
 
 Matrix at 6b1ec822, `layersdark-compose`: `click button@hideveil` wrote the

@@ -13810,12 +13810,19 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         // listener, the route a tap on its grid takes.
                         val emoji = quoted(parts.drop(1))
                         kayaAwaitQuiet()
+                        // The panel the last batch opened, composed (docs/traps.md,
+                        // the emoji panel read before it composed).
+                        val (_, composing) = kayaAwaitComposed()
+                        kayaAwaitFrames(activity, 2)
                         val answered = kayaBatches
                         val picked = onUi(activity) {
                             kayaEmojiPick?.let { it(emoji); true } ?: false
                         }
                         if (picked == true) kayaAwaitAnswer(answered)
-                        else failures.add("pick_emoji \"$emoji\": no emoji picker is open")
+                        else failures.add(
+                            "pick_emoji \"$emoji\": no emoji picker is open (the model's panel is for " +
+                                "${KayaSceneModel.emojiPickerFor?.id ?: "no field"}; $composing; " +
+                                "the panel's pick: ${kayaEmojiPickLog.ifEmpty { "never set" }})")
                     }
                     "expect_image_phase" -> {
                         // What the arm COMPOSED, never the phase prop
@@ -27190,6 +27197,14 @@ fun kayaTopmostSheet(): KayaSheet? {
  * the panel's own listener and the harness's `pick_emoji` both call it. */
 @Volatile internal var kayaEmojiPick: ((String) -> Unit)? = null
 
+/** When the panel's pick was set and cleared, and why: pick_emoji's failure prints it. */
+@Volatile internal var kayaEmojiPickLog = ""
+
+private fun kayaEmojiPickNote(what: String) {
+    kayaEmojiPickLog = (kayaEmojiPickLog.split("; ").filter { it.isNotEmpty() }.takeLast(3) +
+        "$what at ${java.text.SimpleDateFormat("HH:mm:ss.SSS", java.util.Locale.ROOT).format(java.util.Date())}").joinToString("; ")
+}
+
 /** The chosen emoji replaces the field's selection through its own text
  * state, so it reaches the app as text_changed, like a typed character. */
 internal fun kayaInsertEmoji(node: KayaNode, emoji: String) {
@@ -27205,10 +27220,18 @@ internal fun kayaInsertEmoji(node: KayaNode, emoji: String) {
 @Composable
 fun KayaEmojiPanel() {
     val node = KayaSceneModel.emojiPickerFor ?: return
+    val dismiss = {
+        kayaEmojiPickNote("sheet dismissed")
+        KayaSceneModel.emojiPickerFor = null
+    }
     DisposableEffect(node.id) {
         val pick: (String) -> Unit = { emoji -> kayaInsertEmoji(node, emoji) }
         kayaEmojiPick = pick
-        onDispose { if (kayaEmojiPick === pick) kayaEmojiPick = null }
+        kayaEmojiPickNote("set for ${node.id}")
+        onDispose {
+            if (kayaEmojiPick === pick) kayaEmojiPick = null
+            kayaEmojiPickNote("cleared (the model's panel is for ${KayaSceneModel.emojiPickerFor?.id ?: "no field"})")
+        }
     }
     // The picker is a View and draws its headings from its context's theme;
     // the Activity's left them near-white on the light sheet, so it gets the
@@ -27216,7 +27239,7 @@ fun KayaEmojiPanel() {
     val dark = (LocalConfiguration.current.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
         Configuration.UI_MODE_NIGHT_YES
     val theme = if (dark) android.R.style.Theme_DeviceDefault else android.R.style.Theme_DeviceDefault_Light
-    ModalBottomSheet(onDismissRequest = { KayaSceneModel.emojiPickerFor = null }) {
+    ModalBottomSheet(onDismissRequest = dismiss) {
         androidx.compose.ui.viewinterop.AndroidView(
             factory = { context ->
                 androidx.emoji2.emojipicker.EmojiPickerView(
