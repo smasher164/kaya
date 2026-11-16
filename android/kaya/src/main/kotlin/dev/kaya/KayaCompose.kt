@@ -28414,7 +28414,14 @@ internal fun KayaLayers(node: KayaNode, a11y: Modifier, boxFill: Modifier, flexV
     if (base.hidden) return
     val inset = node.inset.dp
     val insetX = (node.insetX ?: node.inset).dp
-    Box(boxFill.then(a11y).semantics { isTraversalGroup = true }, contentAlignment = Alignment.Center) {
+    // A growing base keeps the main axis's start, the share it does not use
+    // left after it (docs/media-plan.md §3, a growing box), as the column does.
+    val at = when (flexVertical) {
+        true -> Alignment.TopCenter
+        false -> Alignment.CenterStart
+        null -> Alignment.Center
+    }
+    Box(boxFill.then(a11y).semantics { isTraversalGroup = true }, contentAlignment = at) {
         Box(Modifier.onGloballyPositioned { kayaLayerFrames[node.id] = it.boundsInWindow() }) {
             Box(
                 Modifier

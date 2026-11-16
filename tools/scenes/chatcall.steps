@@ -24,8 +24,10 @@ expect_voice 0 "660 Hz"
 # The call's geometry, one on every lane (docs/capture-plan.md §12 item 7,
 # docs/layering-plan.md LY14): the peer fills the call's room at its 4:3, the
 # self-view's tile floats over its bottom-trailing corner 12 in, drawn on top,
-# and a reader meets the peer first.
+# and a reader meets the peer first. The room the peer does not use stays
+# under it (docs/media-plan.md §3, a growing box).
 expect_video_box surface@peer "4:3"
+expect_gap label@callstate surface@peer 8
 expect_placed column@selftile "bottom_trailing 12"
 expect_video_box video@selfview "107x80"
 expect_ax_order surface@peer video@selfview
