@@ -2,14 +2,14 @@
 # (docs/HACKING.md, Roadmap). Text fields are HTML. {review:<name>} names a [reviews] entry;
 # #item-<slug> must name a feature in features.toml; blockers and soft are feature slugs.
 
-base = '311de26a'
+base = 'a143b5bf'
 title = 'What kaya builds next'
 lede = 'Every open item scored three ways: how many apps need it, how many of fifteen GUI frameworks ship it, and what a slice of that shape has cost kaya on its own record. The order below follows from the scores; the cards say why each one landed where it did.'
-state = "Since the 2026-10-11 read the phones' safe areas and keyboard avoidance shipped (10-11, 10-12), then images from the network (10-13) and the styling pass toward an app-skinned look (10-16), each on five platforms and in nine bindings. The fourth demo app followed: Aurora Music, a Python music client over a Jamendo catalogue, built screen by screen through 10-26 with every review ruling taken (library, playlist, the album's vivid header, the artist page, search, the dock with Now Playing, Liked Songs, context menus). Its styling then went back into the chat app, the task manager and the text editor (10-26, 10-27). The text editor grew into a real document editor: a Format menu and a format bar above the phone keyboard (10-27), line numbers that hold their lines, document tabs native on every platform (10-28), and one Font… opening the platform's own font picker with family and style, Menlo by default and a compact status bar (10-29, 10-30). Every slice ended on a review page the maintainer read."
+state = "Since the 2026-10-30 read the chat app gained voice and video calls with the far end of a call, a surface kind fed frames and a voice output fed samples (10-31), and rows that hide in place gave the portfolio and the task manager their filters (10-31). The 2026-11-01 rulings fitted growing pictures and the number field to their room. On 11-03 the four earlier demo apps took their own looks, ruled on the Demo App Looks page and then on a design pass against real apps: an icon kind, a fill in the app's own colour with kaya choosing the text over it, up and down chart paints, a list colour and badges for the task manager, a wallpaper per conversation for chat, the day's colour for the portfolio, and a coding face, an accent status bar and a Writing Mode for the editor (built 11-04). The rich document followed: lists, indentation, checklists, alignment, a free text colour mapped for the dark page, a .kdoc file and copy and paste with formatting (11-11), what VoiceOver, Narrator, Orca and TalkBack say about the caret's list item (11-12), the safe save through a picked file, which never leaves a document half written (11-14), and the highlighter pen in six colours, with find's match standing apart from every mark (11-15). Underneath, every run now ends by sweeping cargo's unread build caches, and the Windows lane fixes its own stray display and keeps Windows Update off. Every slice ended on a review page the maintainer read; the editor's library over a CRDT was designed and not taken, since the editor is a demo, not a product."
 menu_heading = 'The menu: the pieces first, then the apps they unblock'
 menu_lede = "Every framework piece is its own entry, in the order recommended, and each names the demo app it unblocks; the apps follow, each listing what it still waits on, so an app is never picked with its pieces unbuilt. A star marks a piece that needs a ruling before any arm is written. With the task manager, the chat app and the music app shipped, the one demo app left is the video editor. Every ruling its plan asked is taken and every piece it names is built, the last two (the timecode formatter and a drop's point) on 2026-10-05 and 10-06, so the editor waits only on the maintainer's pick. The chat app's calls stage shipped on 2026-10-31 with the far end of a call, the peer's picture and voice. Read out of the surface promised against the surface built, the ledger's open headlines and the maintainer's own evidence order; the editor's pieces, the media reader and capture shipped between the reads and stay listed with their dates."
 recommended_next = 'The video editor'
-recommended_note = "Every piece its plan names has been built since 2026-10-06, and it was held only while user-facing features came first; the list the maintainer drew from then (passwords, the segmented control, the toast, the expander, safe areas, network images, the styling pass, the music app, document tabs, the font picker) is done. The alternatives worth weighing: session restoration with recent files, which every document app now wants and which document tabs make more pressing; or a filtered list, which the music app's and the task manager's searches both hand-write today. The two below with a star need a ruling first."
+recommended_note = "Every piece its plan names has been built since 2026-10-06; it was held while user-facing features came first, and that list, then the apps' looks and the rich document, is done. The alternatives worth weighing: layering, one view over another (M), which the call screen's self-view waits on and the editor's program monitor would use; or session restoration with durable file references, which every document app wants and which the safe save, now built, makes the natural next step for picked files. The one with a star needs a ruling first."
 demo_heading = 'The demo apps, and what each still waits on'
 proposed_heading = 'Proposed: more demo apps, as milestones'
 proposed_lede = "Proposed 2026-09-28 at the maintainer's ask, not ruled. Each demo is a milestone that forces a set of pieces no shipped app needs, taken from the archetype table below; the order puts the one that shares the most with the video editor first, so its pieces are built once for both. The webcam and the microphone (the maintainer, 2026-09-28: at least one demo must use them) go into the chat app as calls rather than a demo of their own, the way Signal and Slack carry them: the conversation, the simulated peer and the notifications are already there. The photo gallery and the video editor's voiceover would use the same capture piece more lightly. Nothing here starts until the maintainer picks."
@@ -33,7 +33,7 @@ segmented = 'https://claude.ai/artifact/SCGLn3k2KshTDjhNWTUm4y'
 safearea = 'https://claude.ai/artifact/Skqv1HJC29yya5djjYFVPf'
 netimages = 'https://claude.ai/artifact/Da15r8emgFfRC3jC6yNjvN'
 styling = 'https://claude.ai/artifact/VZN2zZ5imPZqvzvMVWpdJR'
-music = 'https://claude.ai/artifact/8xxAYSybH7th52nzpteUGE'
+music = 'https://claude.ai/artifact/PjkFb98CBrEHi6k3Q7gQe9'
 restyle = 'https://claude.ai/artifact/LYPGimfXNrSWgyfNRqMMLj'
 calls = 'https://claude.ai/artifact/3XqF48GxbBDPMaBBZ9G3EL'
 hiderows = 'https://claude.ai/artifact/V5BWnaBPnCpQNTtyX6qhGN'
@@ -44,17 +44,22 @@ rulings1101 = 'https://claude.ai/artifact/64X8oeghtQchdNVYmdQMJn'
 growfit = 'https://claude.ai/artifact/SsduV7PtFoi344sadJopgo'
 richdoc = 'https://claude.ai/artifact/8PxsiUURHiARrkG5tgxMXq'
 richdocbuild = 'https://claude.ai/artifact/8xxAYSybH7th52nzpteUGE'
+looks = 'https://claude.ai/artifact/4isT9mHJgjfGBgNVbz8Smf'
+looksdesign = 'https://claude.ai/artifact/VRg9U4i2uTfNt16HTzUS9W'
+safesave = 'https://claude.ai/artifact/GjczScFwJEGFnLykCFqASu'
+highlight = 'https://claude.ai/artifact/F8pdgFcPEkrMFYrtyKcNEE'
 timecode = '~/Projects/kaya-handoffs/2026-10-04-timecode/review/index.html'
 
 [[menu]]
 title = "<b>The four demo apps' own looks</b>"
 star = false
-status = 'open'
+status = 'shipped'
 size = 'M'
 unblocks = 'the task manager, the chat app, the portfolio and the text editor'
 plan = 'docs/looks-plan.md'
 key = 'data colour'
-text = "RULED 2026-11-03 on the Demo App Looks page: a colour per list and a tile grid for the task manager, a generated wallpaper per conversation for chat, the day's colour for the portfolio, a bundled coding face with an accent status bar and a Writing Mode for the editor. The framework pieces first: a standalone <code>icon</code> kind, the data-colour fill (the tints plan's T3), up and down chart paints, and a reading measure on the textarea; then one app per slice, each with its review page, and one full matrix at the end."
+review = 'looks'
+text = "SHIPPED 2026-11-04 (2b76c009, 7a22efb0; review {review:looks}), after a design pass against real apps the maintainer approved ({review:looksdesign}). RULED 2026-11-03 on the Demo App Looks page: a colour per list and a tile grid for the task manager, a generated wallpaper per conversation for chat, the day's colour for the portfolio, a bundled coding face with an accent status bar and a Writing Mode for the editor. The framework pieces first: a standalone <code>icon</code> kind, the data-colour fill (the tints plan's T3), up and down chart paints, and a reading measure on the textarea; then one app per slice, each with its review page, and one full matrix at the end."
 
 [[menu]]
 title = '<a href="#item-hscroll">Horizontal scroll axis</a>'
@@ -168,7 +173,7 @@ size = 'XL'
 unblocks = "the text editor's Writing Mode; a notes app on a CRDT"
 plan = 'docs/rich-document-plan.md'
 review = 'richdocbuild'
-text = "SHIPPED 2026-11-11 (72d17b78, 96f2e834, 57c31c19, 55ecc56d, 1027107c; review {review:richdocbuild}): lists, indentation, checklists, alignment and a free text colour mapped for the dark page, a .kdoc file and copy and paste with formatting through RTF and HTML, on five platforms and in nine bindings; the editor's Writing Mode is a rich tab. Planned on {review:richdoc} with eighteen rulings. Unknown keys kept through an edit (RD17) and the caret's list item for Orca and TalkBack (RD18) followed on 2026-11-12 (ad33e17a). Later slices: highlight, the safe save through a picked file, VoiceOver and Narrator hear the list item (RD19 A; RD21 A on WinUI) and a model field's Document keeps its extra (RD20 B), built 2026-11-12 (87408653, bc0a430e; matrix ALL PASS at b2fe5c4b)."
+text = "SHIPPED 2026-11-11 (72d17b78, 96f2e834, 57c31c19, 55ecc56d, 1027107c; review {review:richdocbuild}): lists, indentation, checklists, alignment and a free text colour mapped for the dark page, a .kdoc file and copy and paste with formatting through RTF and HTML, on five platforms and in nine bindings; the editor's Writing Mode is a rich tab. Planned on {review:richdoc} with eighteen rulings. Unknown keys kept through an edit (RD17) and the caret's list item for Orca and TalkBack (RD18) followed on 2026-11-12 (ad33e17a). The safe save through a picked file (11-14, b6dfc5cd; review {review:safesave}) and the highlighter pen in six colours with find standing apart from it (11-15, 601830a3, e8a616e4, a143b5bf; review {review:highlight}) followed. VoiceOver and Narrator hear the list item (RD19 A; RD21 A on WinUI) and a model field's Document keeps its extra (RD20 B), built 2026-11-12 (87408653, bc0a430e; matrix ALL PASS at b2fe5c4b)."
 
 [[menu]]
 title = '<b>The video editor itself</b>'
@@ -229,7 +234,7 @@ status = 'needs ruling'
 size = 'L'
 unblocks = 'every document app'
 key = 'Session restoration'
-text = "nothing restores an app the way the user left it, and a picked file cannot be reopened next launch. L; needs a design pass first, since the backends hold state the core never sees. Unblocks every document app, the editor's recent projects among them."
+text = "nothing restores an app the way the user left it, and a picked file cannot be reopened next launch (the safe save of 2026-11-14 writes one safely, but holds no grant across launches). L; needs a design pass first, since the backends hold state the core never sees. Unblocks every document app, the editor's recent projects among them."
 
 [[menu]]
 title = '<b>The residue pass</b>'
@@ -331,11 +336,11 @@ text = "SHIPPED 2026-10-16 (a6964201 depth, 50e27735 breadth; review {review:sty
 [[menu]]
 title = 'Restyle the earlier demo apps with the styling pass'
 star = false
-status = 'open'
+status = 'shipped'
 size = 'M each'
 unblocks = 'the text editor, the portfolio, the task manager and the chat app'
 review = 'restyle'
-text = "BEGUN 2026-10-26 (5d7df248, facf3a63; review {review:restyle}): the music app's row styling in the chat app, the task manager's Projects screen and the editor's format bar, round pictures in the chat app, the editor's find bar on the basis of Sublime Text, Zed and VS Code. The portfolio and a unique look for each app are what is left. First asked for by the maintainer on 2026-10-15: once the styling pass is built (docs/styling-pass-plan.md, ruled 2026-10-15), go back to each earlier demo app and apply its vocabulary (data-colour grounds, image grounds with overlay panels, activatable cards with hover and selection, image shapes, tinted labels, the dock) to push each into its own unique, interesting look, within Y1's line that controls stay the platform's."
+text = "SHIPPED 2026-11-04 with the four apps' own looks above, which took the portfolio and gave each app its unique look. BEGUN 2026-10-26 (5d7df248, facf3a63; review {review:restyle}): the music app's row styling in the chat app, the task manager's Projects screen and the editor's format bar, round pictures in the chat app, the editor's find bar on the basis of Sublime Text, Zed and VS Code. The portfolio and a unique look for each app are what is left. First asked for by the maintainer on 2026-10-15: once the styling pass is built (docs/styling-pass-plan.md, ruled 2026-10-15), go back to each earlier demo app and apply its vocabulary (data-colour grounds, image grounds with overlay panels, activatable cards with hover and selection, image shapes, tinted labels, the dock) to push each into its own unique, interesting look, within Y1's line that controls stay the platform's."
 
 [[demo]]
 name = 'The text editor'
