@@ -2,8 +2,19 @@
 
 Status: RULED 2026-11-15, H1 to H8 A as recommended, and both assumptions in
 §6's "Beyond these" as the plan assumes them (the maintainer: "i accept your
-rulings there as given"). §5 steps 0 and 1 are built (2026-11-15: the
-measurements under docs/measurements/highlight-*-2026-11-15.md and the root).
+rulings there as given"). BUILT 2026-11-15 (9881ee46 the root, 601830a3 the
+backends, e8a616e4 the bindings and scenes; the plain matrix green at
+e8a616e4): the measurements under docs/measurements/highlight-*-2026-11-15.md,
+the root, the arm on all five lanes, the sugar in nine bindings and the C
+floor, the Go editor's Highlight submenu. What the build settled beyond the
+rulings: the clipboard's RTF writes `\highlightN\cbN` over the light value in
+`\colortbl` with no expanded table (readers map by nearest name); GTK keeps
+code < mark < find on EVERY mint, since a tag minted after find hides its
+match; WinUI rewrites the dark ground on an appearance change itself; on the
+Mac the mark is cut out of the selected bytes because TextKit 2 draws the
+selection under the fragments; and on iOS KayaFlex now places a grown
+textarea in at least its floor (docs/traps.md, the grown textarea under its
+floor).
 H1's hexes RULED 2026-11-15 on the review page (the maintainer: "im okay with
 your recommendations"): recipe A as built, A' not taken; and with them the
 selection rule in H3 below.

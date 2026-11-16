@@ -423,7 +423,7 @@ rule RD7 makes part of its definition:
 | `color` | `#RRGGBB`, sRGB, opaque | yes | no |
 | `code` | flag | no | no |
 | `link` | the URL | no | no |
-| (later) `highlight` | a palette name (RD6) | yes | no |
+| `highlight` | a palette name (RD6; docs/highlight-plan.md, BUILT 2026-11-15) | yes | no |
 
 **Automatic ink** is the absence of a `color` mark. There is no `auto`
 value and no black that means automatic; a run that says `#000000` is
@@ -791,7 +791,8 @@ palette re-resolves; WinUI after `ActualThemeChanged`, where the arm must
 re-apply its runs anyway because of #6908), so five platforms draw one
 colour for one run.
 
-**Highlight** (RD6, recommended later, named): a background colour is a
+**Highlight** (RD6, recommended later, named; BUILT 2026-11-15 as
+docs/highlight-plan.md): a background colour is a
 second slice, and when it comes it is a closed palette of names with
 designed light and dark values (Notes' five, Notion's ten, Word's
 `w:highlight`), because a free background under free text has no contrast
@@ -915,7 +916,7 @@ byte on five lanes.
 5. **The review page** with captures of a rich tab on every lane, light and
    dark, each viewed before it is published.
 6. Then, each its own slice: the
-   highlight (RD6; docs/highlight-plan.md, RULED 2026-11-15), the notes app
+   highlight (RD6; docs/highlight-plan.md, BUILT 2026-11-15), the notes app
    over a SQLite library with Automerge behind it (RD9, RD10; NOT TAKEN
    2026-11-15, docs/editor-library-plan.md: the editor and the notes demo stay
    separate demos), and the safe save through a picked file (§4.1, RD14 to
@@ -1226,7 +1227,8 @@ option, as Word and Notes offer it.
 
 RECOMMEND A. A free background under free text has no contrast answer; WinUI
 has one background slot already shared three ways (find, code, quote); and
-nothing in the ask names it.
+nothing in the ask names it. BUILT 2026-11-15 as A's palette of six names
+(docs/highlight-plan.md).
 
 ### RD7. Each mark's expand rule is part of kaya's vocabulary
 

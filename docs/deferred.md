@@ -29,7 +29,7 @@ go.sum pins (L12). The maintainer rules, then the build runs the plan's §10,
 the bridge's tests first. The entry closes when the plan reads BUILT and the
 matrix is green on it.
 
-## BUILD — the highlighter pen (RD6's slice): docs/highlight-plan.md RULED 2026-11-15, H1 to H8 A as recommended and both assumptions in §6's "Beyond these" (the maintainer: "i accept your rulings there as given")
+## ~~BUILD — the highlighter pen (RD6's slice): docs/highlight-plan.md RULED 2026-11-15, H1 to H8 A as recommended and both assumptions in §6's "Beyond these" (the maintainer: "i accept your rulings there as given")~~ COMPLETE 2026-11-15 (9881ee46, 601830a3, e8a616e4): the plan's status reads BUILT and the plain matrix is green at e8a616e4; the mark on all five lanes, the sugar in nine bindings and the C floor, the Go editor's Highlight submenu; the review page with every lane's capture is https://claude.ai/artifact/F8pdgFcPEkrMFYrtyKcNEE
 KEY: highlight-plan, highlighter pen, highlight mark, highlight_color, HighlightColor, rich_attr 14, ink_on, kaya.draw.mark, nearest_highlight, expect_text_ground, RD6
 
 A user-applied background colour on document text, saved like bold: a
