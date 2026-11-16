@@ -3187,7 +3187,9 @@ fn layers_seat(core: &CoreState, layers: u64) -> windows_core::Result<()> {
         let (col, row) = ((place - 1) % 3, (place - 1) / 3);
         wrapper.SetHorizontalAlignment(if wide { H::Stretch } else { [H::Left, H::Center, H::Right][col as usize] })?;
         wrapper.SetVerticalAlignment(if tall { V::Stretch } else { [V::Top, V::Center, V::Bottom][row as usize] })?;
-        wrapper.SetMargin(Thickness { Left: sides, Top: inset, Right: sides, Bottom: inset })?;
+        // A fade panel sits flush with the box past the inset (LY3, LY9).
+        let (sides, ends) = if edge.is_some() { (0.0, 0.0) } else { (sides, inset) };
+        wrapper.SetMargin(Thickness { Left: sides, Top: ends, Right: sides, Bottom: ends })?;
     }
     if let Some(NativeWidget::Layers { host, .. }) = core.widgets.get(&WidgetId(layers)) {
         layers_cap(host)?;

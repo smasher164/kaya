@@ -1934,7 +1934,11 @@ pub fn classify_placed(o: Frame, b: Frame, rtl: bool) -> String {
     let max = gaps.iter().cloned().fold(f64::MIN, f64::max);
     let min = gaps.iter().cloned().fold(f64::MAX, f64::min);
     let inset = if max - min <= 2.0 { shown[0].clone() } else { shown.join("/") };
-    format!("{} {inset}", words.join("_"))
+    // SPAN: at one edge and as far from both ends of it, a panel along the
+    // edge (a fade panel's, LY9).
+    let across = if matches!(words[0], "top" | "bottom") { left } else { top };
+    let span = if words.len() == 1 && (across - gaps[0]).abs() <= 2.0 { " span" } else { "" };
+    format!("{} {inset}{span}", words.join("_"))
 }
 
 /// The point tap_at presses: the place's position in the frame, 4 units in
@@ -12158,6 +12162,10 @@ mod tests {
         assert_eq!(classify_placed(at(368.0, 62.0), b, false), "top_trailing 12");
         assert_eq!(classify_placed(at(368.0, 56.0), b, false), "top_trailing 6/12");
         assert_eq!(classify_placed((108.0, 58.0, 304.0, 184.0), b, false), "fill 8");
+        assert_eq!(classify_placed((100.0, 190.0, 320.0, 60.0), b, false), "bottom 0 span");
+        assert_eq!(classify_placed((108.0, 182.0, 304.0, 60.0), b, false), "bottom 8 span");
+        assert_eq!(classify_placed((108.0, 190.0, 304.0, 60.0), b, false), "bottom 0");
+        assert_eq!(classify_placed((100.0, 50.0, 40.0, 200.0), b, true), "trailing 0 span");
         assert_eq!(place_point(b, "top_leading", false), Some((104.0, 54.0)));
         assert_eq!(place_point(b, "top_leading", true), Some((416.0, 54.0)));
         assert_eq!(place_point(b, "center", false), Some((260.0, 150.0)));

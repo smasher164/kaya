@@ -6,4 +6,5 @@ expect_locale ar-EG
 expect_direction rtl
 expect_title "layers"
 expect_placed row@badge "top_trailing 8"
+expect_placed row@caption "bottom 0 span"
 expect_placed row@flat "top_leading 8"

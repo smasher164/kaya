@@ -28506,7 +28506,9 @@ internal fun KayaLayers(node: KayaNode, a11y: Modifier, boxFill: Modifier, flexV
                 val edge = if (o.filled == KAYA_TINT_OVERLAY_FADE) kayaFadeEdge(o.place) else null
                 val wide = o.fill == true || edge == 't' || edge == 'b'
                 val tall = o.fill == true || edge == 's' || edge == 'e'
-                Box(Modifier.matchParentSize().clipToBounds().padding(horizontal = insetX, vertical = inset)) {
+                // A fade panel sits flush with the box past the inset (LY3, LY9).
+                val pad = if (edge == null) Modifier.padding(horizontal = insetX, vertical = inset) else Modifier
+                Box(Modifier.matchParentSize().clipToBounds().then(pad)) {
                     Box(
                         Modifier
                             .align(kayaPlaceAlignment(o.place))
@@ -28546,7 +28548,9 @@ fun kayaClassifyPlaced(o: androidx.compose.ui.geometry.Rect, b: androidx.compose
     if (words.isEmpty()) return "center"
     val shown = gaps.map { Math.round(it).toString() }
     val inset = if (gaps.max() - gaps.min() <= 2f) shown[0] else shown.joinToString("/")
-    return "${words.joinToString("_")} $inset"
+    val across = if (words[0] == "top" || words[0] == "bottom") left else top
+    val span = if (words.size == 1 && Math.abs(across - gaps[0]) <= 2f) " span" else ""
+    return "${words.joinToString("_")} $inset$span"
 }
 
 /** tap_at's point: a place in the frame, 4dp in from the edges it names,

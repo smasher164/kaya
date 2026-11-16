@@ -26222,7 +26222,8 @@ struct KayaLayersOverlays: View {
         let insets = kayaInsetEdges(node, node.inset)
         ZStack {
             ForEach(Array(overlays.enumerated()), id: \.element.id) { i, o in
-                // A fade panel spans the box along the edge it sits against (LY9).
+                // A fade panel spans the box along the edge it sits against,
+                // flush with it past the inset (LY3, LY9).
                 let fade = o.filled == tintOverlayFade ? kayaFadeEdge(o.place).edge : nil
                 let wide = o.fill == true || fade == .top || fade == .bottom
                 let tall = o.fill == true || fade == .leading || fade == .trailing
@@ -26232,7 +26233,7 @@ struct KayaLayersOverlays: View {
                     .contentShape(Rectangle())
                     .modifier(KayaLayerReader(id: o.id))
                     .accessibilitySortPriority(-Double(i + 1))
-                    .padding(insets)
+                    .padding(fade == nil ? insets : EdgeInsets())
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: kayaPlaceAlignment(o.place))
             }
         }
@@ -26313,7 +26314,9 @@ func kayaClassifyPlaced(_ o: CGRect, _ box: CGRect, rtl: Bool) -> String {
     if words.isEmpty { return "center" }
     let shown = gaps.map { String(Int($0.rounded())) }
     let inset = gaps.max()! - gaps.min()! <= 2 ? shown[0] : shown.joined(separator: "/")
-    return "\(words.joined(separator: "_")) \(inset)"
+    let across = words[0] == "top" || words[0] == "bottom" ? left : top
+    let span = words.count == 1 && abs(across - gaps[0]) <= 2 ? " span" : ""
+    return "\(words.joined(separator: "_")) \(inset)\(span)"
 }
 
 private struct KayaInFillKey: EnvironmentKey {

@@ -21139,6 +21139,17 @@ dark. A WinUI step shot of a right-to-left window comes back mirrored, glyphs
 included (the layersrtl review capture); the layout under it is right, so a
 picture for a page is flipped back, never read for direction.
 
+The fade flush with the picture (LY3, ruled 2026-11-16), read off each lane's
+held capture of the layers scene before and after: the caption's text against
+the scrim beside it (the brightest 3% of the glyph box against the 95th
+percentile of the scrim to its trailing side in the same rows) read 17.1:1 to
+17.4:1 before and 17.2:1 to 17.6:1 after, light and dark equal; the panel only
+gained scrim at the picture's edges, and the text sits 10 to 13 pt from the
+picture's edge (the default filled padding plus the glyph's side bearing).
+This is a different measure from the 9.9:1 to 10.5:1 above, which took the
+scrim's 95th percentile across the caption's whole rows; compare like with
+like.
+
 Controls on a panel (measured 2026-11-16, the layers scene's Share button,
 WCAG ratio of its text against the bezel under it). As a bare overlay drawn
 over the fade, in each platform's own look, it read 1.1:1 on the Mac and GTK

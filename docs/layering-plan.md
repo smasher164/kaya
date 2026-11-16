@@ -369,6 +369,20 @@ own. A per-child margin waits for a consumer with two overlays at different
 distances. A negative inset (a badge straddling the avatar's edge) is
 refused, as `inset` is today.
 
+RULED 2026-11-16, after the build (the maintainer, on the layering review
+page: "at least when it comes to the gradient at the bottom with some text,
+it probably shouldn't have padding and should sit flush against the bottom so
+it looks like the gradient touches the bottom"): A FADE PANEL TAKES NO PART OF
+THE INSET. A panel in the fade form sits flush with the edge it darkens toward
+and spans that edge's whole length, on every edge a fade can sit against (top,
+bottom, leading, trailing); its content keeps its room through the panel's own
+padding, its `inset` if the app gives one, else the default every filled
+container takes. Every other overlay (a flat `overlay` panel, a badge, the
+self-view, a veil) keeps the container's inset. `expect_placed` reads it as
+`bottom 0 span` (the classifier's span form: at one edge, as far from both
+ends of it as from the edge) in layers.steps and layersrtl.steps on every
+lane, the badge beside it still `top_trailing 8`.
+
 ### LY4. A size relative to the box
 
 The question: should an overlay say "a quarter of the box's width" (Compose
@@ -512,6 +526,18 @@ measured 8.0:1 (iOS) to 14.1:1 (WinUI) inside the fade, light and dark on every 
 the bare overlay read 1.1:1 on the Mac and GTK and 2.7:1 on Android in the
 light (docs/traps.md, the layering entries); check-verbs' LAYERS clause holds
 each backend's site.
+
+RULED 2026-11-16, after the build (LY3's last paragraph, the same quote): THE
+FADE REACHES THE PICTURE'S EDGES. An overlay fade panel sits flush past the
+container's inset along its edge; the caption's contrast held, 17.1:1 to
+17.4:1 before and 17.2:1 to 17.6:1 after on every lane, light and dark, and
+its text sits 10 to 13 pt from the picture's edge (docs/traps.md, the layering
+entries). A fade panel inside an image ground (Y3) is NOT made flush: the
+ground's inset pads all its children, and the panel sits where the column's
+flow puts it, so a middle or nested panel touches no edge. RECOMMEND that a
+flush fade over a picture be spelled as layers (the picture as the base, the
+fade panel as an overlay), and that Y3's fade keep the ground's inset until a
+consumer asks otherwise; for the maintainer.
 
 ### LY10. Safe areas, scroll, hidden and grow
 

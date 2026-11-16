@@ -11081,6 +11081,8 @@ fn layers_seat(core: &CoreState, layers: u64) {
         let fade_tall = matches!(edge, Some(4 | 6));
         w.set_halign(if fill || fade_wide { gtk4::Align::Fill } else { along(col) });
         w.set_valign(if fill || fade_tall { gtk4::Align::Fill } else { along(row) });
+        // A fade panel sits flush with the box past the inset (LY3, LY9).
+        let (sides, ends) = if edge.is_some() { (0, 0) } else { (sides, ends) };
         w.set_margin_start(sides);
         w.set_margin_end(sides);
         w.set_margin_top(ends);
