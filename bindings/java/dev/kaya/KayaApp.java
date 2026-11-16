@@ -6016,6 +6016,24 @@ public final class KayaApp {
         }
     }
 
+    /** A highlighter's colour, the {@code highlight} attribute's value
+     * (docs/highlight-plan.md H1); NONE is its absence. */
+    public enum HighlightColor {
+        NONE("none"),
+        YELLOW("yellow"),
+        ORANGE("orange"),
+        PINK("pink"),
+        PURPLE("purple"),
+        BLUE("blue"),
+        GREEN("green");
+
+        final String kind;
+
+        HighlightColor(String kind) {
+            this.kind = kind;
+        }
+    }
+
     /** A paragraph's alignment, the {@code align} attribute's value; START
      * is its absence. Not {@link Align}, which places a container's
      * children. */
@@ -6207,6 +6225,20 @@ public final class KayaApp {
             }
             return Optional.empty();
         }
+
+        /** The highlight holding over the whole selection; NONE otherwise. */
+        public HighlightColor highlight() {
+            for (TextRun a : attrs) {
+                if (a.name().equals("highlight")) {
+                    for (HighlightColor color : HighlightColor.values()) {
+                        if (color.kind.equals(a.value())) {
+                            return color;
+                        }
+                    }
+                }
+            }
+            return HighlightColor.NONE;
+        }
     }
 
     /**
@@ -6333,6 +6365,12 @@ public final class KayaApp {
          * (RD4, RD5). */
         public Document color(TextRange range, String rgb) {
             return mark(range, "color", rgb.toUpperCase(java.util.Locale.ROOT));
+        }
+
+        /** A highlighter's ground behind the range (docs/highlight-plan.md
+         * H7). */
+        public Document highlight(TextRange range, HighlightColor color) {
+            return mark(range, "highlight", color.kind);
         }
 
         /** A {@code .kdoc} file's bytes read (docs/rich-document-plan.md
@@ -9795,6 +9833,13 @@ public final class KayaApp {
          * page; automatic ink is {@link #unformat} of "color" (RD4). */
         public void color(Widget w, String rgb) {
             format(w, "color", rgb.toUpperCase(java.util.Locale.ROOT));
+        }
+
+        /** The selection highlighted in {@code color}; removal is
+         * {@code unformat(w, "highlight")}, as automatic ink is of
+         * {@code color} (docs/highlight-plan.md H7). */
+        public void highlight(Widget w, HighlightColor color) {
+            format(w, "highlight", color.kind);
         }
 
         /** Present the platform's own colour picker over the selection;

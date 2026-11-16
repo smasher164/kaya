@@ -3,8 +3,10 @@
 // preset colour, a bullet list with a nested item, a numbered list and a
 // checklist, then the paragraph acts from buttons, the platform's colour
 // picker and a `.kdoc` round trip, then a file carrying keys this kaya does
-// not know (RD17). label#1 is the binding's own Document, folded from the
-// same deltas, so it must spell what the core holds.
+// not know (RD17), then the highlighter (docs/highlight-plan.md): a
+// highlight act, find's set declared over it and taken off, and the
+// highlight's removal. label#1 is the binding's own Document, folded from
+// the same deltas, so it must spell what the core holds.
 package richdoc
 
 import (
@@ -132,6 +134,23 @@ func App() *kaya.App {
 					tx.SetDocument(editor, file.Document)
 					tx.Write(kdoc, fmt.Sprintf("opened read_only %s, extra %s", readOnly, strings.ReplaceAll(file.Document.Extra, `"`, "'")))
 					tx.Write(runs, spell(file.Document.Runs))
+				})
+			})
+			tx.Row(func() {
+				tx.Button("highlight", func(tx *kaya.Tx) { // button#6
+					tx.Highlight(editor, kaya.HighlightYellow)
+				})
+				finding := false
+				tx.Button("find", func(tx *kaya.Tx) { // button#7
+					finding = !finding
+					ranges := []kaya.TextRange{}
+					if finding {
+						ranges = append(ranges, kaya.TextRange{Start: 1, End: 3})
+					}
+					tx.HighlightRanges(editor, ranges)
+				})
+				tx.Button("plain", func(tx *kaya.Tx) { // button#8
+					tx.Unformat(editor, "highlight")
 				})
 			})
 		}))

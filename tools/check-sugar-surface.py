@@ -6507,15 +6507,19 @@ def richdoc_read_rows(snake, pascal, camel):
     `block` is."""
     F = RICH_FILES
     return [
-        ("rust", F["rust"], rf"pub fn {snake}\(&self\) -> (ListKind|ParagraphAlign|Option<&str>)"),
+        ("rust", F["rust"],
+         rf"pub fn {snake}\(&self\) -> (ListKind|ParagraphAlign|HighlightColor|Option<&str>)"),
         ("python", F["python"], rf"^    def {snake}\(self\) -> str"),
         ("go", F["go"], rf"^func \(s Selection\) {pascal}\(\)"),
         ("csharp", F["csharp"], rf"public [A-Za-z]+\?? {pascal}\(\)"),
-        ("java", F["java"], rf"public (ListKind|ParagraphAlign|Optional<String>) {camel}\(\)"),
-        ("swift", F["swift"], rf"public var {camel}: (KayaListKind|KayaParagraphAlign|String\?)"),
+        ("java", F["java"],
+         rf"public (ListKind|ParagraphAlign|HighlightColor|Optional<String>) {camel}\(\)"),
+        ("swift", F["swift"],
+         rf"public var {camel}: (KayaListKind|KayaParagraphAlign|KayaHighlightColor|String\?)"),
         ("haskell", F["haskell"], rf"^selection{pascal} :: Selection ->"),
         ("ocaml", F["ocaml"], rf"^  let {snake} s ="),
-        ("js", F["js"], rf"^  {camel}\(\): (ListKindName|ParagraphAlignName|string \| null)"),
+        ("js", F["js"],
+         rf"^  {camel}\(\): (ListKindName|ParagraphAlignName|HighlightColorName|string \| null)"),
     ]
 
 
@@ -6577,6 +6581,13 @@ RICHDOC_PARTS = [
     ("ParagraphAlign", richdoc_type_rows,
      ("paragraph_align", "ParagraphAlign", "paragraphAlign")),
     ("Kdoc", richdoc_type_rows, ("kdoc", "Kdoc", "kdoc")),
+    # docs/highlight-plan.md H7: the highlighter's vocabulary, builder,
+    # act and read, in the color sugar's spellings.
+    ("HighlightColor", richdoc_type_rows,
+     ("highlight_color", "HighlightColor", "highlightColor")),
+    ("Document.highlight", richdoc_builder_rows, ("highlight", "Highlight", "highlight")),
+    ("highlight", richdoc_act_rows, ("highlight", "Highlight", "highlight")),
+    ("Selection.highlight", richdoc_read_rows, ("highlight", "Highlight", "highlight")),
     ("Document.list", richdoc_builder_rows, ("list", "List", "list")),
     ("Document.indent", richdoc_builder_rows, ("indent", "Indent", "indent")),
     ("Document.checked", richdoc_builder_rows, ("checked", "Checked", "checked")),

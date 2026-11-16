@@ -3,9 +3,11 @@
    heading, a body paragraph with a preset colour, a bullet list with a
    nested item, a numbered list and a checklist, then the paragraph acts
    from buttons, the platform's colour picker and a [.kdoc] round trip,
-   then a file carrying keys this kaya does not know (RD17). label#1 is the
-   binding's own Document, folded from the same deltas, so it must spell
-   what the core holds. *)
+   then a file carrying keys this kaya does not know (RD17), then the
+   highlighter (docs/highlight-plan.md): a highlight act, find's set
+   declared over it and taken off, and the highlight's removal. label#1 is
+   the binding's own Document, folded from the same deltas, so it must
+   spell what the core holds. *)
 
 open Kaya_app
 
@@ -80,6 +82,7 @@ let () =
                (Option.value act.value ~default:"off"));
           write runs mirror);
 
+      let finding = ref false in
       mount
         (column
            [
@@ -123,6 +126,19 @@ let () =
                           (Option.value file.read_only ~default:"none")
                           (quoted file.document.extra));
                      write runs (spell file.document.runs));
+               ];
+             row
+               [
+                 (* button#6 *)
+                 button ~text:"highlight"
+                   ~on_click:(fun () -> highlight editor Highlight_color.Yellow);
+                 (* button#7 *)
+                 button ~text:"find"
+                   ~on_click:(fun () ->
+                     finding := not !finding;
+                     highlight_ranges editor (if !finding then [ (1, 3) ] else []));
+                 (* button#8 *)
+                 button ~text:"plain" ~on_click:(fun () -> unformat editor "highlight");
                ];
            ]
            ());

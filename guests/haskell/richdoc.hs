@@ -5,10 +5,13 @@
 -- heading, a body paragraph with a preset colour, a bullet list with a
 -- nested item, a numbered list and a checklist, then the paragraph acts from
 -- buttons, the platform's colour picker and a `.kdoc` round trip, then a file
--- carrying keys this kaya does not know (RD17). label#1 is the binding's own
+-- carrying keys this kaya does not know (RD17), then the highlighter
+-- (docs/highlight-plan.md): a highlight act, find's set declared over it and
+-- taken off, and the highlight's removal. label#1 is the binding's own
 -- Document, folded from the same deltas, so it must spell what the core holds.
 
 import qualified Data.ByteString as BS
+import Data.IORef (atomicModifyIORef', newIORef)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -47,6 +50,7 @@ seeded =
 
 main :: IO ()
 main = kayaMain $ \app -> do
+  finding <- newIORef False
   (editor, lastAct, runs) <- buildTx app $ do
     window
       primary
@@ -108,6 +112,14 @@ main = kayaMain $ \app -> do
                         <> quoted file.document.extra
                     )
                   writeSignal runs (spell file.document.runs)
+            ],
+          row
+            []
+            [ buttonOn "highlight" (submitTx app (highlight editor HighlightYellow)), -- button#6
+              buttonOn "find" $ do -- button#7
+                on <- atomicModifyIORef' finding (\f -> (not f, not f))
+                submitTx app (highlightRanges editor [(1, 3) | on]),
+              buttonOn "plain" (submitTx app (unformat editor "highlight")) -- button#8
             ]
         ]
     mount root

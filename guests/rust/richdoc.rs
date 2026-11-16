@@ -3,7 +3,9 @@
 //! preset colour, a bullet list with a nested item, a numbered list and a
 //! checklist, then the paragraph acts from buttons, the platform's colour
 //! picker and a `.kdoc` round trip, then a file carrying keys this kaya
-//! does not know (RD17). label#1 is the binding's own Document, folded from
+//! does not know (RD17), then the highlighter (docs/highlight-plan.md): a
+//! highlight act, find's set declared over it and taken off, and the
+//! highlight's removal. label#1 is the binding's own Document, folded from
 //! the same deltas, so it must spell what the core holds.
 
 const DOC: &str = "Groceries\nFresh from the market.\nApples\nGreen ones\nBread\nWash\nSlice\nMilk\nEggs";
@@ -20,6 +22,9 @@ enum Msg {
     PickColour,
     Kdoc,
     Unknown,
+    Highlight,
+    Find,
+    Unhighlight,
 }
 
 fn spell(runs: &[kaya::Run]) -> String {
@@ -83,6 +88,16 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         msgs.on_click(button, msg);
                     }
                 });
+                // A SECOND ROW: nine buttons in one row crushed the phone's
+                // text into a sliver.
+                tx.row(|tx| {
+                    for (title, msg) in
+                        [("highlight", Msg::Highlight), ("find", Msg::Find), ("plain", Msg::Unhighlight)]
+                    {
+                        let button = tx.button(title).id();
+                        msgs.on_click(button, msg);
+                    }
+                });
                 editor
             })
             .into_parts();
@@ -91,6 +106,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         (last, runs, kdoc, editor)
     });
 
+    let mut finding = false;
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
             Msg::Edited(edit) => {
@@ -124,6 +140,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::Indent => ctx.apply(|tx| tx.indent(editor)),
             Msg::Red => ctx.apply(|tx| tx.color(editor, "#DD1F24")),
             Msg::PickColour => ctx.apply(|tx| tx.pick_text_color(editor)),
+            Msg::Highlight => ctx.apply(|tx| tx.highlight(editor, kaya::HighlightColor::Yellow)),
+            Msg::Find => {
+                finding = !finding;
+                let ranges = if finding { vec![1..3] } else { Vec::new() };
+                ctx.apply(|tx| tx.highlight_ranges(editor, ranges));
+            }
+            Msg::Unhighlight => ctx.apply(|tx| tx.unformat(editor, "highlight")),
             Msg::Kdoc => {
                 let now = ctx.document(editor);
                 let bytes = now.to_kdoc();

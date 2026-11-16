@@ -508,6 +508,24 @@ module List_kind = struct
     | Check -> "check"
 end
 
+(* A highlighter's colour, the [highlight] attribute's value
+   (docs/highlight-plan.md H1); [None] is its absence. A MODULE, as
+   [List_kind] is. *)
+module Highlight_color = struct
+  type t = None | Yellow | Orange | Pink | Purple | Blue | Green
+
+  let name = function
+    | None -> "none"
+    | Yellow -> "yellow"
+    | Orange -> "orange"
+    | Pink -> "pink"
+    | Purple -> "purple"
+    | Blue -> "blue"
+    | Green -> "green"
+
+  let all = [ Yellow; Orange; Pink; Purple; Blue; Green ]
+end
+
 (* A paragraph's alignment, the [align] attribute's value; [Start] is its
    absence. A MODULE because the layout [align] type already owns [Start],
    [Center] and [End]. *)
@@ -596,6 +614,9 @@ module Document = struct
 
   (* A text colour, [#RRGGBB] as it reads on a light page (RD4, RD5). *)
   let color range rgb doc = mark range "color" (String.uppercase_ascii rgb) doc
+
+  (* A highlighter's ground behind the range (docs/highlight-plan.md H7). *)
+  let highlight range color doc = mark range "highlight" (Highlight_color.name color) doc
 
   (* A [.kdoc] file read (docs/rich-document-plan.md §4): the document, and
      why it may only be read when it carries a name this kaya cannot keep
@@ -756,6 +777,15 @@ module Selection = struct
     Option.map
       (fun (r : Run.t) -> r.value)
       (List.find_opt (fun (r : Run.t) -> r.name = "color") s.attrs)
+
+  (* The highlight holding over the whole selection; [None] otherwise. *)
+  let highlight s =
+    match List.find_opt (fun (r : Run.t) -> r.name = "highlight") s.attrs with
+    | Some r -> (
+        match List.find_opt (fun c -> Highlight_color.name c = r.value) Highlight_color.all with
+        | Some c -> c
+        | None -> Highlight_color.None)
+    | None -> Highlight_color.None
 end
 
 type selection = Selection.t
@@ -3050,6 +3080,10 @@ let check_items widget on =
 (* The selection's text in [#RRGGBB] as it reads on a light page;
    automatic ink is [unformat] of "color" (RD4). *)
 let color widget rgb = format widget "color" (String.uppercase_ascii rgb)
+
+(* The selection highlighted in [color]; removal is [unformat] of
+   "highlight", as automatic ink is of "color" (docs/highlight-plan.md H7). *)
+let highlight widget color = format widget "highlight" (Highlight_color.name color)
 
 (* Present the platform's own colour picker over the selection; each colour
    the user commits arrives as a "color" act through [~on_format]

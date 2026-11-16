@@ -326,6 +326,26 @@ static class ListKinds
     };
 }
 
+/// A highlighter's colour, the `highlight` attribute's value
+/// (docs/highlight-plan.md H1); None is its absence.
+enum HighlightColor { None, Yellow, Orange, Pink, Purple, Blue, Green }
+
+static class HighlightColors
+{
+    internal static string Name(this HighlightColor color) => color switch
+    {
+        HighlightColor.None => "none",
+        HighlightColor.Yellow => "yellow",
+        HighlightColor.Orange => "orange",
+        HighlightColor.Pink => "pink",
+        HighlightColor.Purple => "purple",
+        HighlightColor.Blue => "blue",
+        HighlightColor.Green => "green",
+        _ => throw new ArgumentOutOfRangeException(
+            nameof(color), $"kaya: {color} is no highlight colour"),
+    };
+}
+
 /// A paragraph's alignment, the `align` attribute's value; Start is its
 /// absence. Not Align, which places a container's children.
 enum ParagraphAlign { Start, Center, End, Justify }
@@ -482,6 +502,16 @@ sealed record Selection(TextRange Range, IReadOnlyList<TextRun> Attrs)
             if (a.Name == "color") return a.Value;
         return null;
     }
+
+    /// The highlight holding over the whole selection; None otherwise.
+    public HighlightColor Highlight()
+    {
+        foreach (var a in Attrs)
+            if (a.Name == "highlight")
+                foreach (var color in Enum.GetValues<HighlightColor>())
+                    if (color.Name() == a.Value) return color;
+        return HighlightColor.None;
+    }
 }
 
 /// A `rich` textarea's text and runs, kept current by the binding from
@@ -566,6 +596,10 @@ sealed class Document
     /// A text colour, `#RRGGBB` as it reads on a light page (RD4, RD5).
     public Document Color(TextRange range, string rgb) =>
         Mark(range, "color", rgb.ToUpperInvariant());
+
+    /// A highlighter's ground behind the range (docs/highlight-plan.md H7).
+    public Document Highlight(TextRange range, HighlightColor color) =>
+        Mark(range, "highlight", color.Name());
 
     /// A `.kdoc` file's bytes read (docs/rich-document-plan.md §4); throws
     /// ArgumentException carrying the core's one sentence when they are not
@@ -5453,6 +5487,10 @@ sealed class Tx : IDisposable
     /// The selection's text in `#RRGGBB` as it reads on a light page;
     /// automatic ink is Unformat of "color" (RD4).
     public void Color(Widget w, string rgb) => Format(w, "color", rgb.ToUpperInvariant());
+
+    /// The selection highlighted in `color`; removal is Unformat of
+    /// "highlight", as automatic ink is of "color" (docs/highlight-plan.md H7).
+    public void Highlight(Widget w, HighlightColor color) => Format(w, "highlight", color.Name());
 
     /// Present the platform's own colour picker over the selection; each
     /// colour the user commits arrives as a "color" act through

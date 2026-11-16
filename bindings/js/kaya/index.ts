@@ -1414,6 +1414,13 @@ export class Widget extends Handle {
     return this.format("color", String(rgb).toUpperCase());
   }
 
+  /** The selection highlighted in `color`; removal is
+   * `unformat("highlight")`, as automatic ink is of `color`
+   * (docs/highlight-plan.md H7). */
+  highlight(color: HighlightColorName): this {
+    return this.format("highlight", oneOf<HighlightColorName>("highlight colour", HIGHLIGHT_NAMES, color));
+  }
+
   /** Present the platform's own colour picker over the selection; each
    * colour the user commits arrives as a `color` act through `onFormat`
    * (docs/rich-document-plan.md §5). */
@@ -3250,6 +3257,20 @@ export const ListKind = Object.freeze({
 export type ListKindName = (typeof ListKind)[keyof typeof ListKind];
 const LIST_NAMES: readonly string[] = Object.values(ListKind);
 
+/** A highlighter's colour, the `highlight` attribute's value
+ * (docs/highlight-plan.md H1); NONE is its absence. */
+export const HighlightColor = Object.freeze({
+  NONE: "none",
+  YELLOW: "yellow",
+  ORANGE: "orange",
+  PINK: "pink",
+  PURPLE: "purple",
+  BLUE: "blue",
+  GREEN: "green",
+} as const);
+export type HighlightColorName = (typeof HighlightColor)[keyof typeof HighlightColor];
+const HIGHLIGHT_NAMES: readonly string[] = Object.values(HighlightColor);
+
 /** A paragraph's alignment, the `align` attribute's value; START is its
  * absence. */
 export const ParagraphAlign = Object.freeze({
@@ -3376,6 +3397,13 @@ export class Selection {
   color(): string | null {
     return this.attrs.find((a) => a.name === "color")?.value ?? null;
   }
+
+  /** The highlight holding over the whole selection; HighlightColor.NONE
+   * otherwise. */
+  highlight(): HighlightColorName {
+    const found = this.attrs.find((a) => a.name === "highlight" && HIGHLIGHT_NAMES.includes(a.value));
+    return found === undefined ? HighlightColor.NONE : (found.value as HighlightColorName);
+  }
 }
 
 function selectionOf(tail: readonly wire.Decoded[]): Selection {
@@ -3482,6 +3510,11 @@ export class Document {
   /** A text colour, `#RRGGBB` as it reads on a light page (RD4, RD5). */
   color(span: readonly [number, number], rgb: string): this {
     return this.mark(span, "color", String(rgb).toUpperCase());
+  }
+
+  /** A highlighter's ground behind the span (docs/highlight-plan.md H7). */
+  highlight(span: readonly [number, number], color: HighlightColorName): this {
+    return this.mark(span, "highlight", oneOf<HighlightColorName>("highlight colour", HIGHLIGHT_NAMES, color));
   }
 
   /** A `.kdoc` file's bytes read; throws the core's one sentence when they

@@ -3,7 +3,9 @@
 // heading, a body paragraph with a preset colour, a bullet list with a
 // nested item, a numbered list and a checklist, then the paragraph acts from
 // buttons, the platform's colour picker and a `.kdoc` round trip, then a file
-// carrying keys this kaya does not know (RD17). label#1 is the binding's own
+// carrying keys this kaya does not know (RD17), then the highlighter
+// (docs/highlight-plan.md): a highlight act, find's set declared over it and
+// taken off, and the highlight's removal. label#1 is the binding's own
 // Document, folded from the same deltas, so it must spell what the core holds.
 
 using System;
@@ -111,6 +113,17 @@ static class RichdocScene
                                 + $"extra {file.Document.Extra.Replace('"', '\'')}");
                         t.Write(runs, Spell(file.Document.Runs));
                     });
+                });
+                tx.Row(_ =>
+                {
+                    tx.Button("highlight", onClick: t => t.Highlight(editor, HighlightColor.Yellow)); // button#6
+                    bool finding = false;
+                    tx.Button("find", onClick: t => // button#7
+                    {
+                        finding = !finding;
+                        t.HighlightRanges(editor, finding ? [new TextRange(1, 3)] : []);
+                    });
+                    tx.Button("plain", onClick: t => t.Unformat(editor, "highlight")); // button#8
                 });
                 return root;
             }));

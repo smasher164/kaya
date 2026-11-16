@@ -213,6 +213,9 @@ module KayaApp
     startRun,
     alignRun,
     colorRun,
+    HighlightColor (..),
+    highlightColorName,
+    highlightRun,
     Kdoc (..),
     fromKdoc,
     toKdoc,
@@ -246,6 +249,7 @@ module KayaApp
     setParagraphAlign,
     checkItems,
     color,
+    highlight,
     pickTextColor,
     canUndo,
     canRedo,
@@ -264,6 +268,7 @@ module KayaApp
     selectionList,
     selectionParagraphAlign,
     selectionColor,
+    selectionHighlight,
     onNeeded,
     onReleased,
     RowImages,
@@ -2695,6 +2700,28 @@ listKindName k = case k of
   ListNumbered -> "numbered"
   ListCheck -> "check"
 
+-- | A highlighter's colour, the @highlight@ attribute's value
+-- (docs\/highlight-plan.md H1); 'HighlightNone' is its absence.
+data HighlightColor
+  = HighlightNone
+  | HighlightYellow
+  | HighlightOrange
+  | HighlightPink
+  | HighlightPurple
+  | HighlightBlue
+  | HighlightGreen
+  deriving (Eq, Show, Enum, Bounded)
+
+highlightColorName :: HighlightColor -> Text
+highlightColorName c = case c of
+  HighlightNone -> "none"
+  HighlightYellow -> "yellow"
+  HighlightOrange -> "orange"
+  HighlightPink -> "pink"
+  HighlightPurple -> "purple"
+  HighlightBlue -> "blue"
+  HighlightGreen -> "green"
+
 -- | A paragraph's alignment, the @align@ attribute's value;
 -- 'ParagraphStart' is its absence.
 data ParagraphAlign = ParagraphStart | ParagraphCenter | ParagraphEnd | ParagraphJustify
@@ -2729,6 +2756,10 @@ alignRun r align = mark r "align" (Spelled (paragraphAlignName align))
 -- | A text colour, @#RRGGBB@ as it reads on a light page (RD4, RD5).
 colorRun :: (Int, Int) -> Text -> Document -> Document
 colorRun r rgb = mark r "color" (Spelled (T.toUpper rgb))
+
+-- | A highlighter's ground behind the range (docs\/highlight-plan.md H7).
+highlightRun :: (Int, Int) -> HighlightColor -> Document -> Document
+highlightRun r c = mark r "highlight" (Spelled (highlightColorName c))
 
 -- | A @.kdoc@ file read (docs\/rich-document-plan.md §4): the document,
 -- and why it may only be read when it carries a name this kaya cannot
@@ -3134,6 +3165,11 @@ checkItems w False = unformat w "checked"
 color :: Widget -> Text -> Build ()
 color w rgb = formatText w "color" (Spelled (T.toUpper rgb))
 
+-- | The selection highlighted in @c@; removal is @unformat w "highlight"@,
+-- as automatic ink is of @color@ (docs\/highlight-plan.md H7).
+highlight :: Widget -> HighlightColor -> Build ()
+highlight w c = formatText w "highlight" (Spelled (highlightColorName c))
+
 -- | Present the platform's own colour picker over the selection; each
 -- colour the user commits arrives as a @color@ act through 'onFormat'
 -- (docs\/rich-document-plan.md §5).
@@ -3224,6 +3260,15 @@ selectionParagraphAlign sel =
 -- | The colour holding over the whole selection, @#RRGGBB@.
 selectionColor :: Selection -> Maybe Text
 selectionColor sel = listToMaybe [markSpelling r.value | r <- sel.attrs, r.name == "color"]
+
+-- | The highlight holding over the whole selection; 'HighlightNone'
+-- otherwise.
+selectionHighlight :: Selection -> HighlightColor
+selectionHighlight sel =
+  case [r.value | r <- sel.attrs, r.name == "highlight"] of
+    (Spelled c : _) ->
+      fromMaybe HighlightNone (List.find (\k -> highlightColorName k == c) [minBound .. maxBound])
+    _ -> HighlightNone
 
 selectionOfTail :: [W.Value] -> Selection
 selectionOfTail tail_ = case tail_ of

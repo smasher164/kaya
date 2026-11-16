@@ -3,7 +3,9 @@
 // heading, a body paragraph with a preset colour, a bullet list with a
 // nested item, a numbered list and a checklist, then the paragraph acts from
 // buttons, the platform's colour picker and a `.kdoc` round trip, then a file
-// carrying keys this kaya does not know (RD17). label#1 is the binding's own
+// carrying keys this kaya does not know (RD17), then the highlighter
+// (docs/highlight-plan.md): a highlight act, find's set declared over it and
+// taken off, and the highlight's removal. label#1 is the binding's own
 // Document, folded from the same deltas, so it must spell what the core holds.
 
 import Foundation
@@ -49,6 +51,7 @@ KayaApp.run { app in
         // A SELF-REFERENCE, not a smuggle: the textarea's own onEdit reads
         // the document of the widget being declared.
         var editor: KayaWidget! = nil
+        var finding = false
 
         let root = tx.column { root in
             editor = tx.textarea(
@@ -101,6 +104,21 @@ KayaApp.run { app in
                         .str("opened read_only \(file.readOnly ?? "none"), "
                             + "extra \(file.document.extra.replacingOccurrences(of: "\"", with: "'"))"))
                     t.write(runs, .str(spell(file.document.runs)))
+                }
+            }
+            tx.row { _ in
+                tx.button("highlight") { t in  // button#6
+                    t.highlight(editor, .yellow)
+                }
+                tx.button("find") { t in  // button#7
+                    finding.toggle()
+                    let text = app.document(editor).text
+                    let from = text.index(text.startIndex, offsetBy: 1)
+                    let to = text.index(text.startIndex, offsetBy: 3)
+                    t.highlightRanges(editor, finding ? [from..<to] : [], in: text)
+                }
+                tx.button("plain") { t in  // button#8
+                    t.unformat(editor, "highlight")
                 }
             }
             return root

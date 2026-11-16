@@ -230,6 +230,12 @@ expect_menu "Format>Bold" checked
 menu_activate "Format>Italic"
 expect_runs textarea@buffer-2 "1295:1297 bold|1295:1297 italic"
 expect_menu "Format>Italic" checked
+# THE HIGHLIGHTER is a submenu of names, None taking it off
+# (docs/highlight-plan.md H7).
+menu_activate "Format>Highlight>Green"
+expect_runs textarea@buffer-2 "1295:1297 bold|1295:1297 highlight=green|1295:1297 italic"
+menu_activate "Format>Highlight>None"
+expect_runs textarea@buffer-2 "1295:1297 bold|1295:1297 italic"
 # BOLD ON BOLD TEXT TAKES IT OFF.
 shortcut "primary+b"
 expect_runs textarea@buffer-2 "1295:1297 italic"

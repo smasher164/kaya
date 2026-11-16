@@ -274,6 +274,15 @@ module List_kind : sig
   val name : t -> string
 end
 
+(* A highlighter's colour, the [highlight] attribute's value; [None] is its
+   absence (docs/highlight-plan.md H1). *)
+module Highlight_color : sig
+  type t = None | Yellow | Orange | Pink | Purple | Blue | Green
+
+  val name : t -> string
+  val all : t list
+end
+
 (* A paragraph's alignment, the [align] attribute's value; [Start] is its
    absence. A MODULE because the layout [align] already owns [Start],
    [Center] and [End]. *)
@@ -329,6 +338,9 @@ module Document : sig
 
   (* A text colour, [#RRGGBB] as it reads on a light page (RD4, RD5). *)
   val color : int * int -> string -> t -> t
+
+  (* A highlighter's ground behind the range (docs/highlight-plan.md H7). *)
+  val highlight : int * int -> Highlight_color.t -> t -> t
 
   val attr_at : t -> int -> string -> string option
 
@@ -408,6 +420,9 @@ module Selection : sig
 
   (* The colour holding over the whole selection, [#RRGGBB]. *)
   val color : t -> string option
+
+  (* The highlight holding over the whole selection; [None] otherwise. *)
+  val highlight : t -> Highlight_color.t
 end
 
 type selection = Selection.t
@@ -1065,6 +1080,10 @@ val outdent : widget -> unit
 val set_paragraph_align : widget -> Paragraph_align.t -> unit
 val check_items : widget -> bool -> unit
 val color : widget -> string -> unit
+
+(* The selection highlighted in a colour; removal is [unformat] of
+   "highlight" (docs/highlight-plan.md H7). *)
+val highlight : widget -> Highlight_color.t -> unit
 
 (* Present the platform's own colour picker over the selection; each
    colour the user commits arrives as a "color" act through

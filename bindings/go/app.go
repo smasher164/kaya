@@ -1926,6 +1926,20 @@ const (
 	ListCheck    ListKind = "check"
 )
 
+// HighlightColor is a highlighter's colour, the `highlight` attribute's value
+// (docs/highlight-plan.md H1); HighlightNone is its absence.
+type HighlightColor string
+
+const (
+	HighlightNone   HighlightColor = "none"
+	HighlightYellow HighlightColor = "yellow"
+	HighlightOrange HighlightColor = "orange"
+	HighlightPink   HighlightColor = "pink"
+	HighlightPurple HighlightColor = "purple"
+	HighlightBlue   HighlightColor = "blue"
+	HighlightGreen  HighlightColor = "green"
+)
+
 // ParagraphAlign is a paragraph's alignment, the `align` attribute's value;
 // ParagraphStart is its absence.
 type ParagraphAlign string
@@ -2046,6 +2060,11 @@ func (d Document) Align(start, end int, align ParagraphAlign) Document {
 // (RD4, RD5).
 func (d Document) Color(start, end int, rgb string) Document {
 	return d.Mark(start, end, "color", strings.ToUpper(rgb))
+}
+
+// Highlight puts a highlighter's ground behind a range (docs/highlight-plan.md H7).
+func (d Document) Highlight(start, end int, color HighlightColor) Document {
+	return d.Mark(start, end, "highlight", string(color))
 }
 
 // Equal is value equality: the same text and the same runs in the same order
@@ -2266,6 +2285,17 @@ func (s Selection) Color() (string, bool) {
 	return "", false
 }
 
+// Highlight is the highlight holding over the whole selection; HighlightNone
+// otherwise.
+func (s Selection) Highlight() HighlightColor {
+	for _, a := range s.Attrs {
+		if a.Name == "highlight" {
+			return HighlightColor(a.Value)
+		}
+	}
+	return HighlightNone
+}
+
 // Block is the paragraph kind every touched paragraph shares; Body for body
 // text and for paragraphs of different kinds.
 func (s Selection) Block() Block {
@@ -2464,6 +2494,12 @@ func (tx *Tx) CheckItems(w Widget, on bool) {
 // page; automatic ink is Tx.Unformat of "color" (RD4).
 func (tx *Tx) Color(w Widget, rgb string) {
 	tx.Format(w, "color", strings.ToUpper(rgb))
+}
+
+// Highlight highlights the selection in color; removal is Unformat of
+// "highlight", as automatic ink is of "color" (docs/highlight-plan.md H7).
+func (tx *Tx) Highlight(w Widget, color HighlightColor) {
+	tx.Format(w, "highlight", string(color))
 }
 
 // PickTextColor presents the platform's own colour picker over the

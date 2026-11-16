@@ -2306,6 +2306,20 @@ public enum KayaListKind: String {
     var name: String { rawValue }
 }
 
+/// A highlighter's colour, the `highlight` attribute's value
+/// (docs/highlight-plan.md H1); `.none` is its absence.
+public enum KayaHighlightColor: String {
+    case none
+    case yellow
+    case orange
+    case pink
+    case purple
+    case blue
+    case green
+
+    var name: String { rawValue }
+}
+
 /// A paragraph's alignment, the `align` attribute's value; `.start` is its
 /// absence. Not KayaAlign, which places a container's children.
 public enum KayaParagraphAlign: String {
@@ -2472,6 +2486,11 @@ public struct KayaDocument: Equatable, Sendable {
         mark(range, "color", rgb.uppercased())
     }
 
+    /// A highlighter's ground behind the range (docs/highlight-plan.md H7).
+    public func highlight(_ range: Range<Int>, _ color: KayaHighlightColor) -> KayaDocument {
+        mark(range, "highlight", color.name)
+    }
+
     /// A `.kdoc` file's bytes read (docs/rich-document-plan.md §4); throws
     /// KayaKdocRefusal carrying the core's one sentence when they are not
     /// one, or name a newer major version.
@@ -2589,6 +2608,11 @@ public struct KayaSelection: Equatable {
     /// The colour holding over the whole selection, `#RRGGBB`.
     public var color: String? {
         attrs.first { $0.name == "color" }?.value
+    }
+
+    /// The highlight holding over the whole selection; `.none` otherwise.
+    public var highlight: KayaHighlightColor {
+        attrs.first { $0.name == "highlight" }.flatMap { KayaHighlightColor(rawValue: $0.value) } ?? .none
     }
 }
 
@@ -5535,6 +5559,10 @@ public final class KayaAppTx {
     /// The selection's text in `#RRGGBB` as it reads on a light page;
     /// automatic ink is `unformat` of "color" (RD4).
     public func color(_ w: KayaWidget, _ rgb: String) { format(w, "color", rgb.uppercased()) }
+
+    /// The selection highlighted in `color`; removal is `unformat(w,
+    /// "highlight")`, as automatic ink is of `color` (docs/highlight-plan.md H7).
+    public func highlight(_ w: KayaWidget, _ color: KayaHighlightColor) { format(w, "highlight", color.name) }
 
     /// Present the platform's own colour picker over the selection; each
     /// colour the user commits arrives as a "color" act through

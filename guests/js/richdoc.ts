@@ -3,8 +3,10 @@
 // preset colour, a bullet list with a nested item, a numbered list and a
 // checklist, then the paragraph acts from buttons, the platform's colour
 // picker and a `.kdoc` round trip, then a file carrying keys this kaya does
-// not know (RD17). label#1 is the binding's own Document, folded from the
-// same deltas, so it must spell what the core holds.
+// not know (RD17), then the highlighter (docs/highlight-plan.md): a
+// highlight act, find's set declared over it and taken off, and the
+// highlight's removal. label#1 is the binding's own Document, folded from
+// the same deltas, so it must spell what the core holds.
 
 import * as kaya from "kaya-gui";
 
@@ -53,6 +55,13 @@ function onKdoc(): void {
   runs.set(spell(back.document.runs));
 }
 
+let finding = false;
+
+function onFind(): void {
+  finding = !finding;
+  editor.highlightRanges(finding ? [[1, 3]] : []);
+}
+
 function onUnknown(): void {
   const file = kaya.Document.fromKdoc(new TextEncoder().encode(UNKNOWN));
   editor.setDocument(file.document);
@@ -83,6 +92,11 @@ const { last, runs, kdoc, editor } = app.window({ title: "richdoc", width: 560, 
       kaya.button("colour", { onClick: () => editor.pickTextColor() }); // button#3
       kaya.button("kdoc", { onClick: onKdoc }); // button#4
       kaya.button("keys", { onClick: onUnknown }); // button#5
+    });
+    kaya.row(() => {
+      kaya.button("highlight", { onClick: () => editor.highlight(kaya.HighlightColor.YELLOW) }); // button#6
+      kaya.button("find", { onClick: onFind }); // button#7
+      kaya.button("plain", { onClick: () => editor.unformat("highlight") }); // button#8
     });
     return editor;
   });

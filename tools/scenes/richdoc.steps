@@ -126,3 +126,44 @@ expect label#2 "kdoc 277 bytes, read_only none, same true, extra {'com.example.t
 expect_runs textarea#0 "0:5 para:embed=e1|6:17 para:com.example.pinned"
 expect label#1 "0:5 para:embed=e1|6:17 para:com.example.pinned"
 expect textarea#0 "Loose\nPinned\nAlso"
+
+# ---- the highlighter (docs/highlight-plan.md §4) -------------------
+# A highlight is a mark like a colour: an act over the selection, read back
+# from the core, and a colour run under it drawn at the contrast it has on
+# the page (H4, the core's ink_on), over the palette's ground.
+select_text textarea#0 0:5
+click button#2
+expect label#0 "format 0:5 color=#DD1F24"
+click button#6
+expect label#0 "format 0:5 highlight=yellow"
+expect_runs textarea#0 "0:5 color=#DD1F24|0:5 highlight=yellow|0:5 para:embed=e1|6:17 para:com.example.pinned"
+expect label#1 "0:5 color=#DD1F24|0:5 highlight=yellow|0:5 para:embed=e1|6:17 para:com.example.pinned"
+select_text textarea#0 8:8
+expect_text_ink textarea#0 0:5 "light C90015 dark FFB1A7"
+expect_text_ground textarea#0 0:5 "light F7E8AF dark 594C1A"
+# FIND'S SET IS NOT THE MARK: declared over the highlighted run, the
+# highlights read names find's set alone, and nothing once it is cleared.
+click button#7
+expect_highlights textarea#0 "1:3=oo"
+click button#7
+expect_highlights textarea#0 ""
+# The clipboard keeps it both ways, and the mark grows over text typed at
+# its end (RD7); typing appends on every lane, so the pasted run is the one.
+select_text textarea#0 0:5
+menu_activate "Edit>Copy"
+expect_clipboard html "<meta charset=\qutf-8\q><p><span style=\qcolor:#DD1F24\q><mark data-kaya-highlight=\qyellow\q style=\qbackground-color:#F7E8AF\q>Loose</mark></span></p>"
+select_text textarea#0 17:17
+menu_activate "Edit>Paste"
+expect_edit textarea#0 "17:17 <Loose> paste [0:5 color=#DD1F24|0:5 highlight=yellow]"
+expect_focused textarea#0
+type "r"
+expect_edit textarea#0 "22:22 <r> user [0:1 color=#DD1F24|0:1 highlight=yellow|0:1 para:com.example.pinned]"
+# The file keeps it.
+click button#4
+expect label#2 "kdoc 379 bytes, read_only none, same true, extra {'com.example.theme':{'page':'sepia'}}"
+expect_runs textarea#0 "0:5 color=#DD1F24|0:5 highlight=yellow|0:5 para:embed=e1|6:23 para:com.example.pinned|17:23 color=#DD1F24|17:23 highlight=yellow"
+# Taking it off is the general act on the name.
+select_text textarea#0 0:23
+click button#8
+expect label#0 "format 0:23 highlight=off"
+expect_runs textarea#0 "0:5 color=#DD1F24|0:5 para:embed=e1|6:23 para:com.example.pinned|17:23 color=#DD1F24"

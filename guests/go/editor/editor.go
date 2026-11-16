@@ -889,6 +889,20 @@ func App() *kaya.App {
 		}
 		colour.Separator()
 		colour.Item("Other…").OnActivate(func(tx *kaya.Tx) { tx.PickTextColor(active.buffer) })
+		// The highlighter's six names (docs/highlight-plan.md H7); None takes
+		// it off, and no item is checked, as Text Colour's are not.
+		pen := format.Menu("Highlight").BindEnabled(richOn)
+		pen.Item("None").OnActivate(func(tx *kaya.Tx) { tx.Unformat(active.buffer, "highlight") })
+		for _, name := range []struct {
+			label string
+			color kaya.HighlightColor
+		}{
+			{"Yellow", kaya.HighlightYellow}, {"Orange", kaya.HighlightOrange}, {"Pink", kaya.HighlightPink},
+			{"Purple", kaya.HighlightPurple}, {"Blue", kaya.HighlightBlue}, {"Green", kaya.HighlightGreen},
+		} {
+			color := name.color
+			pen.Item(name.label).OnActivate(func(tx *kaya.Tx) { tx.Highlight(active.buffer, color) })
+		}
 		format.Separator()
 		// TextEdit's two conversions; the plain one asks before it drops
 		// formatting (RD11).

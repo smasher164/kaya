@@ -3,8 +3,10 @@ docs/rich-document-plan.md §9 step 2): a heading, a body paragraph with a
 preset colour, a bullet list with a nested item, a numbered list and a
 checklist, then the paragraph acts from buttons, the platform's colour
 picker and a `.kdoc` round trip, then a file carrying keys this kaya does
-not know (RD17). label#1 is the binding's own Document, folded from the
-same deltas, so it must spell what the core holds."""
+not know (RD17), then the highlighter (docs/highlight-plan.md): a highlight
+act, find's set declared over it and taken off, and the highlight's
+removal. label#1 is the binding's own Document, folded from the same
+deltas, so it must spell what the core holds."""
 
 import sys
 
@@ -83,6 +85,22 @@ def on_kdoc():
     runs.set(spell(back.document.runs))
 
 
+def on_highlight():
+    editor.highlight(kaya.HighlightColor.YELLOW)
+
+
+finding = [False]
+
+
+def on_find():
+    finding[0] = not finding[0]
+    editor.highlight_ranges([range(1, 3)] if finding[0] else [])
+
+
+def on_plain():
+    editor.unformat("highlight")
+
+
 def on_unknown():
     file = kaya.Document.from_kdoc(UNKNOWN.encode("utf-8"))
     read_only = "none" if file.read_only is None else file.read_only
@@ -116,5 +134,9 @@ with app.window(title="richdoc", width=560.0, height=620.0):
             kaya.button("colour", on_click=on_colour)      # button#3
             kaya.button("kdoc", on_click=on_kdoc)          # button#4
             kaya.button("keys", on_click=on_unknown)    # button#5
+        with kaya.row():
+            kaya.button("highlight", on_click=on_highlight)  # button#6
+            kaya.button("find", on_click=on_find)          # button#7
+            kaya.button("plain", on_click=on_plain)        # button#8
 
 sys.exit(app.run())

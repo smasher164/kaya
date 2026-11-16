@@ -11,15 +11,18 @@ import java.util.List;
  * heading, a body paragraph with a preset colour, a bullet list with a
  * nested item, a numbered list and a checklist, then the paragraph acts from
  * buttons, the platform's colour picker and a {@code .kdoc} round trip, then
- * a file carrying keys this kaya does not know (RD17). label#1 is the
- * binding's own Document, folded from the same deltas, so it must spell what
- * the core holds.
+ * a file carrying keys this kaya does not know (RD17), then the highlighter
+ * (docs/highlight-plan.md): a highlight act, find's set declared over it and
+ * taken off, and the highlight's removal. label#1 is the binding's own
+ * Document, folded from the same deltas, so it must spell what the core
+ * holds.
  */
 public final class Richdoc {
     /** A SELF-REFERENCE, not a smuggle: the textarea's own onEdit reads
      * the document of the widget being declared. */
     private static final class Refs {
         KayaApp.Widget editor;
+        boolean finding;
     }
 
     /** BYTE-IDENTICAL to guests/rust/richdoc.rs's DOC. */
@@ -114,6 +117,15 @@ public final class Richdoc {
                                 + file.document().extra().replace('"', '\''));
                         t.write(runs, spell(file.document().runs()));
                     });
+                });
+                tx.row(row -> {
+                    tx.button("highlight", t -> t.highlight(refs.editor, KayaApp.HighlightColor.YELLOW)); // button#6
+                    tx.button("find", t -> { // button#7
+                        refs.finding = !refs.finding;
+                        t.highlightRanges(refs.editor,
+                                refs.finding ? List.of(KayaApp.TextRange.ofBytes(1, 3)) : List.of());
+                    });
+                    tx.button("plain", t -> t.unformat(refs.editor, "highlight")); // button#8
                 });
             }));
             tx.setDocument(refs.editor, doc);

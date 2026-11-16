@@ -1337,6 +1337,13 @@ class Widget(_Handle):
         automatic ink is `unformat("color")` (RD4). Returns the widget."""
         return self.format("color", str(rgb).upper())
 
+    def highlight(self, color: str) -> Widget:
+        """The selection highlighted in `color` (kaya.HighlightColor);
+        removal is `unformat("highlight")`, as automatic ink is of `color`
+        (docs/highlight-plan.md H7). Returns the widget."""
+        return self.format("highlight",
+                           _one_of("highlight colour", _HIGHLIGHT_NAMES, color))
+
     def pick_text_color(self) -> Widget:
         """Present the platform's own colour picker over the selection;
         each colour the user commits arrives as a `color` act through
@@ -3497,6 +3504,24 @@ class ParagraphAlign:
 _ALIGN_NAMES = ("start", "center", "end", "justify")
 
 
+class HighlightColor:
+    """A highlighter's colour, the `highlight` attribute's value
+    (docs/highlight-plan.md H1); NONE is its absence. Plain names accepted
+    too."""
+
+    NONE = "none"
+    YELLOW = "yellow"
+    ORANGE = "orange"
+    PINK = "pink"
+    PURPLE = "purple"
+    BLUE = "blue"
+    GREEN = "green"
+
+
+_HIGHLIGHT_NAMES = ("none", "yellow", "orange", "pink", "purple", "blue",
+                    "green")
+
+
 def _one_of(noun: str, names: tuple[str, ...], kind: object) -> str:
     name = str(kind)
     if name not in names:
@@ -3648,6 +3673,12 @@ class Document:
     def color(self, span: Span, rgb: str) -> Document:
         """A text colour, `#RRGGBB` as it reads on a light page (RD4, RD5)."""
         return self.mark(span, "color", str(rgb).upper())
+
+    def highlight(self, span: Span, color: str) -> Document:
+        """A highlighter's ground behind the span (docs/highlight-plan.md
+        H7)."""
+        return self.mark(span, "highlight",
+                         _one_of("highlight colour", _HIGHLIGHT_NAMES, color))
 
     @staticmethod
     def from_kdoc(data: bytes) -> Kdoc:
@@ -3920,6 +3951,13 @@ class Selection:
             if a.name == "list" and a.value in _LIST_NAMES:
                 return a.value
         return ListKind.NONE
+
+    def highlight(self) -> str:
+        """The highlight holding over the whole selection; NONE otherwise."""
+        for a in self.attrs:
+            if a.name == "highlight" and a.value in _HIGHLIGHT_NAMES:
+                return a.value
+        return HighlightColor.NONE
 
 
 def _selection_of(tail: Sequence[Any]) -> Selection:
