@@ -21152,3 +21152,14 @@ the colour they inherit, so the panel's white reaches them. On Compose a
 nested MaterialTheme for the panel rewrote the harness's record of the tint
 fills (kayaTintFills, read by expect_fill) with the dark scheme's colours, and
 the badge outside it read "neutral": the record is the app scheme's only.
+
+Compose's tap_at raced a hide under a matrix's load (2026-11-16, matrix at
+6b1ec822, layersdark-compose): `click button@hideveil` wrote the veil hidden,
+the expect on the log passed at once, and `tap_at button@base center` went
+70 ms later after only the batch-quiet wait; the base never answered and the
+fail shot showed the veil gone. The tap was delivered before the frame that
+dropped the veil. tap_at now waits two frames (kayaAwaitFrames, the drag's
+precedent), and every tap_at logs its point, the target's frame and each layer
+frame over the point with its model `hidden` (read back in a held bundle:
+`[9 hidden=false, 11 hidden=true]` at the base tap). Green in every earlier
+run, so this is a race under load, not the panel change.

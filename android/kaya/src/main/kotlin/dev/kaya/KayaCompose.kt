@@ -17093,12 +17093,19 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         // the window's own touch path; the scene reads which
                         // handler answered with an ordinary expect.
                         kayaAwaitQuiet()
+                        // The last batch drawn first: a veil hidden by it still took the
+                        // tap 70 ms later under a matrix's load (docs/traps.md).
+                        kayaAwaitFrames(activity, 2)
                         val place = parts.getOrElse(2) { "center" }
                         val at = onUi(activity) {
                             val node = kayaWidgetTarget(parts[1])
                             val frame = node?.let { kayaLayerFrames[it.id] ?: kayaNodeVisible[it.id] }
                             frame?.let {
                                 kayaPlacePoint(it, place, kayaRootDirection == LayoutDirection.Rtl, activity.resources.displayMetrics.density)
+                            }?.also { pt ->
+                                val over = kayaLayerFrames.filter { (id, r) -> id != node.id && r.contains(pt) }
+                                    .map { (id, _) -> "$id hidden=${KayaSceneModel.nodes[id]?.hidden}" }
+                                Log.i("kaya", "KAYA_HARNESS: tap_at ${parts[1]} $place at (${pt.x},${pt.y}) in $frame; layer frames over it: $over")
                             }
                         }
                         if (at == null) failures.add("tap_at ${parts[1]} $place: no such target, no frame recorded for it, or no such place")
