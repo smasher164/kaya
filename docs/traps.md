@@ -21130,3 +21130,11 @@ player's SurfaceView still composed on top (layersvideo-compose green, the
 self-view's ink 1E5AC8 at its centre). The order the platform does not
 promise held on this emulator in attach order, so the TextureView route is
 kept by the ruling, not by a red read; that negative was never watched red.
+
+The fade form's caption contrast, read off each lane's held capture of the
+layers scene (white text against the 95th percentile of the scrim's
+luminance in the caption's rows, over the scene's red cover): 10.4:1 on the
+Mac and iOS, 9.9:1 on GTK, 10.1:1 on WinUI and Compose, the same light and
+dark. A WinUI step shot of a right-to-left window comes back mirrored, glyphs
+included (the layersrtl review capture); the layout under it is right, so a
+picture for a page is flipped back, never read for direction.

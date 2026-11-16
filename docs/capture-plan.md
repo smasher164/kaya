@@ -502,4 +502,6 @@ by tools/scenes/chatcall.steps on five lanes. What it settled:
    column@selftile "bottom_trailing 12"`, the self-view's box and ink on top
    of the peer's, the peer's ink at its centre, and `expect_ax_order
    surface@peer video@selfview`. On Android the overlay self-view is a
-   TextureView (LY7).
+   TextureView (LY7). Green on all five lanes since 0a5a5481 and 75acd450,
+   which also read the 8 point gap above the peer, the room it does not use
+   left under it.

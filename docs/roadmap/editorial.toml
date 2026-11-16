@@ -9,7 +9,7 @@ state = "Since the 2026-10-30 read the chat app gained voice and video calls wit
 menu_heading = 'The menu: the pieces first, then the apps they unblock'
 menu_lede = "Every framework piece is its own entry, in the order recommended, and each names the demo app it unblocks; the apps follow, each listing what it still waits on, so an app is never picked with its pieces unbuilt. A star marks a piece that needs a ruling before any arm is written. With the task manager, the chat app and the music app shipped, the one demo app left is the video editor. Every ruling its plan asked is taken and every piece it names is built, the last two (the timecode formatter and a drop's point) on 2026-10-05 and 10-06, so the editor waits only on the maintainer's pick. The chat app's calls stage shipped on 2026-10-31 with the far end of a call, the peer's picture and voice. Read out of the surface promised against the surface built, the ledger's open headlines and the maintainer's own evidence order; the editor's pieces, the media reader and capture shipped between the reads and stay listed with their dates."
 recommended_next = 'The video editor'
-recommended_note = "Every piece its plan names has been built since 2026-10-06; it was held while user-facing features came first, and that list, then the apps' looks and the rich document, is done. The alternatives worth weighing: layering, one view over another (M), which the call screen's self-view waits on and the editor's program monitor would use; or session restoration with durable file references, which every document app wants and which the safe save, now built, makes the natural next step for picked files. The one with a star needs a ruling first."
+recommended_note = "Every piece its plan names has been built since 2026-10-06; it was held while user-facing features came first, and that list, then the apps' looks and the rich document, is done. The alternative worth weighing: session restoration with durable file references, which every document app wants and which the safe save, now built, makes the natural next step for picked files. Layering, which the editor's program monitor will use, shipped 2026-11-16. The one with a star needs a ruling first."
 demo_heading = 'The demo apps, and what each still waits on'
 proposed_heading = 'Proposed: more demo apps, as milestones'
 proposed_lede = "Proposed 2026-09-28 at the maintainer's ask, not ruled. Each demo is a milestone that forces a set of pieces no shipped app needs, taken from the archetype table below; the order puts the one that shares the most with the video editor first, so its pieces are built once for both. The webcam and the microphone (the maintainer, 2026-09-28: at least one demo must use them) go into the chat app as calls rather than a demo of their own, the way Signal and Slack carry them: the conversation, the simulated peer and the notifications are already there. The photo gallery and the video editor's voiceover would use the same capture piece more lightly. Nothing here starts until the maintainer picks."
@@ -21,6 +21,7 @@ method = ['Parity counts first-party support over the ten full toolkits (SwiftUI
 
 [reviews]
 hscroll = 'https://claude.ai/artifact/7EaiAAwfPvvoJ6Xd2aMukq'
+layering = 'https://claude.ai/artifact/LL26jACE8HnF4s2kFzYa2e'
 fullscreen = 'https://claude.ai/artifact/1kpb8bL46DbjMobLkiBai6'
 number = 'https://claude.ai/artifact/7RbsBbeymH5M8RYq9xHbeb'
 color = 'https://claude.ai/artifact/79MLwMNtCeF251RFGmuikh'
@@ -205,7 +206,7 @@ unblocks = "the chat app's calls"
 plan = 'docs/capture-plan.md'
 review = 'calls'
 plan_built_part = "stage C10 is capture-plan §8; the plan's BUILT is capture itself"
-text = "SHIPPED 2026-10-31 (c90f6f4b; review {review:calls}): stage C10 (docs/capture-plan.md §8). Call and Video in a thread's header open a call screen in the Go app: the peer's picture, the self-view, camera and microphone pickers, Mute, Camera off and Hang up; the scripted peer answers over its own loopback connection with a test pattern and a tone, and calls back as an ordinary notification with Answer and Decline. CallKit and Android's call service stay out. The chatcall scene runs it on five lanes. Ruled 2026-11-01 and built (9b59dfd0; review {review:rulings1101}): every call button shows its symbol beside its title, and the self-view sits smaller under the peer's picture until the layering entry lets it float over a corner; the settled choices are capture-plan §12, ratified. The call screen has one geometry on every lane (211bc322), and a growing video view or surface fills until either axis of its room is used up on all five, ruled 2026-11-01 (cfebe2c5; review {review:growfit}; docs/media-plan.md §3)."
+text = "SHIPPED 2026-10-31 (c90f6f4b; review {review:calls}): stage C10 (docs/capture-plan.md §8). Call and Video in a thread's header open a call screen in the Go app: the peer's picture, the self-view, camera and microphone pickers, Mute, Camera off and Hang up; the scripted peer answers over its own loopback connection with a test pattern and a tone, and calls back as an ordinary notification with Answer and Decline. CallKit and Android's call service stay out. The chatcall scene runs it on five lanes. Ruled 2026-11-01 and built (9b59dfd0; review {review:rulings1101}): every call button shows its symbol beside its title, and the self-view sat smaller under the peer's picture until the layering entry floated it over a corner (2026-11-16); the settled choices are capture-plan §12, ratified. The call screen has one geometry on every lane (211bc322), and a growing video view or surface fills until either axis of its room is used up on all five, ruled 2026-11-01 (cfebe2c5; review {review:growfit}; docs/media-plan.md §3)."
 
 [[menu]]
 title = '<b>Six more languages on a phone</b>'
@@ -248,11 +249,13 @@ text = "Most of it done 2026-10-31 (398fadd2, 8303eadd, bacb578f, 5c1492cc): the
 [[menu]]
 title = '<b>Layering: one view over another</b>'
 star = false
-status = 'open'
+status = 'shipped'
 size = 'M'
 unblocks = 'the chat app (its call screen); the media player; the video editor'
 key = 'layering kind'
-text = "Opened 2026-11-01 by the maintainer's call-screen ruling: a container whose children share one box, a small view floated over an edge or corner of a larger one, so a call's self-view sits over the peer's picture rather than under it. Each toolkit has it (SwiftUI's ZStack and overlay, Compose's Box, GTK's GtkOverlay, WinUI's one-cell Grid); kaya's containers only lay children side by side. The call screen's smaller self-view under the peer is the interim (capture-plan §12 item 7)."
+plan = 'docs/layering-plan.md'
+review = 'layering'
+text = "SHIPPED 2026-11-16 (4c260eac, 6b27231b, 82ff92ec, 0a5a5481, 75acd450; review {review:layering}): a <code>layers</code> container whose first child is the base and sizes the box, each later child placed at one of nine positions at the container's inset, drawn and hit in declaration order and read base first; the overlay fill's fade form for text over a picture; on five platforms, in nine bindings and the C floor. The call screen's self-view now floats over the peer's bottom-trailing corner on every lane. Opened 2026-11-01 by the maintainer's call-screen ruling: a container whose children share one box, a small view floated over an edge or corner of a larger one, so a call's self-view sits over the peer's picture rather than under it. Each toolkit has it (SwiftUI's ZStack and overlay, Compose's Box, GTK's GtkOverlay, WinUI's one-cell Grid); kaya's containers only lay children side by side. The call screen's smaller self-view under the peer was the interim until then (capture-plan §12 item 7)."
 
 [[menu]]
 title = 'Segmented control'
