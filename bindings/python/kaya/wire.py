@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x3ab48ce2d4543eac
+SPEC_HASH = 0x3f0f96117842a9ee
 VERSION = "0.0.0"
 
 VALUE_BOOL = 1
@@ -58,6 +58,7 @@ KIND_SEGMENTED = 25
 KIND_EXPANDER = 26
 KIND_SURFACE = 27
 KIND_ICON = 28
+KIND_LAYERS = 29
 DRAW_OP_MOVE_TO = 1
 DRAW_OP_LINE_TO = 2
 DRAW_OP_CLOSE = 3
@@ -165,6 +166,7 @@ PROP_FONT_ITALIC = 74
 PROP_FONT_WIDTH = 75
 PROP_INSET_X = 76
 PROP_TITLED = 77
+PROP_PLACE = 78
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -265,6 +267,16 @@ TINT_CRITICAL = 4
 TINT_NEUTRAL = 5
 TINT_OVERLAY = 6
 TINT_COLOR = 7
+TINT_OVERLAY_FADE = 8
+PLACE_TOP_LEADING = 1
+PLACE_TOP = 2
+PLACE_TOP_TRAILING = 3
+PLACE_LEADING = 4
+PLACE_CENTER = 5
+PLACE_TRAILING = 6
+PLACE_BOTTOM_LEADING = 7
+PLACE_BOTTOM = 8
+PLACE_BOTTOM_TRAILING = 9
 GROUND_NONE = 0
 GROUND_GRADIENT = 1
 GROUND_IMAGE = 2
@@ -2360,6 +2372,21 @@ def tx_bind_titled(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_titled_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TITLED, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_place(widget_id: int, place: int) -> bytes:
+    """set_property with a constant place value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_PLACE, SOURCE_CONST) + _enc.value(int(place)))
+
+
+def tx_bind_place(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound place value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_PLACE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_place_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_PLACE, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:

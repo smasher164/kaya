@@ -358,6 +358,9 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // A symbol button that draws its title beside the glyph rather than in
     // place of it (docs/composer-plan.md §2, the maintainer 2026-11-01).
     ("titled", 77, PropKind::Bool),
+    // docs/layering-plan.md LY3: where an overlay of a layers container sits
+    // in its base's box; the core emits `center` when an overlay joins.
+    ("place", 78, PropKind::Enum("place")),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -4802,6 +4805,9 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 // docs/looks-plan.md §3.1: one symbol of the vocabulary drawn on
                 // its own, sized by text_scale, coloured by tint.
                 ("icon", 28),
+                // docs/layering-plan.md LY1: children sharing the first
+                // child's box, later ones drawn over earlier ones.
+                ("layers", 29),
             ],
         },
         EnumSpec {
@@ -4952,6 +4958,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("font_width", 75),
                 ("inset_x", 76),
                 ("titled", 77),
+                ("place", 78),
             ],
         },
         EnumSpec {
@@ -5163,6 +5170,24 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 // docs/looks-plan.md §3.2: a fill in the app's own colour, the
                 // `color` prop, kaya choosing the text colour on it.
                 ("color", 7),
+                // docs/layering-plan.md LY9: the overlay panel as a scrim
+                // fading from clear to kaya's darkness at the picture's edge.
+                ("overlay_fade", 8),
+            ],
+        },
+        EnumSpec {
+            // docs/layering-plan.md LY3, the keypad order.
+            name: "place",
+            variants: &[
+                ("top_leading", 1),
+                ("top", 2),
+                ("top_trailing", 3),
+                ("leading", 4),
+                ("center", 5),
+                ("trailing", 6),
+                ("bottom_leading", 7),
+                ("bottom", 8),
+                ("bottom_trailing", 9),
             ],
         },
         EnumSpec {
@@ -6137,6 +6162,7 @@ mod tests {
                     ("kind", "expander") => wire::KIND_EXPANDER,
                     ("kind", "surface") => wire::KIND_SURFACE,
                     ("kind", "icon") => wire::KIND_ICON,
+                    ("kind", "layers") => wire::KIND_LAYERS,
                     ("kind", "color_picker") => wire::KIND_COLOR_PICKER,
                     ("kind", "range") => wire::KIND_RANGE,
                     ("kind", "video") => wire::KIND_VIDEO,
@@ -6149,6 +6175,7 @@ mod tests {
                     ("image_phase", _) => canvas_pin(wire::IMAGE_PHASES, name),
                     ("ground", _) => canvas_pin(wire::GROUNDS, name),
                     ("shape", _) => canvas_pin(wire::SHAPES, name),
+                    ("place", _) => canvas_pin(wire::PLACES, name),
                     ("content_type", _) => canvas_pin(wire::CONTENT_TYPES, name),
                     ("pprop", _) => canvas_pin(wire::PPROPS, name),
                     ("track_kind", _) => canvas_pin(wire::TRACK_KINDS, name),
@@ -6252,6 +6279,7 @@ mod tests {
                     ("prop", "font_width") => wire::PROP_FONT_WIDTH,
                     ("prop", "inset_x") => wire::PROP_INSET_X,
                     ("prop", "titled") => wire::PROP_TITLED,
+                    ("prop", "place") => wire::PROP_PLACE,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -6373,6 +6401,7 @@ mod tests {
                     ("tint", "none") => wire::TINT_NONE,
                     ("tint", "overlay") => wire::TINT_OVERLAY,
                     ("tint", "color") => wire::TINT_COLOR,
+                    ("tint", "overlay_fade") => wire::TINT_OVERLAY_FADE,
                     ("symbol", "add") => wire::SYMBOL_ADD,
                     ("symbol", "remove") => wire::SYMBOL_REMOVE,
                     ("symbol", "delete") => wire::SYMBOL_DELETE,
@@ -6478,6 +6507,7 @@ mod tests {
             ("image_phase", wire::IMAGE_PHASES),
             ("ground", wire::GROUNDS),
             ("shape", wire::SHAPES),
+            ("place", wire::PLACES),
             ("content_type", wire::CONTENT_TYPES),
             ("pprop", wire::PPROPS),
             ("track_kind", wire::TRACK_KINDS),

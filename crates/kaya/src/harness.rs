@@ -132,6 +132,7 @@ pub enum TargetKind {
     /// The icon (docs/looks-plan.md §3.1): `expect_symbol` reads the glyph it
     /// draws off the platform, as a button's.
     Icon,
+    Layers,
 }
 
 /// Text bound for a secure field (docs/secure-entry-plan.md P6). It has no
@@ -6184,6 +6185,7 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "expander" => TargetKind::Expander,
         "surface" => TargetKind::Surface,
         "icon" => TargetKind::Icon,
+        "layers" => TargetKind::Layers,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -10164,6 +10166,7 @@ pub(crate) fn target_spec(t: &Target) -> String {
         TargetKind::Segmented => "segmented",
         TargetKind::Expander => "expander",
         TargetKind::Icon => "icon",
+        TargetKind::Layers => "layers",
         TargetKind::Surface => "surface",
     };
     if let Some(id) = t.id {

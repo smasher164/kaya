@@ -316,6 +316,7 @@ pub(crate) const KIND_SEGMENTED: u32 = 25;
 pub(crate) const KIND_EXPANDER: u32 = 26;
 pub(crate) const KIND_SURFACE: u32 = 27;
 pub(crate) const KIND_ICON: u32 = 28;
+pub(crate) const KIND_LAYERS: u32 = 29;
 
 // Draw opcodes (docs/canvas-plan.md §3.3). The op stream is a flat run
 // of tagged values: one of these as an i64, then its operands.
@@ -1350,6 +1351,7 @@ pub(crate) const PROP_ROLE: u32 = 16;
 pub(crate) const PROP_INSET: u32 = 17;
 pub(crate) const PROP_INSET_X: u32 = 76;
 pub(crate) const PROP_TITLED: u32 = 77;
+pub(crate) const PROP_PLACE: u32 = 78;
 pub(crate) const PROP_AXIS: u32 = 18;
 /// The pickers' value and range slots, packed-decimal I64s the spec
 /// labels Date/Time (docs/datetime-plan.md D2); the step is a count.
@@ -1743,6 +1745,7 @@ pub(crate) const TINT_NEUTRAL: u32 = 5;
 pub(crate) const TINT_NONE: u32 = 0;
 pub(crate) const TINT_OVERLAY: u32 = 6;
 pub(crate) const TINT_COLOR: u32 = 7;
+pub(crate) const TINT_OVERLAY_FADE: u32 = 8;
 
 /// docs/styling-pass-plan.md Y2, Y3 (spec enum "ground").
 pub(crate) const GROUND_NONE: i64 = 0;
@@ -1755,6 +1758,20 @@ pub(crate) const SHAPE_RECT: i64 = 0;
 pub(crate) const SHAPE_ROUNDED: i64 = 1;
 pub(crate) const SHAPE_CIRCLE: i64 = 2;
 pub(crate) const SHAPES: &[(i64, &str)] = &[(SHAPE_RECT, "rect"), (SHAPE_ROUNDED, "rounded"), (SHAPE_CIRCLE, "circle")];
+
+/// docs/layering-plan.md LY3 (spec enum "place").
+pub(crate) const PLACE_CENTER: i64 = 5;
+pub(crate) const PLACES: &[(i64, &str)] = &[
+    (1, "top_leading"),
+    (2, "top"),
+    (3, "top_trailing"),
+    (4, "leading"),
+    (PLACE_CENTER, "center"),
+    (6, "trailing"),
+    (7, "bottom_leading"),
+    (8, "bottom"),
+    (9, "bottom_trailing"),
+];
 
 /// The semantic icon vocabulary's wire values (spec enum "symbol";
 /// docs/styling-plan.md D6). APPEND-ONLY: every backend keys its
@@ -2062,6 +2079,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_EXPANDER => WidgetKind::Expander,
         KIND_SURFACE => WidgetKind::Surface,
         KIND_ICON => WidgetKind::Icon,
+        KIND_LAYERS => WidgetKind::Layers,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -2087,6 +2105,7 @@ fn prop(raw: u32) -> Prop {
         PROP_INSET => Prop::Inset,
         PROP_INSET_X => Prop::InsetX,
         PROP_TITLED => Prop::Titled,
+        PROP_PLACE => Prop::Place,
         PROP_AXIS => Prop::Axis,
         PROP_DATE => Prop::Date,
         PROP_TIME => Prop::Time,
@@ -6135,6 +6154,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Expander => KIND_EXPANDER,
         WidgetKind::Surface => KIND_SURFACE,
         WidgetKind::Icon => KIND_ICON,
+        WidgetKind::Layers => KIND_LAYERS,
     }
 }
 
@@ -6371,6 +6391,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Inset => PROP_INSET,
         Prop::InsetX => PROP_INSET_X,
         Prop::Titled => PROP_TITLED,
+        Prop::Place => PROP_PLACE,
         Prop::Axis => PROP_AXIS,
         Prop::A11yHint => PROP_A11Y_HINT,
         Prop::Date => PROP_DATE,

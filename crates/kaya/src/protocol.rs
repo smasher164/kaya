@@ -1974,6 +1974,9 @@ pub enum WidgetKind {
     /// An ICON (docs/looks-plan.md §3.1): one symbol of the vocabulary drawn
     /// on its own, sized by `text_scale`, coloured by `tint`. Display-only.
     Icon,
+    /// LAYERS (docs/layering-plan.md): the first child is the base and sizes
+    /// the box; every later child is an overlay placed in it by `place`.
+    Layers,
 }
 
 /// A video view's box ratio, width:height (docs/media-plan.md §3, RULED
@@ -2270,7 +2273,7 @@ impl WidgetKind {
     /// export `WidgetKind` into the public header as an opaque handle no C
     /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 28] = [
+    pub(crate) const ALL: [WidgetKind; 29] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -2299,6 +2302,7 @@ impl WidgetKind {
         WidgetKind::Expander,
         WidgetKind::Surface,
         WidgetKind::Icon,
+        WidgetKind::Layers,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -2342,7 +2346,8 @@ impl WidgetKind {
             | WidgetKind::Labeled
             | WidgetKind::Video
             | WidgetKind::Surface
-            | WidgetKind::Icon => false,
+            | WidgetKind::Icon
+            | WidgetKind::Layers => false,
         }
     }
 }
@@ -2703,6 +2708,8 @@ pub enum Prop {
     InsetX,
     /// A symbol button draws its title beside the glyph (docs/composer-plan.md §2).
     Titled,
+    /// Where an overlay sits in its layers container's box (docs/layering-plan.md LY3).
+    Place,
     /// The container's arrangement axis (docs/adaptive-layout-plan.md
     /// D1/D2): row and column are one node this parameterizes, and the
     /// prop is mutable so a breakpoint diff or a handler toggle is an

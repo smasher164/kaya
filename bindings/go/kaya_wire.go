@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x3ab48ce2d4543eac
+	SpecHash uint64 = 0x3f0f96117842a9ee
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -58,6 +58,7 @@ const (
 	KindExpander = 26
 	KindSurface = 27
 	KindIcon = 28
+	KindLayers = 29
 	DrawOpMoveTo = 1
 	DrawOpLineTo = 2
 	DrawOpClose = 3
@@ -165,6 +166,7 @@ const (
 	PropFontWidth = 75
 	PropInsetX = 76
 	PropTitled = 77
+	PropPlace = 78
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -265,6 +267,16 @@ const (
 	TintNeutral Tint = 5
 	TintOverlay Tint = 6
 	TintColor Tint = 7
+	TintOverlayFade Tint = 8
+	PlaceTopLeading = 1
+	PlaceTop = 2
+	PlaceTopTrailing = 3
+	PlaceLeading = 4
+	PlaceCenter = 5
+	PlaceTrailing = 6
+	PlaceBottomLeading = 7
+	PlaceBottom = 8
+	PlaceBottomTrailing = 9
 	GroundNone = 0
 	GroundGradient = 1
 	GroundImage = 2
@@ -914,6 +926,8 @@ func (t Tint) String() string {
 		return "overlay"
 	case TintColor:
 		return "color"
+	case TintOverlayFade:
+		return "overlay_fade"
 	}
 	return "Tint(" + strconv.FormatInt(int64(t), 10) + ")"
 }
@@ -4630,6 +4644,38 @@ func TxBindTitledElement(widgetID uint64, level uint32, field uint32) []byte {
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropTitled)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetPlace: set_property with a constant place value.
+func TxSetPlace(widgetID uint64, place int64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropPlace)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, place)
+	return endRecord(b)
+}
+
+// TxBindPlace: set_property with a signal-bound place value.
+func TxBindPlace(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropPlace)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindPlaceElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindPlaceElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropPlace)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

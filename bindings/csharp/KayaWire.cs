@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x3ab48ce2d4543eac;
+    public const ulong SpecHash = 0x3f0f96117842a9ee;
     public const string Version = "0.0.0";
 
     public const uint ValueBool = 1;
@@ -56,6 +56,7 @@ static class KayaWire
     public const uint KindExpander = 26;
     public const uint KindSurface = 27;
     public const uint KindIcon = 28;
+    public const uint KindLayers = 29;
     public const uint DrawOpMoveTo = 1;
     public const uint DrawOpLineTo = 2;
     public const uint DrawOpClose = 3;
@@ -163,6 +164,7 @@ static class KayaWire
     public const uint PropFontWidth = 75;
     public const uint PropInsetX = 76;
     public const uint PropTitled = 77;
+    public const uint PropPlace = 78;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -263,6 +265,16 @@ static class KayaWire
     public const uint TintNeutral = 5;
     public const uint TintOverlay = 6;
     public const uint TintColor = 7;
+    public const uint TintOverlayFade = 8;
+    public const uint PlaceTopLeading = 1;
+    public const uint PlaceTop = 2;
+    public const uint PlaceTopTrailing = 3;
+    public const uint PlaceLeading = 4;
+    public const uint PlaceCenter = 5;
+    public const uint PlaceTrailing = 6;
+    public const uint PlaceBottomLeading = 7;
+    public const uint PlaceBottom = 8;
+    public const uint PlaceBottomTrailing = 9;
     public const uint GroundNone = 0;
     public const uint GroundGradient = 1;
     public const uint GroundImage = 2;
@@ -3742,6 +3754,31 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         w.Write(widgetId); w.Write(PropTitled); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant place value.
+    public static byte[] TxSetPlace(ulong widgetId, long place)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropPlace); w.Write(SourceConst);
+        EncodeValue(w, place);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound place value.
+    public static byte[] TxBindPlace(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropPlace); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindPlaceElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropPlace); w.Write(SourceElement); w.Write(level); w.Write(field);
         return Finish(stream, w, TxKindSetProperty);
     }
 

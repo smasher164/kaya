@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x3ab48ce2d4543eacL;
+    public static final long SPEC_HASH = 0x3f0f96117842a9eeL;
     public static final String VERSION = "0.0.0";
 
     public static final int VALUE_BOOL = 1;
@@ -57,6 +57,7 @@ public final class KayaWire {
     public static final int KIND_EXPANDER = 26;
     public static final int KIND_SURFACE = 27;
     public static final int KIND_ICON = 28;
+    public static final int KIND_LAYERS = 29;
     public static final int DRAW_OP_MOVE_TO = 1;
     public static final int DRAW_OP_LINE_TO = 2;
     public static final int DRAW_OP_CLOSE = 3;
@@ -164,6 +165,7 @@ public final class KayaWire {
     public static final int PROP_FONT_WIDTH = 75;
     public static final int PROP_INSET_X = 76;
     public static final int PROP_TITLED = 77;
+    public static final int PROP_PLACE = 78;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -264,6 +266,16 @@ public final class KayaWire {
     public static final int TINT_NEUTRAL = 5;
     public static final int TINT_OVERLAY = 6;
     public static final int TINT_COLOR = 7;
+    public static final int TINT_OVERLAY_FADE = 8;
+    public static final int PLACE_TOP_LEADING = 1;
+    public static final int PLACE_TOP = 2;
+    public static final int PLACE_TOP_TRAILING = 3;
+    public static final int PLACE_LEADING = 4;
+    public static final int PLACE_CENTER = 5;
+    public static final int PLACE_TRAILING = 6;
+    public static final int PLACE_BOTTOM_LEADING = 7;
+    public static final int PLACE_BOTTOM = 8;
+    public static final int PLACE_BOTTOM_TRAILING = 9;
     public static final int GROUND_NONE = 0;
     public static final int GROUND_GRADIENT = 1;
     public static final int GROUND_IMAGE = 2;
@@ -3522,6 +3534,29 @@ public final class KayaWire {
     public static byte[] txBindTitledElement(long widgetId, int level, int field) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_TITLED).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant place value. */
+    public static byte[] txSetPlace(long widgetId, long place) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_PLACE).putInt(SOURCE_CONST);
+        encodeValue(b, place);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound place value. */
+    public static byte[] txBindPlace(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_PLACE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindPlaceElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_PLACE).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

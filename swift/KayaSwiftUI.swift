@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x3ab48ce2d4543eac
+let kayaSpecHash: UInt64 = 0x3f0f96117842a9ee
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2

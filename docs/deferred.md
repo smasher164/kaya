@@ -116,6 +116,11 @@ The call screen shows a smaller self-view under the peer's picture (docs/capture
 DESIGNED 2026-11-15 in docs/layering-plan.md, status PROPOSED, rulings LY1 to LY14 open: a container kind `layers` whose first child is the base and sizes the box, each later child placed by a per-child `place` (nine positions) at the container's `inset`, declaration order as z-order, every overlay's own box taking the pointer, the reading order pinned to declaration order, Y3's text-over-picture refusal widened to overlays, Android's overlay videos on their TextureView route, and the call screen as the first consumer. This entry closes when the build does.
 KEY: overlay, layering kind, layers, place, expect_placed, tap_at, expect_ax_order, layers.steps, self-view over the peer, ZStack, GtkOverlay, Box align, one cell, matchParentSize, setZOrderMediaOverlay, TextureView, COMPATIBLE, picture in picture, capture-plan §12 item 7, docs/layering-plan.md
 
+The root (spec, core refusals, the Rust sugar) is in; each unbuilt arm refuses the scene through the stub call:
+
+  - **DEPTH STUB: layers on gtk** — the GtkOverlay arm follows the Mac's depth slice (docs/layering-plan.md §5 step 3); closes when the layers scene is green on the linux lane.
+  - **DEPTH STUB: layers on winui** — the one-cell Grid arm follows the Mac's depth slice (docs/layering-plan.md §5 step 3); closes when the layers scene is green on the windows lane.
+
 ## ~~BUILD — a font picker with family and face, native on three platforms and kaya-drawn on two (docs/font-picker-plan.md, ruled 2026-10-29)~~ COMPLETE 2026-10-29: every lane, all nine bindings, the fontpick scene in every language and the editor's Font…, through one full matrix (e2d4a307) and the review page (claude.ai/artifact/6RrGZauKea4rQyycBPn3oC); the three findings of its captures are the GAP entry below, the panel before macOS 26 the DEFER entry
 KEY: font picker, show_font_dialog, font_dialog_result, list_font_faces, font_faces, font_weight, font_italic, font_width, choose_font, on_font_chosen, NSFontPanel, NSFontPanelCollectionsToolbarItem, UIFontPickerViewController, GtkFontDialog, expect_face face, pick_font, expect_font_dialog, fontpick.steps, DEPTH STUB fontpick
 

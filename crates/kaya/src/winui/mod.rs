@@ -17753,6 +17753,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.images.push(image.clone());
                     NativeWidget::Image { host, image }
                 }
+                WidgetKind::Layers => crate::depth_stub("layers"),
                 WidgetKind::Icon => {
                     // docs/looks-plan.md §3.1: the symbol arrives as a SetProp
                     // and the glyph is rebuilt into the host from the three.
@@ -24152,6 +24153,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Segmented => id_of!(core.segmenteds, NativeWidget::Segmented(bar), bar),
         K::Expander => core.expander_ids.get(i).copied(),
         K::Icon => core.icon_ids.get(i).copied(),
+        K::Layers => None,
         K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
@@ -24495,6 +24497,7 @@ fn target_element(
         K::Segmented => nth!(core.segmenteds),
         K::Expander => nth!(core.expanders),
         K::Icon => nth!(core.icons),
+        K::Layers => return Ok(None),
         K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
@@ -24604,6 +24607,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Segmented => ids!(core.segmenteds, NativeWidget::Segmented(bar), bar),
         K::Expander => core.expander_ids.clone(),
         K::Icon => core.icon_ids.clone(),
+        K::Layers => Vec::new(),
         K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
@@ -28926,6 +28930,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Segmented => find(core, K::Segmented, &core.segmenteds, &id),
                 K::Expander => find(core, K::Expander, &core.expanders, &id),
                 K::Icon => find(core, K::Icon, &core.icons, &id),
+                K::Layers => None,
                 K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),

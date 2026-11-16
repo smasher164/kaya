@@ -1132,6 +1132,7 @@ pub const KAYA_KIND_SEGMENTED: u32 = 25;
 pub const KAYA_KIND_EXPANDER: u32 = 26;
 pub const KAYA_KIND_SURFACE: u32 = 27;
 pub const KAYA_KIND_ICON: u32 = 28;
+pub const KAYA_KIND_LAYERS: u32 = 29;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -1161,6 +1162,7 @@ const _: () = assert!(
         && KAYA_KIND_EXPANDER == wire::KIND_EXPANDER
         && KAYA_KIND_SURFACE == wire::KIND_SURFACE
         && KAYA_KIND_ICON == wire::KIND_ICON
+        && KAYA_KIND_LAYERS == wire::KIND_LAYERS
 );
 // Completeness, not just agreement: a value pin cannot see a FORGOTTEN
 // export (docs/traps.md, "A value pin cannot see a FORGOTTEN sibling").
@@ -1178,7 +1180,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 28,
+        kinds == 29,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };
@@ -1235,6 +1237,7 @@ pub const KAYA_PROP_INSET: u32 = 17;
 /// (docs/styling-plan.md D3, the inset pair).
 pub const KAYA_PROP_INSET_X: u32 = 76;
 pub const KAYA_PROP_TITLED: u32 = 77;
+pub const KAYA_PROP_PLACE: u32 = 78;
 /// The arrangement axis (docs/adaptive-layout-plan.md D1): row and
 /// column are one node this prop parameterizes.
 pub const KAYA_PROP_AXIS: u32 = 18;
@@ -1578,6 +1581,7 @@ const _: () = assert!(
         && KAYA_PROP_INSET == wire::PROP_INSET
         && KAYA_PROP_INSET_X == wire::PROP_INSET_X
         && KAYA_PROP_TITLED == wire::PROP_TITLED
+        && KAYA_PROP_PLACE == wire::PROP_PLACE
         && KAYA_PROP_AXIS == wire::PROP_AXIS
         && KAYA_PROP_DATE == wire::PROP_DATE
         && KAYA_PROP_TIME == wire::PROP_TIME
@@ -1777,6 +1781,8 @@ pub const KAYA_TINT_NONE: u32 = 0;
 pub const KAYA_TINT_OVERLAY: u32 = 6;
 /// A fill in the app's own colour (docs/looks-plan.md §3.2).
 pub const KAYA_TINT_COLOR: u32 = 7;
+/// The overlay panel as a scrim (docs/layering-plan.md LY9).
+pub const KAYA_TINT_OVERLAY_FADE: u32 = 8;
 const _: () = assert!(
     KAYA_TINT_ACCENT == wire::TINT_ACCENT
         && KAYA_TINT_SUCCESS == wire::TINT_SUCCESS
@@ -1786,6 +1792,7 @@ const _: () = assert!(
         && KAYA_TINT_NONE == wire::TINT_NONE
         && KAYA_TINT_OVERLAY == wire::TINT_OVERLAY
         && KAYA_TINT_COLOR == wire::TINT_COLOR
+        && KAYA_TINT_OVERLAY_FADE == wire::TINT_OVERLAY_FADE
 );
 
 /// The SEMANTIC ICON VOCABULARY (spec enum "symbol"; docs/styling-plan.md
@@ -2100,6 +2107,15 @@ pub const KAYA_GROUND_IMAGE: u32 = 2;
 pub const KAYA_SHAPE_RECT: u32 = 0;
 pub const KAYA_SHAPE_ROUNDED: u32 = 1;
 pub const KAYA_SHAPE_CIRCLE: u32 = 2;
+pub const KAYA_PLACE_TOP_LEADING: u32 = 1;
+pub const KAYA_PLACE_TOP: u32 = 2;
+pub const KAYA_PLACE_TOP_TRAILING: u32 = 3;
+pub const KAYA_PLACE_LEADING: u32 = 4;
+pub const KAYA_PLACE_CENTER: u32 = 5;
+pub const KAYA_PLACE_TRAILING: u32 = 6;
+pub const KAYA_PLACE_BOTTOM_LEADING: u32 = 7;
+pub const KAYA_PLACE_BOTTOM: u32 = 8;
+pub const KAYA_PLACE_BOTTOM_TRAILING: u32 = 9;
 pub const KAYA_CONTENT_TYPE_NONE: u32 = 0;
 pub const KAYA_CONTENT_TYPE_USERNAME: u32 = 1;
 pub const KAYA_CONTENT_TYPE_PASSWORD: u32 = 2;
@@ -2238,6 +2254,15 @@ const _: () = assert!(
         && vocab_is(wire::SHAPES, "rect", KAYA_SHAPE_RECT)
         && vocab_is(wire::SHAPES, "rounded", KAYA_SHAPE_ROUNDED)
         && vocab_is(wire::SHAPES, "circle", KAYA_SHAPE_CIRCLE)
+        && vocab_is(wire::PLACES, "top_leading", KAYA_PLACE_TOP_LEADING)
+        && vocab_is(wire::PLACES, "top", KAYA_PLACE_TOP)
+        && vocab_is(wire::PLACES, "top_trailing", KAYA_PLACE_TOP_TRAILING)
+        && vocab_is(wire::PLACES, "leading", KAYA_PLACE_LEADING)
+        && vocab_is(wire::PLACES, "center", KAYA_PLACE_CENTER)
+        && vocab_is(wire::PLACES, "trailing", KAYA_PLACE_TRAILING)
+        && vocab_is(wire::PLACES, "bottom_leading", KAYA_PLACE_BOTTOM_LEADING)
+        && vocab_is(wire::PLACES, "bottom", KAYA_PLACE_BOTTOM)
+        && vocab_is(wire::PLACES, "bottom_trailing", KAYA_PLACE_BOTTOM_TRAILING)
         && vocab_is(wire::CONTENT_TYPES, "none", KAYA_CONTENT_TYPE_NONE)
         && vocab_is(wire::CONTENT_TYPES, "username", KAYA_CONTENT_TYPE_USERNAME)
         && vocab_is(wire::CONTENT_TYPES, "password", KAYA_CONTENT_TYPE_PASSWORD)
@@ -2337,7 +2362,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 77,
+    crate::spec::PROPS.len() == 78,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

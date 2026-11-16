@@ -2103,6 +2103,10 @@ pub enum Tint {
     Critical,
     Neutral,
     Overlay,
+    /// The overlay panel as a scrim, clear where it faces into the picture
+    /// and darkening toward the picture's edge it sits against, kaya
+    /// choosing the darkness (docs/layering-plan.md LY9).
+    OverlayFade,
 }
 
 impl Tint {
@@ -2115,11 +2119,12 @@ impl Tint {
             Tint::Critical => 4,
             Tint::Neutral => 5,
             Tint::Overlay => 6,
+            Tint::OverlayFade => 8,
         }
     }
 
     fn from_wire(n: i64) -> Option<Tint> {
-        [Tint::None, Tint::Accent, Tint::Success, Tint::Warning, Tint::Critical, Tint::Neutral, Tint::Overlay]
+        [Tint::None, Tint::Accent, Tint::Success, Tint::Warning, Tint::Critical, Tint::Neutral, Tint::Overlay, Tint::OverlayFade]
             .into_iter()
             .find(|t| t.wire() == n)
     }
@@ -2141,6 +2146,28 @@ impl Shape {
             Shape::Rounded => crate::wire::SHAPE_ROUNDED,
             Shape::Circle => crate::wire::SHAPE_CIRCLE,
         }
+    }
+}
+
+/// Where an overlay of a layers container sits in its base's box
+/// (docs/layering-plan.md LY3): leading and trailing follow the layout
+/// direction. An overlay with none sits at the centre.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Place {
+    TopLeading,
+    Top,
+    TopTrailing,
+    Leading,
+    Center,
+    Trailing,
+    BottomLeading,
+    Bottom,
+    BottomTrailing,
+}
+
+impl Place {
+    fn wire(self) -> i64 {
+        self as i64 + 1
     }
 }
 
@@ -2398,6 +2425,12 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
     /// This image's clip — [`Tx::shape`] chained.
     pub fn shape(self, shape: Shape) -> Self {
         self.tx.shape(self.id, shape);
+        self
+    }
+
+    /// This overlay's position in its layers container's box — [`Tx::place`] chained.
+    pub fn place(self, place: Place) -> Self {
+        self.tx.place(self.id, place);
         self
     }
 
@@ -3758,6 +3791,11 @@ impl<'a> Tx<'a> {
         self.set(widget, Prop::Shape, shape.wire());
     }
 
+    /// Where an overlay sits in its layers container's box (docs/layering-plan.md LY3).
+    pub fn place(&mut self, widget: WidgetId, place: Place) {
+        self.set(widget, Prop::Place, place.wire());
+    }
+
     /// A label in a tint's standalone colour (docs/styling-pass-plan.md Y7).
     pub fn tint(&mut self, widget: WidgetId, tint: impl Into<LiveSource<TintKind>>) {
         self.set_live(widget, Prop::Tint, tint.into());
@@ -4264,6 +4302,14 @@ impl<'a> Tx<'a> {
 
     pub fn row<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> Widget<'_, 'a, R> {
         self.container_of(WidgetKind::Row, body)
+    }
+
+    /// LAYERS (docs/layering-plan.md): the body's first child is the base,
+    /// laid out as it would be alone in this container's place; every later
+    /// child is drawn over it, placed in the base's box by [`Widget::place`]
+    /// at this container's [`Widget::inset`], and takes every tap in its own box.
+    pub fn layers<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> Widget<'_, 'a, R> {
+        self.container_of(WidgetKind::Layers, body)
     }
 
     /// A vertical scroll viewport over EXACTLY ONE child — declare
@@ -5781,6 +5827,10 @@ impl<'b> Row<'_, 'b> {
         self.tpl().column(body)
     }
 
+    pub fn layers<R>(&mut self, body: impl FnOnce(&mut Tpl<'_, 'b>) -> R) -> (TemplateNodeId, R) {
+        self.tpl().layers(body)
+    }
+
     // THE REST OF THE ZONE, forwarded. Row is the for-STATEMENT façade
     // over the same template, so a constructor that exists on Tpl and not
     // here is reachable through `for row in rows` and not through
@@ -6025,6 +6075,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn shape(&mut self, node: TemplateNodeId, shape: Shape) {
         self.tpl().shape(node, shape)
+    }
+
+    pub fn place(&mut self, node: TemplateNodeId, place: Place) {
+        self.tpl().place(node, place)
     }
 
     pub fn tint(&mut self, node: TemplateNodeId, src: impl Into<TplSource<TintKind>>) {
@@ -9817,6 +9871,11 @@ impl<'b> Tpl<'_, 'b> {
         self.container_of(WidgetKind::Column, body)
     }
 
+    /// A stamped layers container, the blueprint twin of [`Tx::layers`].
+    pub fn layers<R>(&mut self, body: impl FnOnce(&mut Self) -> R) -> (TemplateNodeId, R) {
+        self.container_of(WidgetKind::Layers, body)
+    }
+
     fn container_of<R>(
         &mut self,
         kind: WidgetKind,
@@ -10130,6 +10189,11 @@ impl<'b> Tpl<'_, 'b> {
     /// A stamped image's clip, the blueprint twin of [`Tx::shape`].
     pub fn shape(&mut self, node: TemplateNodeId, shape: Shape) {
         self.set(node, Prop::Shape, shape.wire());
+    }
+
+    /// A stamped overlay's position, the blueprint twin of [`Tx::place`].
+    pub fn place(&mut self, node: TemplateNodeId, place: Place) {
+        self.set(node, Prop::Place, place.wire());
     }
 
     /// A stamped label's tint, the blueprint twin of [`Tx::tint`].

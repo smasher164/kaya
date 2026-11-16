@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x3ab48ce2d4543eac
+specHash = 0x3f0f96117842a9ee
 kayaVersion :: String
 kayaVersion = "0.0.0"
 
@@ -110,6 +110,8 @@ kindSurface :: Word32
 kindSurface = 27
 kindIcon :: Word32
 kindIcon = 28
+kindLayers :: Word32
+kindLayers = 29
 drawOpMoveTo :: Word32
 drawOpMoveTo = 1
 drawOpLineTo :: Word32
@@ -324,6 +326,8 @@ propInsetX :: Word32
 propInsetX = 76
 propTitled :: Word32
 propTitled = 77
+propPlace :: Word32
+propPlace = 78
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -524,6 +528,26 @@ tintOverlay :: Word32
 tintOverlay = 6
 tintColor :: Word32
 tintColor = 7
+tintOverlayFade :: Word32
+tintOverlayFade = 8
+placeTopLeading :: Word32
+placeTopLeading = 1
+placeTop :: Word32
+placeTop = 2
+placeTopTrailing :: Word32
+placeTopTrailing = 3
+placeLeading :: Word32
+placeLeading = 4
+placeCenter :: Word32
+placeCenter = 5
+placeTrailing :: Word32
+placeTrailing = 6
+placeBottomLeading :: Word32
+placeBottomLeading = 7
+placeBottom :: Word32
+placeBottom = 8
+placeBottomTrailing :: Word32
+placeBottomTrailing = 9
 groundNone :: Word32
 groundNone = 0
 groundGradient :: Word32
@@ -3369,6 +3393,25 @@ txBindTitled widgetId signalId = wireRecord txKindSetProperty
 txBindTitledElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindTitledElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propTitled <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant place value.
+txSetPlace :: Word64 -> Int64 -> Builder
+txSetPlace widgetId place = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propPlace <> word32LE sourceConst
+    <> encodeValue (VI64 place))
+
+-- set_property with a signal-bound place value.
+txBindPlace :: Word64 -> Word64 -> Builder
+txBindPlace widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propPlace <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindPlaceElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindPlaceElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propPlace <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

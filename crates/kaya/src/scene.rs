@@ -1092,6 +1092,12 @@ pub(crate) struct Scene {
     /// transaction (docs/layout-knobs-plan.md §2).
     wrapping: std::collections::HashSet<WidgetId>,
     wrap_dirty: Vec<WidgetId>,
+    /// docs/layering-plan.md: each widget's per-child layer props, the
+    /// widgets whose pairing moved this transaction, and the edge each fade
+    /// panel was last given.
+    layer_marks: HashMap<WidgetId, LayerMarks>,
+    layers_dirty: Vec<WidgetId>,
+    fade_edges: HashMap<WidgetId, i64>,
     /// Live containers that DECLARED COLUMNS — a table is a column
     /// whose header bar makes it one, and that declaration is what gives
     /// it a table's overflow behaviour (docs/tables-plan.md). Kept so the
@@ -1437,6 +1443,8 @@ struct SkinBox {
     filled: bool,
     /// `filled color` (docs/looks-plan.md §3.2): the fill is the `color` prop.
     color_fill: bool,
+    /// The overlay fill's fade form (docs/layering-plan.md LY9).
+    fade: bool,
     color: bool,
     source: bool,
     selected: bool,
@@ -1459,6 +1467,7 @@ impl SkinBox {
             Prop::Filled => {
                 self.filled = !matches!(constant, Some(Value::I64(0)));
                 self.color_fill = matches!(constant, Some(Value::I64(v)) if *v == i64::from(crate::wire::TINT_COLOR));
+                self.fade = matches!(constant, Some(Value::I64(v)) if *v == i64::from(crate::wire::TINT_OVERLAY_FADE));
             }
             Prop::Color => self.color = true,
             Prop::Source => self.source = true,
@@ -1564,9 +1573,100 @@ fn is_text_kind(kind: WidgetKind) -> bool {
 fn bare_text_refusal(text: &str, ground: &str) -> String {
     format!(
         "kaya: {text} sits bare on the image ground of {ground} — text over a picture has no \
-         contrast anyone can promise; put it inside a container `filled` with `overlay` \
-         (docs/styling-pass-plan.md Y3)"
+         contrast anyone can promise; put it inside a container `filled` with `overlay` or \
+         `overlay_fade` (docs/styling-pass-plan.md Y3)"
     )
+}
+
+/// LY9 (docs/layering-plan.md): Y3's refusal, reached through an overlay.
+fn bare_overlay_text_refusal(text: &str, base: &str, layers: &str) -> String {
+    format!(
+        "kaya: {text} is an overlay of {layers} sitting bare over its picture base {base} — text \
+         over a picture has no contrast anyone can promise; put it inside a container `filled` \
+         with `overlay` or `overlay_fade` (docs/layering-plan.md LY9)"
+    )
+}
+
+/// The kinds whose content is a picture, as a layers base (LY9).
+fn is_picture_kind(kind: WidgetKind) -> bool {
+    matches!(kind, WidgetKind::Image | WidgetKind::Video | WidgetKind::Surface | WidgetKind::Canvas)
+}
+
+/// The per-child props a layers parent holds (docs/layering-plan.md LY3,
+/// LY10), as the app set them.
+#[derive(Default, Clone, Copy)]
+struct LayerMarks {
+    place: Option<i64>,
+    placed: bool,
+    grow: bool,
+    fill: bool,
+    bleed: bool,
+}
+
+impl LayerMarks {
+    fn note(&mut self, prop: Prop, value: &PropValue) {
+        let held = match value {
+            PropValue::Const(Value::F64(w)) => *w > 0.0,
+            PropValue::Const(Value::Bool(b)) => *b,
+            PropValue::Const(_) => true,
+            _ => true,
+        };
+        match prop {
+            Prop::Place => {
+                self.placed = true;
+                self.place = match value {
+                    PropValue::Const(Value::I64(p)) => Some(*p),
+                    _ => None,
+                };
+            }
+            Prop::Grow => self.grow = held,
+            Prop::Fill => self.fill = held,
+            Prop::Bleed => self.bleed = held,
+            _ => {}
+        }
+    }
+
+    /// The refusal for a child at `index` of `parent` (None when the parent
+    /// is not a layers container).
+    fn refusal(&self, who: &str, parent: Option<(&str, usize)>) -> Option<String> {
+        let plan = "docs/layering-plan.md";
+        match parent {
+            None if self.placed => Some(format!(
+                "kaya: {who} declares `place` and is not an overlay — place positions a later child \
+                 of a layers container in its base's box; declare it inside layers after the base \
+                 ({plan} LY3)"
+            )),
+            None => None,
+            Some((layers, 0)) if self.placed => Some(format!(
+                "kaya: {who} is the base of {layers} and declares `place` — the base is the box the \
+                 overlays are placed in; place belongs on the children after it ({plan} LY3)"
+            )),
+            Some((layers, 0)) if self.fill => Some(format!(
+                "kaya: {who} is the base of {layers} and declares `fill` — the base sizes the box; \
+                 put fill on {layers} itself ({plan} LY2)"
+            )),
+            Some((layers, _)) if self.grow => Some(format!(
+                "kaya: {who} is a child of {layers} and declares `grow` — a layers child takes no \
+                 weight; put grow on {layers} itself ({plan} LY10)"
+            )),
+            Some((layers, i)) if i > 0 && self.bleed => Some(format!(
+                "kaya: {who} is an overlay of {layers} and declares `bleed` — overlays are placed \
+                 inside the safe area; only the base may bleed ({plan} LY10)"
+            )),
+            Some(_) => None,
+        }
+    }
+}
+
+/// The edge a fade panel darkens toward, as a place (LY9): an overlay's own
+/// place read as its nearest edge, the centre and the corners' vertical edge.
+fn fade_edge(place: i64) -> i64 {
+    match place {
+        1..=3 => 2,
+        4 => 4,
+        6 => 6,
+        _ => 8,
+    }
 }
 
 /// A stamped image as N8 reads it (docs/network-images-plan.md).
@@ -1735,6 +1835,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
                     | WidgetKind::Grid
                     | WidgetKind::Labeled
                     | WidgetKind::Expander
+                    | WidgetKind::Layers
             )
         }
         // The grid's own shape: how many columns children fill
@@ -1803,9 +1904,13 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
                 | WidgetKind::Row
                 | WidgetKind::Column
                 | WidgetKind::Textarea
+                | WidgetKind::Layers
         ),
         Prop::MaxHeight => kind == WidgetKind::Image,
         Prop::Titled => kind == WidgetKind::Button,
+        // Any child of a layers container but its base, held at the end of
+        // the transaction (docs/layering-plan.md LY3).
+        Prop::Place => true,
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -2797,7 +2902,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Expanded => ValueType::Bool,
         Prop::Bleed => ValueType::Bool,
         Prop::Phase => ValueType::I64,
-        Prop::Ground | Prop::Shape | Prop::Tint => ValueType::I64,
+        Prop::Ground | Prop::Shape | Prop::Tint | Prop::Place => ValueType::I64,
         Prop::Selected | Prop::Activatable | Prop::Hidden => ValueType::Bool,
         Prop::LineNumbers | Prop::Monospaced => ValueType::Bool,
         Prop::Family => ValueType::Str,
@@ -3633,15 +3738,22 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     }
     if let (Prop::Filled, Value::I64(tint)) = (prop, value) {
         assert!(
-            (1..=7).contains(tint),
+            (1..=8).contains(tint),
             "kaya: filled takes a tint (accent=1, success=2, warning=3, critical=4, neutral=5, \
-             overlay=6, color=7), got {tint}"
+             overlay=6, color=7, overlay_fade=8), got {tint}"
         );
     }
     if let (Prop::Ground, Value::I64(ground)) = (prop, value) {
         assert!(
             crate::wire::vocab_name(crate::wire::GROUNDS, *ground).is_some(),
             "kaya: ground is none (0), gradient (1) or image (2), got {ground}"
+        );
+    }
+    if let (Prop::Place, Value::I64(place)) = (prop, value) {
+        assert!(
+            crate::wire::vocab_name(crate::wire::PLACES, *place).is_some(),
+            "kaya: place is top_leading (1), top (2), top_trailing (3), leading (4), center (5), \
+             trailing (6), bottom_leading (7), bottom (8) or bottom_trailing (9), got {place}"
         );
     }
     if let (Prop::Shape, Value::I64(shape)) = (prop, value) {
@@ -4147,7 +4259,135 @@ impl Scene {
                 }
             }
         }
+        for (layers, kids) in &self.children_of {
+            if self.widgets.get(layers) != Some(&WidgetKind::Layers) {
+                continue;
+            }
+            let Some(base) = kids.first() else { continue };
+            let Some(base_kind) = self.widgets.get(base).copied() else { continue };
+            let picture = is_picture_kind(base_kind)
+                || self.skin_boxes.get(base).is_some_and(|b| b.ground == Some(crate::wire::GROUND_IMAGE));
+            if !picture {
+                continue;
+            }
+            let mut stack: Vec<WidgetId> = kids[1..].to_vec();
+            while let Some(id) = stack.pop() {
+                let Some(kind) = self.widgets.get(&id).copied() else { continue };
+                if is_text_kind(kind) {
+                    return Some(bare_overlay_text_refusal(
+                        &format!("{kind:?} {id:?}"),
+                        &format!("{base_kind:?} {base:?}"),
+                        &format!("layers {layers:?}"),
+                    ));
+                }
+                if !self.skin_boxes.get(&id).is_some_and(SkinBox::covers) {
+                    stack.extend(self.children_of.get(&id).cloned().unwrap_or_default());
+                }
+            }
+        }
         None
+    }
+
+    /// The edge each live fade panel darkens toward (docs/layering-plan.md
+    /// LY9), sent as its `place` when it is not an overlay itself, whose own
+    /// place the backends read.
+    fn emit_fade_edges(&mut self, out: &mut Vec<ApplyOp>) {
+        let panels: Vec<WidgetId> = self
+            .skin_boxes
+            .iter()
+            .filter(|(id, b)| b.fade && self.widgets.contains_key(id))
+            .map(|(id, _)| *id)
+            .collect();
+        for panel in panels {
+            let overlay = self.parent_of.get(&panel).is_some_and(|p| {
+                self.widgets.get(p) == Some(&WidgetKind::Layers) && self.children_of[p].first() != Some(&panel)
+            });
+            if overlay {
+                continue;
+            }
+            let mut edge = 8;
+            let mut node = panel;
+            while let Some(parent) = self.parent_of.get(&node).copied() {
+                let siblings = self.children_of.get(&parent).map_or(&[][..], |c| &c[..]);
+                let index = siblings.iter().position(|c| *c == node).unwrap_or(0);
+                if self.widgets.get(&parent) == Some(&WidgetKind::Layers) && index > 0 {
+                    edge = fade_edge(self.layer_marks.get(&node).and_then(|m| m.place).unwrap_or(crate::wire::PLACE_CENTER));
+                    break;
+                }
+                if self.skin_boxes.get(&parent).is_some_and(|b| b.ground == Some(crate::wire::GROUND_IMAGE)) {
+                    edge = if index == 0 && siblings.len() > 1 { 2 } else { 8 };
+                    break;
+                }
+                node = parent;
+            }
+            if self.fade_edges.insert(panel, edge) != Some(edge) {
+                out.push(ApplyOp::SetProp { id: panel, prop: Prop::Place, value: Value::I64(edge) });
+            }
+        }
+    }
+
+    /// The template twin of [`Self::emit_fade_edges`], on one body's
+    /// blueprint as it closes.
+    fn stamp_fade_edges(body: &mut TplBody) {
+        let mut kinds: HashMap<u64, WidgetKind> = HashMap::new();
+        let mut parent_of: HashMap<u64, u64> = HashMap::new();
+        let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
+        let mut places: HashMap<u64, i64> = HashMap::new();
+        let mut fades: Vec<u64> = Vec::new();
+        let mut image_grounds: HashSet<u64> = HashSet::new();
+        for op in &body.ops {
+            match op {
+                TplOp::Widget { node, kind } => {
+                    kinds.insert(*node, *kind);
+                }
+                TplOp::AddChild { parent, child } => {
+                    parent_of.insert(*child, *parent);
+                    children.entry(*parent).or_default().push(*child);
+                }
+                TplOp::SetProp { node, prop: Prop::Place, value: PropValue::Const(Value::I64(p)) } => {
+                    places.insert(*node, *p);
+                }
+                TplOp::SetProp { node, prop: Prop::Filled, value } => {
+                    let fade = matches!(value, PropValue::Const(Value::I64(v)) if *v == i64::from(crate::wire::TINT_OVERLAY_FADE));
+                    fades.retain(|n| n != node);
+                    if fade {
+                        fades.push(*node);
+                    }
+                }
+                TplOp::SetProp { node, prop: Prop::Ground, value } => {
+                    if matches!(value, PropValue::Const(Value::I64(g)) if *g == crate::wire::GROUND_IMAGE) {
+                        image_grounds.insert(*node);
+                    } else {
+                        image_grounds.remove(node);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let is_overlay = |n: u64| {
+            parent_of.get(&n).is_some_and(|p| kinds.get(p) == Some(&WidgetKind::Layers) && children[p].first() != Some(&n))
+        };
+        for panel in fades {
+            if is_overlay(panel) {
+                continue;
+            }
+            let mut edge = 8;
+            let mut node = panel;
+            while let Some(parent) = parent_of.get(&node).copied() {
+                let siblings = &children[&parent];
+                let index = siblings.iter().position(|c| *c == node).unwrap_or(0);
+                if kinds.get(&parent) == Some(&WidgetKind::Layers) && index > 0 {
+                    edge = fade_edge(places.get(&node).copied().unwrap_or(crate::wire::PLACE_CENTER));
+                    break;
+                }
+                if image_grounds.contains(&parent) {
+                    edge = if index == 0 && siblings.len() > 1 { 2 } else { 8 };
+                    break;
+                }
+                node = parent;
+            }
+            body.ops.push(TplOp::SetProp { node: panel, prop: Prop::Place, value: PropValue::Const(Value::I64(edge)) });
+        }
     }
 
     /// Y3's template twin: the same walk over one body's blueprint.
@@ -4193,6 +4433,59 @@ impl Scene {
             while let Some(id) = stack.pop() {
                 if kinds.get(&id).copied().is_some_and(is_text_kind) {
                     panic!("{}", bare_text_refusal(&format!("template node {id}"), &format!("template node {node}")));
+                }
+                if !boxes.get(&id).is_some_and(SkinBox::covers) {
+                    stack.extend(children.get(&id).cloned().unwrap_or_default());
+                }
+            }
+        }
+        let mut marks: HashMap<u64, LayerMarks> = HashMap::new();
+        let mut parent_of: HashMap<u64, u64> = HashMap::new();
+        for op in &body.ops {
+            match op {
+                TplOp::SetProp { node, prop: prop @ (Prop::Place | Prop::Grow | Prop::Fill | Prop::Bleed), value } => {
+                    marks.entry(*node).or_default().note(*prop, value);
+                }
+                TplOp::AddChild { parent, child } => {
+                    parent_of.insert(*child, *parent);
+                }
+                _ => {}
+            }
+        }
+        for (node, m) in &marks {
+            let parent = parent_of.get(node).copied().filter(|p| kinds.get(p) == Some(&WidgetKind::Layers));
+            let seat = parent.map(|p| {
+                let index = children[&p].iter().position(|c| c == node).unwrap_or(0);
+                (format!("template node {p} (Layers)"), index)
+            });
+            if let Some(why) = m.refusal(
+                &format!("template node {node} ({:?})", kinds.get(node)),
+                seat.as_ref().map(|(n, i)| (n.as_str(), *i)),
+            ) {
+                panic!("{why}");
+            }
+        }
+        for (layers, kids) in &children {
+            if kinds.get(layers) != Some(&WidgetKind::Layers) {
+                continue;
+            }
+            let Some(base) = kids.first() else { continue };
+            let picture = kinds.get(base).copied().is_some_and(is_picture_kind)
+                || boxes.get(base).is_some_and(|b| b.ground == Some(crate::wire::GROUND_IMAGE));
+            if !picture {
+                continue;
+            }
+            let mut stack: Vec<u64> = kids[1..].to_vec();
+            while let Some(id) = stack.pop() {
+                if kinds.get(&id).copied().is_some_and(is_text_kind) {
+                    panic!(
+                        "{}",
+                        bare_overlay_text_refusal(
+                            &format!("template node {id}"),
+                            &format!("template node {base}"),
+                            &format!("template node {layers} (Layers)"),
+                        )
+                    );
                 }
                 if !boxes.get(&id).is_some_and(SkinBox::covers) {
                     stack.extend(children.get(&id).cloned().unwrap_or_default());
@@ -4677,6 +4970,13 @@ impl Scene {
                         .get(&widget)
                         .unwrap_or_else(|| panic!("kaya: property on unknown widget {widget:?}"));
                     check_prop(kind, prop);
+                    if matches!(prop, Prop::Place | Prop::Grow | Prop::Fill | Prop::Bleed) {
+                        self.layer_marks.entry(widget).or_default().note(prop, &value);
+                        self.layers_dirty.push(widget);
+                        if prop == Prop::Place {
+                            self.skin_text_dirty = true;
+                        }
+                    }
                     if kind == WidgetKind::Image {
                         self.image_boxes.entry(widget).or_default().note(prop, &value);
                         if !self.image_box_dirty.contains(&widget) {
@@ -6032,6 +6332,17 @@ impl Scene {
                     );
                     self.parent_of.insert(child, parent);
                     self.children_of.entry(parent).or_default().push(child);
+                    if self.widgets[&parent] == WidgetKind::Layers {
+                        self.layers_dirty.push(child);
+                        let overlay = self.children_of[&parent].len() > 1;
+                        if overlay && !self.layer_marks.get(&child).is_some_and(|m| m.placed) {
+                            out.push(ApplyOp::SetProp {
+                                id: child,
+                                prop: Prop::Place,
+                                value: Value::I64(crate::wire::PLACE_CENTER),
+                            });
+                        }
+                    }
                     if self.widgets[&parent] == WidgetKind::Labeled
                         && !self.labeled_dirty.contains(&parent)
                     {
@@ -6888,6 +7199,19 @@ impl Scene {
         if !skin_dirty.is_empty() || self.skin_text_dirty {
             self.skin_text_dirty = false;
             if let Some(why) = self.bare_text_on_image() {
+                panic!("{why}");
+            }
+            self.emit_fade_edges(&mut out);
+        }
+        for id in std::mem::take(&mut self.layers_dirty) {
+            let Some(kind) = self.widgets.get(&id).copied() else { continue };
+            let marks = self.layer_marks.get(&id).copied().unwrap_or_default();
+            let parent = self.parent_of.get(&id).copied().filter(|p| self.widgets.get(p) == Some(&WidgetKind::Layers));
+            let seat = parent.map(|p| {
+                let index = self.children_of[&p].iter().position(|c| *c == id).unwrap_or(0);
+                (format!("layers {p:?}"), index)
+            });
+            if let Some(why) = marks.refusal(&format!("{kind:?} {id:?}"), seat.as_ref().map(|(n, i)| (n.as_str(), *i))) {
                 panic!("{why}");
             }
         }
@@ -10294,10 +10618,22 @@ impl Scene {
                 }
                 top.current.childed.push(child.0);
                 let top = scopes.last_mut().unwrap();
+                let overlay = parent_kind == WidgetKind::Layers
+                    && top.current.ops.iter().any(|op| matches!(op, TplOp::AddChild { parent: p, .. } if *p == parent.0));
+                let placed = top.current.ops.iter().any(
+                    |op| matches!(op, TplOp::SetProp { node, prop: Prop::Place, .. } if *node == child.0),
+                );
                 top.current.ops.push(TplOp::AddChild {
                     parent: parent.0,
                     child: child.0,
                 });
+                if overlay && !placed {
+                    top.current.ops.push(TplOp::SetProp {
+                        node: child.0,
+                        prop: Prop::Place,
+                        value: PropValue::Const(Value::I64(crate::wire::PLACE_CENTER)),
+                    });
+                }
             }
             TxOp::CreateCollection { id, variants } => {
                 Self::check_variants(id, &variants);
@@ -10391,7 +10727,17 @@ impl Scene {
             }
             TxOp::TemplateEnd => {
                 let closed = scopes.pop().unwrap();
-                let bodies = self.close_scope_bodies(closed);
+                let mut bodies = self.close_scope_bodies(closed);
+                match &mut bodies {
+                    ClosedScope::For { bodies, .. } => {
+                        for body in bodies.iter_mut() {
+                            Self::stamp_fade_edges(Arc::get_mut(body).expect("a closing body is unshared"));
+                        }
+                    }
+                    ClosedScope::When { body, .. } => {
+                        Self::stamp_fade_edges(Arc::get_mut(body).expect("a closing body is unshared"));
+                    }
+                }
                 let in_for = scopes.iter().any(|s| matches!(s.header, ScopeHeader::For { .. }));
                 match &bodies {
                     ClosedScope::For { bodies, .. } => {
@@ -14764,7 +15110,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "filled takes a tint")]
     fn a_filled_row_refuses_a_value_outside_the_tints() {
-        declare(WidgetKind::Row, Prop::Filled, 8);
+        declare(WidgetKind::Row, Prop::Filled, 9);
     }
 
     #[test]
@@ -25280,6 +25626,228 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
             .expect("a live row carries its tag");
         assert_eq!(crate::wire::decode_activated_tag(&tag), Occurrence::Activated { id: WidgetId(1) });
     }
+    /// docs/layering-plan.md: a widget, a set and an add in one line each.
+    fn w(id: u64, kind: WidgetKind) -> TxOp {
+        TxOp::CreateWidget { id: WidgetId(id), kind }
+    }
+
+    fn add(parent: u64, child: u64) -> TxOp {
+        TxOp::AddChild { parent: WidgetId(parent), child: WidgetId(child) }
+    }
+
+    fn mounted(mut tx: Transaction, root: u64) -> Transaction {
+        tx.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(root) });
+        tx
+    }
+
+    fn layers_refusal(tx: Transaction) -> String {
+        panic_text(
+            std::panic::catch_unwind(move || {
+                Scene::new().apply(tx);
+            })
+            .expect_err("the root admitted what LY2, LY3, LY9 or LY10 refuse"),
+        )
+    }
+
+    fn places(ops: &[ApplyOp]) -> Vec<(u64, i64)> {
+        ops.iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetProp { id, prop: Prop::Place, value: Value::I64(p) } => Some((id.0, *p)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// LY3: every overlay gets `center` from the core as it joins, the app's
+    /// own place follows it in the stream, and the base gets none.
+    #[test]
+    fn an_overlay_is_centred_by_the_core_and_its_own_place_follows() {
+        let ops = Scene::new().apply(mounted(
+            vec![
+                w(1, WidgetKind::Layers),
+                w(2, WidgetKind::Button),
+                add(1, 2),
+                w(3, WidgetKind::Button),
+                add(1, 3),
+                w(4, WidgetKind::Button),
+                add(1, 4),
+                set(4, Prop::Place, Value::I64(9)),
+            ],
+            1,
+        ));
+        assert_eq!(places(&ops), vec![(3, 5), (4, 5), (4, 9)]);
+    }
+
+    /// LY2, LY3, LY10: each pairing dies at the end of the transaction naming
+    /// the widget, its parent and where the prop belongs; the container's own
+    /// layout props are refused by kind.
+    #[test]
+    fn the_layers_pairings_are_refused_by_name() {
+        let base_and_overlay = |props: Vec<TxOp>| {
+            let mut tx = vec![w(1, WidgetKind::Layers), w(2, WidgetKind::Image), add(1, 2), w(3, WidgetKind::Button), add(1, 3)];
+            tx.extend(props);
+            mounted(tx, 1)
+        };
+        let cases: Vec<(Transaction, &str)> = vec![
+            (base_and_overlay(vec![set(2, Prop::Place, Value::I64(1))]), "is the base of layers WidgetId(1) and declares `place`"),
+            (base_and_overlay(vec![set(2, Prop::Fill, Value::Bool(true))]), "is the base of layers WidgetId(1) and declares `fill`"),
+            (base_and_overlay(vec![set(3, Prop::Grow, Value::F64(1.0))]), "declares `grow` — a layers child takes no weight"),
+            (base_and_overlay(vec![set(2, Prop::Grow, Value::F64(1.0))]), "put grow on layers WidgetId(1) itself"),
+            (base_and_overlay(vec![w(4, WidgetKind::Image), add(1, 4), set(4, Prop::Bleed, Value::Bool(true))]), "only the base may bleed"),
+            (
+                mounted(vec![w(1, WidgetKind::Column), w(2, WidgetKind::Button), add(1, 2), set(2, Prop::Place, Value::I64(9))], 1),
+                "Button WidgetId(2) declares `place` and is not an overlay",
+            ),
+        ];
+        for (tx, want) in cases {
+            let msg = layers_refusal(tx);
+            assert!(msg.contains(want) && msg.contains("layering-plan.md"), "wanted {want:?}: {msg}");
+        }
+        for prop in [Prop::Spacing, Prop::Align, Prop::Axis, Prop::Wrap, Prop::Filled, Prop::Ground, Prop::Activatable] {
+            assert!(std::panic::catch_unwind(|| check_prop(WidgetKind::Layers, prop)).is_err(), "{prop:?}");
+        }
+        for prop in [Prop::Inset, Prop::InsetX, Prop::MaxWidth, Prop::Grow, Prop::Fill, Prop::Place] {
+            check_prop(WidgetKind::Layers, prop);
+        }
+        Scene::new().apply(base_and_overlay(vec![set(2, Prop::Bleed, Value::Bool(true)), set(3, Prop::Fill, Value::Bool(true))]));
+        let msg = panic_text(std::panic::catch_unwind(|| declare(WidgetKind::Button, Prop::Place, 10)).unwrap_err());
+        assert!(msg.contains("place is top_leading (1)"), "{msg}");
+    }
+
+    /// LY3 in the template zone: the same pairings, and the core's centre.
+    #[test]
+    fn a_stamped_layers_holds_the_same_pairings() {
+        let stamped = |place_on: u64| {
+            vec![
+                w(1, WidgetKind::Column),
+                TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+                TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+                w(10, WidgetKind::Layers),
+                w(11, WidgetKind::Image),
+                add(10, 11),
+                w(12, WidgetKind::Button),
+                add(10, 12),
+                set(place_on, Prop::Place, Value::I64(3)),
+                TxOp::TemplateEnd,
+                TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+                TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            ]
+        };
+        Scene::new().apply(stamped(12));
+        let msg = layers_refusal(stamped(11));
+        assert!(msg.contains("template node 11") && msg.contains("is the base of template node 10"), "{msg}");
+    }
+
+    /// LY9: text over a picture base sits in a filled container, both fill
+    /// forms standing; a button stays legal bare; the refusal names the label,
+    /// in both zones.
+    #[test]
+    fn bare_text_over_a_picture_base_is_refused_in_both_zones() {
+        let call = |fill: Option<u32>, base: WidgetKind| {
+            let mut tx = vec![w(1, WidgetKind::Layers), w(2, base), add(1, 2), w(3, WidgetKind::Row), add(1, 3), w(4, WidgetKind::Label), add(3, 4)];
+            if let Some(tint) = fill {
+                tx.push(set(3, Prop::Filled, Value::I64(i64::from(tint))));
+            }
+            tx.push(w(5, WidgetKind::Button));
+            tx.push(add(1, 5));
+            mounted(tx, 1)
+        };
+        for base in [WidgetKind::Image, WidgetKind::Video, WidgetKind::Surface, WidgetKind::Canvas] {
+            let msg = layers_refusal(call(None, base));
+            assert!(msg.contains("Label WidgetId(4)") && msg.contains(&format!("{base:?} WidgetId(2)")) && msg.contains("LY9"), "{msg}");
+            Scene::new().apply(call(Some(crate::wire::TINT_OVERLAY), base));
+            Scene::new().apply(call(Some(crate::wire::TINT_OVERLAY_FADE), base));
+        }
+        Scene::new().apply(call(None, WidgetKind::Button));
+        let stamped = |filled: bool| {
+            let mut tx = vec![
+                w(1, WidgetKind::Column),
+                TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+                TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+                w(10, WidgetKind::Layers),
+                w(11, WidgetKind::Image),
+                add(10, 11),
+                w(12, WidgetKind::Column),
+                add(10, 12),
+                w(13, WidgetKind::Label),
+                add(12, 13),
+            ];
+            if filled {
+                tx.push(set(12, Prop::Filled, Value::I64(i64::from(crate::wire::TINT_OVERLAY_FADE))));
+            }
+            tx.extend([TxOp::TemplateEnd, add(1, 2), TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) }]);
+            tx
+        };
+        Scene::new().apply(stamped(true));
+        let msg = layers_refusal(stamped(false));
+        assert!(msg.contains("template node 13") && msg.contains("LY9"), "{msg}");
+    }
+
+    /// LY9: a fade panel that is not an overlay itself is told the edge it
+    /// sits against: its overlay's place, or its seat in an image ground.
+    #[test]
+    fn a_fade_panel_is_told_its_edge() {
+        let fade = Value::I64(i64::from(crate::wire::TINT_OVERLAY_FADE));
+        let ops = Scene::new().apply(mounted(
+            vec![
+                w(1, WidgetKind::Layers),
+                w(2, WidgetKind::Image),
+                add(1, 2),
+                w(3, WidgetKind::Column),
+                add(1, 3),
+                set(3, Prop::Place, Value::I64(3)),
+                w(4, WidgetKind::Row),
+                add(3, 4),
+                set(4, Prop::Filled, fade.clone()),
+                w(5, WidgetKind::Row),
+                add(1, 5),
+                set(5, Prop::Filled, fade.clone()),
+                set(5, Prop::Place, Value::I64(9)),
+            ],
+            1,
+        ));
+        let got = places(&ops);
+        assert!(got.contains(&(4, 2)), "{got:?}");
+        assert!(!got.iter().any(|(id, p)| *id == 5 && *p != 5 && *p != 9), "{got:?}");
+        let art = Value::Blob(crate::protocol::Blob::from(&b"\xff\xd8 art"[..]));
+        let header = |rows: u64| {
+            let mut tx = vec![
+                w(1, WidgetKind::Column),
+                set(1, Prop::Ground, Value::I64(crate::wire::GROUND_IMAGE)),
+                set(1, Prop::Source, art.clone()),
+            ];
+            for id in 2..2 + rows {
+                tx.extend([w(id, WidgetKind::Row), add(1, id), set(id, Prop::Filled, fade.clone())]);
+            }
+            mounted(tx, 1)
+        };
+        assert_eq!(places(&Scene::new().apply(header(1))), vec![(2, 8)]);
+        let mut two = places(&Scene::new().apply(header(2)));
+        two.sort();
+        assert_eq!(two, vec![(2, 2), (3, 8)]);
+    }
+
+    /// The Rust spelling of place agrees with the spec's numbers.
+    #[test]
+    fn the_rust_places_are_the_specs() {
+        use crate::Place;
+        let all = [
+            Place::TopLeading,
+            Place::Top,
+            Place::TopTrailing,
+            Place::Leading,
+            Place::Center,
+            Place::Trailing,
+            Place::BottomLeading,
+            Place::Bottom,
+            Place::BottomTrailing,
+        ];
+        for (place, (n, name)) in all.iter().zip(crate::wire::PLACES) {
+            assert_eq!(*place as i64 + 1, *n, "{name}");
+            assert_eq!(format!("{place:?}").to_lowercase(), name.replace('_', ""));
+        }
+    }
+
 }
 
 #[cfg(test)]
@@ -25338,4 +25906,5 @@ mod slider_max_width_tests {
             TxOp::SetProperty { widget: WidgetId(1), prop: Prop::MaxHeight, value: PropValue::Const(Value::F64(120.0)) },
         ]);
     }
+
 }

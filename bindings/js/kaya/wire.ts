@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x3ab48ce2d4543eacn;
+export const SPEC_HASH = 0x3f0f96117842a9een;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -51,6 +51,7 @@ export const KIND_SEGMENTED = 25;
 export const KIND_EXPANDER = 26;
 export const KIND_SURFACE = 27;
 export const KIND_ICON = 28;
+export const KIND_LAYERS = 29;
 export const DRAW_OP_MOVE_TO = 1;
 export const DRAW_OP_LINE_TO = 2;
 export const DRAW_OP_CLOSE = 3;
@@ -158,6 +159,7 @@ export const PROP_FONT_ITALIC = 74;
 export const PROP_FONT_WIDTH = 75;
 export const PROP_INSET_X = 76;
 export const PROP_TITLED = 77;
+export const PROP_PLACE = 78;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -258,6 +260,16 @@ export const TINT_CRITICAL = 4;
 export const TINT_NEUTRAL = 5;
 export const TINT_OVERLAY = 6;
 export const TINT_COLOR = 7;
+export const TINT_OVERLAY_FADE = 8;
+export const PLACE_TOP_LEADING = 1;
+export const PLACE_TOP = 2;
+export const PLACE_TOP_TRAILING = 3;
+export const PLACE_LEADING = 4;
+export const PLACE_CENTER = 5;
+export const PLACE_TRAILING = 6;
+export const PLACE_BOTTOM_LEADING = 7;
+export const PLACE_BOTTOM = 8;
+export const PLACE_BOTTOM_TRAILING = 9;
 export const GROUND_NONE = 0;
 export const GROUND_GRADIENT = 1;
 export const GROUND_IMAGE = 2;
@@ -3147,6 +3159,24 @@ export function tx_bind_titled(widget_id: number, signal_id: number): Uint8Array
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_titled_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_TITLED); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant place value. */
+export function tx_set_place(widget_id: number, place: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_PLACE); enc.u32(SOURCE_CONST); enc.value(new I64(place));
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound place value. */
+export function tx_bind_place(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_PLACE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_place_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_PLACE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

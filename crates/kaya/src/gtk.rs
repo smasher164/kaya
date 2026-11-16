@@ -6028,6 +6028,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Segmented => core.segmenteds.iter().map(|w| w.clone().upcast()).collect(),
         K::Expander => core.expanders.iter().map(|x| x.control()).collect(),
         K::Icon => core.icons.iter().map(|w| w.clone().upcast()).collect(),
+        K::Layers => Vec::new(),
         K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
@@ -13533,6 +13534,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         K::Segmented => core.segmenteds[resolve(t.index, core.segmenteds.len())].clone().upcast(),
         K::Expander => core.expanders[resolve(t.index, core.expanders.len())].widget(),
         K::Icon => core.icons[resolve(t.index, core.icons.len())].clone().upcast(),
+        K::Layers => crate::depth_stub("layers"),
         K::Entry | K::Textarea | K::Search | K::NumberField | K::SecureField => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
@@ -16895,6 +16897,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.images.push(picture.clone());
                     NativeWidget::Image(picture)
                 }
+                WidgetKind::Layers => crate::depth_stub("layers"),
                 WidgetKind::Icon => {
                     // docs/looks-plan.md §3.1: the symbol arrives as a SetProp;
                     // 16px is GTK's normal icon size, text_scale multiplies it.
@@ -31194,6 +31197,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Segmented => nth!(core.segmenteds),
         K::Expander => try_resolve(target.index, core.expanders.len()).map(|i| core.expanders[i].control()),
         K::Icon => try_resolve(target.index, core.icons.len()).map(|i| core.icons[i].clone().upcast()),
+        K::Layers => None,
         K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
             .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())

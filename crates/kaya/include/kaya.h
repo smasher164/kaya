@@ -1301,6 +1301,8 @@
 
 #define KAYA_KIND_ICON 28
 
+#define KAYA_KIND_LAYERS 29
+
 /**
  * Property keys.
  */
@@ -1367,6 +1369,8 @@
 #define KAYA_PROP_INSET_X 76
 
 #define KAYA_PROP_TITLED 77
+
+#define KAYA_PROP_PLACE 78
 
 /**
  * The arrangement axis (docs/adaptive-layout-plan.md D1): row and
@@ -1955,6 +1959,11 @@
 #define KAYA_TINT_COLOR 7
 
 /**
+ * The overlay panel as a scrim (docs/layering-plan.md LY9).
+ */
+#define KAYA_TINT_OVERLAY_FADE 8
+
+/**
  * The SEMANTIC ICON VOCABULARY (spec enum "symbol"; docs/styling-plan.md
  * D6). A closed set of CONCEPTS each backend maps to its own platform's
  * symbol set; both KAYA_MPROP_SYMBOL and KAYA_SPROP_SYMBOL take them.
@@ -2262,6 +2271,24 @@
 #define KAYA_SHAPE_ROUNDED 1
 
 #define KAYA_SHAPE_CIRCLE 2
+
+#define KAYA_PLACE_TOP_LEADING 1
+
+#define KAYA_PLACE_TOP 2
+
+#define KAYA_PLACE_TOP_TRAILING 3
+
+#define KAYA_PLACE_LEADING 4
+
+#define KAYA_PLACE_CENTER 5
+
+#define KAYA_PLACE_TRAILING 6
+
+#define KAYA_PLACE_BOTTOM_LEADING 7
+
+#define KAYA_PLACE_BOTTOM 8
+
+#define KAYA_PLACE_BOTTOM_TRAILING 9
 
 #define KAYA_CONTENT_TYPE_NONE 0
 

@@ -152,7 +152,7 @@ pub use app::{
     Field, ForScope, Inset, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     PathKey,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
-    CatalogHome, MenuRole, Platform, Role, SizeClass, Shape, Sort, Symbol, SymbolKind, Tint, TintKind, ToggleRef, Tpl, TplSource, Tx,
+    CatalogHome, MenuRole, Platform, Role, SizeClass, Shape, Place, Sort, Symbol, SymbolKind, Tint, TintKind, ToggleRef, Tpl, TplSource, Tx,
     ValueKind,
     props, Dropped, Op, Block, Document, Edit, EditSource, Format, HighlightColor, Kdoc, ListKind, ParagraphAlign, Run, Selection,
     AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, FontDialogRef, FontFutureRef, SaveFutureRef,

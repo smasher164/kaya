@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x3ab48ce2d4543eacL
+let spec_hash = 0x3f0f96117842a9eeL
 let version = "0.0.0"
 
 let value_bool = 1
@@ -74,6 +74,7 @@ let kind_segmented = 25
 let kind_expander = 26
 let kind_surface = 27
 let kind_icon = 28
+let kind_layers = 29
 let draw_op_move_to = 1
 let draw_op_line_to = 2
 let draw_op_close = 3
@@ -181,6 +182,7 @@ let prop_font_italic = 74
 let prop_font_width = 75
 let prop_inset_x = 76
 let prop_titled = 77
+let prop_place = 78
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -281,6 +283,16 @@ let tint_critical = 4
 let tint_neutral = 5
 let tint_overlay = 6
 let tint_color = 7
+let tint_overlay_fade = 8
+let place_top_leading = 1
+let place_top = 2
+let place_top_trailing = 3
+let place_leading = 4
+let place_center = 5
+let place_trailing = 6
+let place_bottom_leading = 7
+let place_bottom = 8
+let place_bottom_trailing = 9
 let ground_none = 0
 let ground_gradient = 1
 let ground_image = 2
@@ -3514,6 +3526,32 @@ let tx_bind_titled_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_titled);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant place value. *)
+let tx_set_place widget_id place =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_place);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (I64 place))
+
+(* set_property with a signal-bound place value. *)
+let tx_bind_place widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_place);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_place_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_place);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
