@@ -12205,11 +12205,38 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
         weak var layer: CALayer?
         let at: String
         let caller: [UInt]
-        init(_ layer: CALayer, _ at: String, _ caller: [UInt]) {
+        let fate: KayaLayerFate
+        init(_ layer: CALayer, _ at: String, _ caller: [UInt], _ fate: KayaLayerFate) {
             self.layer = layer
             self.at = at
             self.caller = caller
+            self.fate = fate
         }
+    }
+
+    /// When and from where an animated layer was released: a sentinel the layer alone
+    /// retains (KayaLayerWake) writes it from its deinit, so a stop UIKit never sent can be
+    /// told from one still to come (docs/traps.md, the stop UIKit loses with its layer).
+    final class KayaLayerFate: @unchecked Sendable {
+        static let key = UnsafeMutableRawPointer.allocate(byteCount: 1, alignment: 1)
+        private let lock = NSLock()
+        private var when: (Date, String, [UInt])?
+        func died() {
+            let at = (Date(), KayaAnimationLedger.clock(), Thread.callStackReturnAddresses.prefix(28).map { $0.uintValue })
+            lock.lock()
+            when = at
+            lock.unlock()
+        }
+        var death: (Date, String, [UInt])? {
+            lock.lock()
+            defer { lock.unlock() }
+            return when
+        }
+    }
+
+    final class KayaLayerWake {
+        let fate = KayaLayerFate()
+        deinit { fate.died() }
     }
 
     final class KayaAnimationLedger: @unchecked Sendable {
@@ -12223,7 +12250,8 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
         private var unmatched = 0
         private var startsPlaced = 0
         private var unplaced: [String: Int] = [:]
-        private var open: [(id: ObjectIdentifier, anim: AnyObject, at: String, step: String, what: String, xctest: Bool, placed: KayaAnimationPlace?)] = []
+        private var open: [(id: ObjectIdentifier, anim: AnyObject, at: String, step: String, what: String, xctest: Bool, placed: KayaAnimationPlace?, began: Date)] = []
+        private var delivered: [String] = []
         private var events: [String] = []
         private var xctestSeen: String?
         private var xctestBlind: [String] = []
@@ -12286,7 +12314,7 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
                 let kind = (what.range(of: " of ").map { String(what[..<$0.lowerBound]) } ?? what) + " in step '\(step)'"
                 if unplaced[kind] != nil || unplaced.count < 40 { unplaced[kind, default: 0] += 1 }
             }
-            open.append((ObjectIdentifier(key), key, Self.clock(), step, what, loaded, place))
+            open.append((ObjectIdentifier(key), key, Self.clock(), step, what, loaded, place, Date()))
             lock.unlock()
             note("start \(what)\(place == nil ? " WITH NO ADD SEEN" : "")")
         }
@@ -12339,11 +12367,16 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
             let site = Thread.isMainThread
                 ? Self.place(layer) : "\(type(of: layer)), added off the main thread"
             let caller = Thread.callStackReturnAddresses.prefix(28).map { $0.uintValue }
-            let entry = KayaAnimationPlace(layer, "\(site) key \(key) at \(Self.clock())", caller)
+            let wake = objc_getAssociatedObject(layer, KayaLayerFate.key) as? KayaLayerWake ?? {
+                let made = KayaLayerWake()
+                objc_setAssociatedObject(layer, KayaLayerFate.key, made, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+                return made
+            }()
+            let entry = KayaAnimationPlace(layer, "\(site) key \(key) at \(Self.clock())", caller, wake.fate)
             objc_setAssociatedObject(anim, KayaAnimationPlace.key, entry, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
         }
 
-        static func symbolicate(_ caller: [UInt]) -> String {
+        static func symbolicate(_ caller: [UInt], keep: Int = 14) -> String {
             let names: [String] = caller.compactMap { pc in
                 var info = Dl_info()
                 guard dladdr(UnsafeRawPointer(bitPattern: pc), &info) != 0 else { return String(format: "0x%lx", pc) }
@@ -12352,13 +12385,22 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
                 return "\(image) \(symbol)"
             }
             let theirs = names.drop { $0.hasPrefix("libkaya_swiftui") || $0.contains("Thread") }
-            return theirs.prefix(14).joined(separator: " < ")
+            return theirs.prefix(keep).joined(separator: " < ")
+        }
+
+        /// A release stack from the first frame past the dealloc machinery.
+        static func releaser(_ caller: [UInt]) -> String {
+            let names = symbolicate(caller, keep: 28).components(separatedBy: " < ")
+            let past = names.prefix(12).lastIndex { $0.hasSuffix(" dealloc]") }.map { $0 + 1 } ?? 0
+            let rest = Array(names[past...].prefix(14))
+            return rest.isEmpty ? "the dealloc machinery alone" : rest.joined(separator: " < ")
         }
 
         static func now(_ place: KayaAnimationPlace?, _ anim: AnyObject, _ listed: [UIWindow]) -> String {
             guard let place else { return "; never seen added through CALayer's addAnimation:forKey:" }
             guard let layer = place.layer else {
-                return "; added to \(place.at); that layer has been deallocated; added from \(symbolicate(place.caller))"
+                let death = place.fate.death.map { "at \($0.1), released from \(releaser($0.2))" } ?? "at a time no sentinel recorded"
+                return "; added to \(place.at); that layer has been deallocated \(death); added from \(symbolicate(place.caller))"
             }
             var root = layer
             while let up = root.superlayer { root = up }
@@ -12374,6 +12416,42 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
             return "; added to \(place.at); that layer now \(whereNow) and "
                 + (carried ? "still carries the animation" : "no longer carries it")
                 + "; added from \(symbolicate(place.caller))"
+        }
+
+        /// docs/traps.md, the stop UIKit loses with its layer: an open start whose layer is
+        /// deallocated gets its stop through UIViewAnimationState's own method 2 s after both its
+        /// end and its layer's death, once, and says so. Main thread.
+        func deliverLost() {
+            let now = Date()
+            lock.lock()
+            let due = open.filter { entry in
+                guard let place = entry.placed, place.layer == nil, let death = place.fate.death,
+                    let anim = entry.anim as? CAAnimation
+                else { return false }
+                let laps = Double(max(anim.repeatCount, 1))
+                let span = anim.duration * laps
+                let end = entry.began.addingTimeInterval(span.isFinite && span < 3600 ? span : 0)
+                return now.timeIntervalSince(max(end, death.0)) >= 2
+            }
+            lock.unlock()
+            let stopSel = NSSelectorFromString("animationDidStop:finished:")
+            typealias Stop = @convention(c) (AnyObject, Selector, AnyObject?, Bool) -> Void
+            for entry in due {
+                guard let anim = entry.anim as? CAAnimation, let state = anim.delegate as AnyObject?,
+                    NSStringFromClass(type(of: state)) == "UIViewAnimationState",
+                    let method = class_getInstanceMethod(type(of: state), stopSel)
+                else { continue }
+                let death = entry.placed?.fate.death
+                let said = "delivered the stop UIKit never sent for \(entry.what), started \(entry.at) "
+                    + "(step '\(entry.step)'), its layer deallocated at \(death?.1 ?? "?") and released from "
+                    + "\(death.map { Self.releaser($0.2) } ?? "?"); added to \(entry.placed?.at ?? "?"); added from "
+                    + Self.symbolicate(entry.placed?.caller ?? [])
+                lock.lock()
+                delivered.append(said)
+                lock.unlock()
+                print("KAYA_HARNESS: animations: \(said)")
+                unsafeBitCast(method_getImplementation(method), to: Stop.self)(state, stopSel, anim, false)
+            }
         }
 
         /// docs/traps.md, XCTest's notifier loaded over an open animation.
@@ -12473,6 +12551,8 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
             } else {
                 adds = "refused: CALayer answers no addAnimation:forKey:"
             }
+            let sweep = Timer(timeInterval: 0.5, repeats: true) { _ in KayaAnimationLedger.shared.deliverLost() }
+            RunLoop.main.add(sweep, forMode: .common)
             installed = "installed"
         }
 
@@ -12498,6 +12578,8 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
                 + "\(startsPlaced) of \(started) starts carried the layer their add read"
                 + (unplaced.isEmpty ? "" : " (the others: "
                     + unplaced.sorted { $0.value > $1.value }.map { "\($0.value) x \($0.key)" }.joined(separator: ", ") + ")")
+            let gave: String = delivered.first.map { " (the first: \($0))" } ?? ""
+            let lost = ", \(delivered.count) stop(s) UIKit never sent delivered for deallocated layers" + gave
             let ring = events
             lock.unlock()
             let lock2 = NSLock()
@@ -12554,7 +12636,7 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
                             + (gotNow[entry.id] ?? ""))
             }
             let more = mine.count > 60 ? ["  open and not listed: \(mine.count - 60) more"] : []
-            return "XCTest's animation tracking \(moment): \(Self.xctest()); \(xctestLoad()); \(head); \(main)"
+            return "XCTest's animation tracking \(moment): \(Self.xctest()); \(xctestLoad()); \(head)\(lost); \(main)"
                 + (lines.isEmpty ? "" : "\n" + (lines + more).joined(separator: "\n"))
                 + (ring.isEmpty ? "" : "\n" + ring.map { "  " + $0 }.joined(separator: "\n"))
         }

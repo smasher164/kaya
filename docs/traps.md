@@ -21153,13 +21153,61 @@ nested MaterialTheme for the panel rewrote the harness's record of the tint
 fills (kayaTintFills, read by expect_fill) with the dark scheme's colours, and
 the badge outside it read "neutral": the record is the app scheme's only.
 
-Compose's tap_at raced a hide under a matrix's load (2026-11-16, matrix at
-6b1ec822, layersdark-compose): `click button@hideveil` wrote the veil hidden,
-the expect on the log passed at once, and `tap_at button@base center` went
-70 ms later after only the batch-quiet wait; the base never answered and the
-fail shot showed the veil gone. The tap was delivered before the frame that
-dropped the veil. tap_at now waits two frames (kayaAwaitFrames, the drag's
-precedent), and every tap_at logs its point, the target's frame and each layer
-frame over the point with its model `hidden` (read back in a held bundle:
-`[9 hidden=false, 11 hidden=true]` at the base tap). Green in every earlier
-run, so this is a race under load, not the panel change.
+## Compose's tap_at raced a hide (measured 2026-11-16)
+
+Matrix at 6b1ec822, `layersdark-compose`: `click button@hideveil` wrote the
+veil hidden, the expect on the log passed at once, and `tap_at button@base
+center` went 43 ms after the click; the base never answered and the fail shot
+showed the veil gone. Compose's `hidden` is snapshot state and KayaLayers drops
+a hidden overlay at COMPOSITION, so the veil leaves the LayoutNode tree only at
+the Recomposer's next pass, on the frame after the snapshot's apply
+notification; kayaTouchTap dispatches through `decorView.dispatchTouchEvent` on
+the UI thread, which hit-tests the tree as it is. Until that pass a hidden
+overlay still takes the touch. Forced: show the veil, wait until it is
+composed, then in ONE UI runnable hide it and dispatch DOWN and UP: red on
+layers-compose and layersdark-compose with "composition at batch #5 of the
+model's #6 at the tap". The two-frame wait 0877371d added usually covers the
+pass but is not anchored to it (the apply notification and the Recomposer's
+frame request are separate hops that can straddle the first frame); with no
+wait at all the four layers legs stayed green in 4 passes at host load 85, so
+the window needs the emulator starved. Now every batch writes its count into
+composition state (kayaBatchState), KayaComposedMark's SideEffect records the
+count each composition applied (kayaComposedBatch), and tap_at waits until a
+composition applied the model's last batch, then two frames for the layout
+(the drag's reason); the same forced hide followed by tap_at's own path was
+green, "caught up in 10 ms". The tap_at log line names the point, the layer
+frames over it with their model `hidden`, and how far the composition lagged
+when asked. GTK (set_visible, an outside injector after two frames), WinUI
+(Visibility, SendInput through the message queue), iOS (the XCUI driver waits
+for idle) and macOS (each kayaAwaitQuiet round trip passes the run loop's
+BeforeWaiting, where SwiftUI commits) have no such window. GUARD: check-verbs'
+LAYERS rows for tap_at's wait, the mark, the batch state and the mark's place,
+four negatives watched red.
+
+## The stop UIKit loses with its layer (measured 2026-11-16)
+
+Three iOS sightings of XCTest's 60 s animations-idle wait carry the same open
+start: an additive `position` spring added through `-[_UIViewAdditiveAnimationAction
+runActionForKey:...]` (SwiftUI's DisplayList geometry update on a
+`_UIInheritedView` under the tab bar's bottom accessory in `music_search-python`,
+the keyboard's InputAccessoryHost in both numberfield legs of 2026-11-03), whose
+layer was DEALLOCATED and whose `animationDidStop:finished:` never came, so
+XCTAnimationsIdleNotifier's count held. Releasing views mid-animation from
+outside (plain, spring, beginFromCurrentState and spring retargets, a hosting
+controller's frame) lost no stop: 8 started, 8 stopped. XCTest swizzles
+UIViewAnimationState when its notifier loads at the driver's attach, after
+kaya's ledger, so XCTest's method is the outermost and calls kaya's; a stop
+swallowed inside kaya's replacement still reached XCTest's counter, and a
+forced loss has to sit outside both. With the stop swallowed there, the next
+`type` sat in XCTest's wait for 60 s exactly as sighted. A sentinel only the
+layer retains records its death (time and the stack past the dealloc frames;
+CA releases a removed layer at `CA::Transaction::commit`), and
+KayaAnimationLedger.deliverLost, on a 0.5 s main-run-loop timer, calls the
+class's current `animationDidStop:finished:` with finished NO for an open start
+whose layer is deallocated, 2 s past both its end and that death, so XCTest's
+counter, kaya's ledger and UIKit's own state all get it once, and prints
+`KAYA_HARNESS: animations: delivered the stop UIKit never sent ...`. The forced
+loss went green with it. A live layer is never touched: the 2026-11-05
+editor-go face (an animation still on a layer in a window) stays open in
+docs/deferred.md. GUARD: check-flightrec NH24 to NH27.
+

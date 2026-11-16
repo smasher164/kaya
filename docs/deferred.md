@@ -1609,7 +1609,7 @@ bytes, modified 5.4 s ago): the platform cancelled a save it had written"
 restored by copy). check-flightrec "iOS save cancel leftovers", NSC1. On the
 next sighting that sentence is the whole reading.
 
-## WATCH — iOS numberfield-swiftui and numberfieldde-swiftui: `press return` found kaya's focus nowhere and no first responder (seen once, both legs of the 0b8e8e42 matrix, 2026-11-03)
+## ~~WATCH — iOS numberfield-swiftui and numberfieldde-swiftui: `press return` found kaya's focus nowhere and no first responder (seen once, both legs of the 0b8e8e42 matrix, 2026-11-03)~~ FIXED 2026-11-16: not the focus. Both bundles (red/20261103T222534Z-016040) read XCTest IN PROGRESS 15 s into the `type_b64`: the driver sat in XCTest's 60 s animations-idle wait on a `CASpringAnimation position 0.3833` added through `_UIViewAdditiveAnimationAction` to the keyboard's InputAccessoryHost layer, which was deallocated before its stop came, and the focus reading came after the wait. The iOS harness now delivers a stop UIKit never sent for a deallocated layer (the INVESTIGATE "XCTest waits 60 s for animations idle" entry below; docs/traps.md, the stop UIKit loses with its layer). GUARD: check-flightrec NH24 to NH27.
 KEY: numberfield-swiftui, numberfieldde-swiftui, press return, the simdrive watcher did not answer, focus is node nowhere, the first responder is nothing, keyboard_done
 
 Run 20261103T222534Z-016040: after `click number_field@amount`, `set_text`,
@@ -17261,8 +17261,8 @@ reads free space. The fix belongs on that path: restart the launcher
 after install, or refuse with the free space and the launcher's pinned
 count named, and it is held by android-leg-order's staging clause.
 
-## INVESTIGATE — XCTest waits 60 s for "animations idle" after a Return that commits a number field and hides the keyboard (iOS, seen 2026-10-08, 10-12, 10-16 and 10-18)
-KEY: animations idle, XCTAnimationsIdleNotifier, isAnimationInProgress, KayaAnimationLedger, KayaAnimationPlace, addAnimation:forKey:, startsPlaced, starts carried the layer their add read, added from, numberfield-swift, kayaDriverSlowReading, system_capture, ios_animation_reading, ios_system_log, ios_crash_reports, Lost connection to the application, timecode rowtime, xcuidrive type_b64
+## INVESTIGATE — XCTest waits 60 s for "animations idle" (iOS, seen 2026-10-08, 10-12, 10-16, 10-18, 11-03, 11-05 and 11-16): the face whose layer was deallocated FIXED 2026-11-16 by delivering the stop UIKit never sent; the 2026-11-05 face, an animation still on a layer in a window, is open
+KEY: animations idle, XCTAnimationsIdleNotifier, isAnimationInProgress, KayaAnimationLedger, KayaAnimationPlace, addAnimation:forKey:, startsPlaced, starts carried the layer their add read, added from, numberfield-swift, kayaDriverSlowReading, system_capture, ios_animation_reading, ios_system_log, ios_crash_reports, Lost connection to the application, timecode rowtime, xcuidrive type_b64, deliverLost, KayaLayerFate, delivered the stop UIKit never sent, _UIViewAdditiveAnimationAction, music_search-python, editor-go UIDropShadowView
 
 docs/traps.md, "The iOS ceiling's stacks, and XCTest's 60 s animations-idle
 wait", has the mechanism and both sightings. Both were the same step:
@@ -17360,6 +17360,39 @@ calling animationDidStart: with nil), so on this leg every real animation's add
 was seen (docs/traps.md, the animations-idle wait). On the next sighting a
 "never seen added" line is a real bypass of addAnimation:forKey:, and an
 "added from" line names the code that started the spring.
+
+THE LOST STOP, 2026-11-16 (matrix #2 at 0877371d, `music_search-python`,
+`dismiss_sheet`'s drag; bundle runs/20261116T145242Z-062584). The drag sat 62 s
+in XCTest's wait ("App animations complete notification not received"), the
+harness's 30 s watcher bound reddened the step, a second dismiss sat again, and
+the runner's `timeout 120` SIGTERMed the app (runningboardd, 07:11:03.484)
+under the still-waiting driver: XCTest's "Lost connection to the application"
+1 s later is that kill, not a cause. The one open start: `CASpringAnimation
+position duration 0.5`, added through `-[_UIViewAdditiveAnimationAction
+runActionForKey:...]` from SwiftUI's DisplayList geometry update to a
+`_UIInheritedView` under the tab bar's bottom accessory (the dock), "that layer
+has been deallocated". The 2026-11-03 numberfield sightings (two legs) read the
+same: an additive `position` spring on the keyboard's InputAccessoryHost layer,
+deallocated. The 10-16 sighting's "on no layer in any window" fits it too.
+UIKit loses the stop of such an animation when its layer goes; releasing views
+mid-animation from outside (plain, spring, retargeted, hosted) did not
+reproduce it, so the trigger is inside UIKit's or SwiftUI's own pass. The
+harness now delivers that stop itself, through UIViewAnimationState's current
+method (XCTest's counter, kaya's ledger, UIKit's bookkeeping), only for an open
+start whose layer is deallocated, 2 s past both its end and the layer's death,
+and prints `KAYA_HARNESS: animations: delivered the stop UIKit never sent ...`
+with the death's time and releasing stack; every reading counts the deliveries.
+A forced loss (the stop swallowed outside XCTest) was red without the delivery,
+XCTest's 60 s wait exactly, and green with it (docs/traps.md, the stop UIKit
+loses with its layer). GUARD: check-flightrec NH24 to NH27.
+
+STILL OPEN, the 2026-11-05 face (red/20261105T075727Z-085979, `editor-go`,
+`savepress`): 78 open starts, the oldest a `CASpringAnimation position 0.5` on
+the `_UIMultiLayer` of a `UIDropShadowView` under `UITransitionView`, "that
+layer now is in UIWindow (hidden false) and still carries the animation". The
+delivery does not touch a live layer. On the next sighting of this face read
+whether the layer's animation is still advancing (its presentation layer) or
+held by a paused or detached layer tree.
 
 ## RULING — should GTK and Windows grow a sidebar a user can drag? (raised 2026-10-25 by the sidebar memory, docs/tasks-s4-plan.md P8)
 

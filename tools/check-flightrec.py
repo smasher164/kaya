@@ -2049,6 +2049,30 @@ def census_ios_hang_record(src):
     if ledger.count("; added from \\(symbolicate(place.caller))") != 2:
         found.append("swift: an open start whose add was seen no longer names the add's caller "
                      "on both of its readings (layer alive, layer deallocated)")
+    lost = ledger[ledger.find("func deliverLost()"):]
+    lost = lost[:lost.find("\n        }\n\n")]
+    for want, why in (
+            ("place.layer == nil, let death = place.fate.death",
+             "only a deallocated layer's start"),
+            ("now.timeIntervalSince(max(end, death.0)) >= 2",
+             "2 s past both its end and its death"),
+            ('NSStringFromClass(type(of: state)) == "UIViewAnimationState"', "UIKit's own state"),
+            ("unsafeBitCast(method_getImplementation(method), to: Stop.self)(state, stopSel, "
+             "anim, false)",
+             "the stop through the class's method, so XCTest and UIKit both get it"),
+            ('print("KAYA_HARNESS: animations: \\(said)")', "each delivery said in the leg log")):
+        if want not in lost:
+            found.append(f"swift: deliverLost lost {why} ({want}) (docs/traps.md, the stop UIKit "
+                         "loses with its layer)")
+    if "RunLoop.main.add(sweep, forMode: .common)" not in ledger or \
+            "KayaAnimationLedger.shared.deliverLost()" not in ledger:
+        found.append("swift: the ledger no longer sweeps for stops UIKit lost with their layer, so "
+                     "XCTest's count holds for 60 s at the next driver request (docs/traps.md, the "
+                     "stop UIKit loses with its layer)")
+    if "deinit { fate.died() }" not in swift or \
+            "objc_setAssociatedObject(layer, KayaLayerFate.key, made," not in ledger:
+        found.append("swift: an animated layer's death is no longer recorded, so a lost stop "
+                     "cannot be told from one still to come")
     if re.search(r"\[ObjectIdentifier: KayaAnimationPlace\]", ledger):
         found.append("swift: KayaAnimationLedger keys an add's layer by the animation's address, "
                      "which a later animation reuses once the first is freed, so a start reads "
@@ -2061,6 +2085,7 @@ def census_ios_hang_record(src):
                 "that layer has been deallocated", "is alive in no window",
                 "a window the scene does not list", "never seen added through",
                 "starts carried the layer their add read", "; added from ",
+                "stop(s) UIKit never sent delivered", ", released from ",
                 " (the others: ", " WITH NO ADD SEEN"):
         if key not in ledger:
             found.append(f"swift: the reading no longer prints {key!r}, which "
@@ -3899,7 +3924,19 @@ for label, rel, pattern, repl, want, check in (
          "starts carried the layer their add read", census_ios_hang_record),
         ("NH23 an open start without its add's caller", SWIFTUI,
          r'\n +\+ "; added from \\\(symbolicate\(place\.caller\)\)"', "",
-         "no longer names the add's caller", census_ios_hang_record)):
+         "no longer names the add's caller", census_ios_hang_record),
+        ("NH24 the lost-stop sweep never scheduled", SWIFTUI,
+         r"^ +RunLoop\.main\.add\(sweep, forMode: \.common\)\n", "",
+         "no longer sweeps for stops UIKit lost", census_ios_hang_record),
+        ("NH25 a stop delivered for a live layer", SWIFTUI,
+         r"place\.layer == nil, let death", "let death", "only a deallocated layer's start",
+         census_ios_hang_record),
+        ("NH26 an animated layer's death never recorded", SWIFTUI,
+         r"deinit \{ fate\.died\(\) \}", "deinit {}", "death is no longer recorded",
+         census_ios_hang_record),
+        ("NH27 a delivery the leg log never hears of", SWIFTUI,
+         r'^ +print\("KAYA_HARNESS: animations: \\\(said\)"\)\n', "",
+         "each delivery said in the leg log", census_ios_hang_record)):
     changed = doctored(rel, pattern, repl, label)
     gate.negative(label, lambda: check(changed), want=want)
 for label, name, want in (("NH13 iOS animations section unwritten", "animations",
@@ -4270,6 +4307,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(309 + (5 if DRIVES else 0))
+gate.negatives_ran(313 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

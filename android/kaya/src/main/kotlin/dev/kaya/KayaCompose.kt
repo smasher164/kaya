@@ -1767,6 +1767,19 @@ val kayaDrawnFindOnMark = HashMap<Long, Int>()
  */
 @Volatile
 var kayaBatches = 0
+
+/** The batch count as composition state, and the last count a composition applied
+ * (docs/traps.md, Compose's tap_at raced a hide): a pointer verb waits until the second
+ * reaches the first, so it hits the tree the model describes. */
+val kayaBatchState = androidx.compose.runtime.mutableIntStateOf(0)
+@Volatile
+var kayaComposedBatch = 0
+
+@Composable
+fun KayaComposedMark() {
+    val batch = kayaBatchState.intValue
+    SideEffect { kayaComposedBatch = batch }
+}
 /** The last `click` verb: its target, the batch count it saw, and when —
  * for expect_title's refusal (the android portfolio WATCH's instrument). */
 var kayaLastClick: Triple<String, Int, Long>? = null
@@ -4844,7 +4857,7 @@ object KayaCompose {
             android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         // The ONE place this backend's theme is installed: every scene,
         // dialog and dropdown is a sub-composition of this one.
-        activity.setContent { KayaAppearance { KayaCompliance { KayaTheme { KayaRoot() } } } }
+        activity.setContent { KayaComposedMark(); KayaAppearance { KayaCompliance { KayaTheme { KayaRoot() } } } }
         // A LIVE DIALOG OUTLIVES THE ACTIVITY THAT LAUNCHED IT: the
         // result belongs to the ActivityRecord, which a recreation
         // keeps, and androidx holds it under the launcher's key
@@ -6559,6 +6572,7 @@ object KayaCompose {
         // moves only once everything in the batch has landed.
         notePresentedChanged()
         kayaBatches += 1
+        kayaBatchState.intValue = kayaBatches
         KayaDiag.note(
             "batch #$kayaBatches records=$records " +
                 "took=${(System.nanoTime() - began) / 1_000_000}ms")
@@ -6754,6 +6768,23 @@ object KayaCompose {
      * drag WATCH, decoded by KAYA_DRAG_EVENT 2026-09-04). A frame that never
      * comes in 10s is said out loud instead.
      */
+    /** Until a composition has applied the last batch, or the sentence why not after 10s
+     * (docs/traps.md, Compose's tap_at raced a hide). */
+    private fun kayaAwaitComposed(): Pair<Boolean, String> {
+        val want = kayaBatches
+        val asked = kayaComposedBatch
+        val began = System.nanoTime()
+        val deadline = began + 10_000_000_000L
+        while (System.nanoTime() < deadline) {
+            if (kayaComposedBatch >= want) {
+                return true to "composition at batch #$asked of the model's #$want when asked, " +
+                    "caught up in ${(System.nanoTime() - began) / 1_000_000} ms"
+            }
+            Thread.sleep(5)
+        }
+        return false to "the composition had applied batch #$kayaComposedBatch, not the model's #$want, after 10s"
+    }
+
     private fun kayaAwaitFrames(activity: ComponentActivity, frames: Int) {
         repeat(frames) { n ->
             val done = java.util.concurrent.CountDownLatch(1)
@@ -17093,8 +17124,9 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         // the window's own touch path; the scene reads which
                         // handler answered with an ordinary expect.
                         kayaAwaitQuiet()
-                        // The last batch drawn first: a veil hidden by it still took the
-                        // tap 70 ms later under a matrix's load (docs/traps.md).
+                        // The last batch composed, then laid out (docs/traps.md, Compose's
+                        // tap_at raced a hide).
+                        val (composed, composing) = kayaAwaitComposed()
                         kayaAwaitFrames(activity, 2)
                         val place = parts.getOrElse(2) { "center" }
                         val at = onUi(activity) {
@@ -17105,10 +17137,11 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             }?.also { pt ->
                                 val over = kayaLayerFrames.filter { (id, r) -> id != node.id && r.contains(pt) }
                                     .map { (id, _) -> "$id hidden=${KayaSceneModel.nodes[id]?.hidden}" }
-                                Log.i("kaya", "KAYA_HARNESS: tap_at ${parts[1]} $place at (${pt.x},${pt.y}) in $frame; layer frames over it: $over")
+                                Log.i("kaya", "KAYA_HARNESS: tap_at ${parts[1]} $place at (${pt.x},${pt.y}) in $frame; layer frames over it: $over; $composing")
                             }
                         }
-                        if (at == null) failures.add("tap_at ${parts[1]} $place: no such target, no frame recorded for it, or no such place")
+                        if (!composed) failures.add("tap_at ${parts[1]} $place: $composing")
+                        else if (at == null) failures.add("tap_at ${parts[1]} $place: no such target, no frame recorded for it, or no such place")
                         else {
                             kayaTouchTap(activity, at.x, at.y)
                             observed.add("tap_at ${parts[1]} $place")

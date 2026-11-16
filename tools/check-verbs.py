@@ -6603,6 +6603,22 @@ LAYERS_SITES = [
     ("gtk.rs", GTK, "the fade panel's light foreground",
      r"\.kaya-filled\.kaya-fade \{", r"\n",
      [r"color: white;"]),
+    # A POINTER VERB HITS THE TREE THE MODEL DESCRIBES (docs/traps.md, Compose's
+    # tap_at raced a hide): Compose drops a hidden overlay at its next
+    # recomposition, so tap_at waits for a composition that applied the last
+    # batch, then two frames for its layout.
+    ("KayaCompose.kt", KOTLIN, "tap_at's wait for the composition",
+     r'"tap_at" -> \{', r"\n                    \}\n",
+     [r"= kayaAwaitComposed\(\)\n\s*kayaAwaitFrames\(activity, 2\)"]),
+    ("KayaCompose.kt", KOTLIN, "the composed batch's mark",
+     r"fun KayaComposedMark\(\)", r"\n}\n",
+     [r"val batch = kayaBatchState\.intValue", r"SideEffect \{ kayaComposedBatch = batch \}"]),
+    ("KayaCompose.kt", KOTLIN, "the batch count as composition state",
+     r"        kayaBatches \+= 1\n", r"\n",
+     [r"kayaBatchState\.intValue = kayaBatches"]),
+    ("KayaCompose.kt", KOTLIN, "the mark in the one composition",
+     r"activity\.setContent \{", r"\n",
+     [r"KayaComposedMark\(\); KayaAppearance"]),
 ]
 
 
@@ -6679,6 +6695,19 @@ for label, rel, pattern, repl, finding in (
      r"(\.kaya-filled\.kaya-fade \{ border-radius: 0px; background-color: transparent; )"
      r"color: white; ", "",
      r"^gtk\.rs's site for the fade panel's light foreground"),
+    ("the compose tap_at without the composition wait", KOTLIN,
+     r"(\n)                        val \(composed, composing\) = kayaAwaitComposed\(\)\n",
+     "                        val (composed, composing) = true to \"\"\n",
+     r"^KayaCompose\.kt's site for tap_at's wait for the composition"),
+    ("the compose mark's side effect cut", KOTLIN,
+     r"(\n)    SideEffect \{ kayaComposedBatch = batch \}", "",
+     r"^KayaCompose\.kt's site for the composed batch's mark"),
+    ("the compose batch count kept out of composition", KOTLIN,
+     r"(        kayaBatches \+= 1\n)        kayaBatchState\.intValue = kayaBatches\n", "",
+     r"^KayaCompose\.kt's site for the batch count as composition state"),
+    ("the compose mark left out of the composition", KOTLIN,
+     r"(activity\.setContent \{ )KayaComposedMark\(\); ", "",
+     r"^KayaCompose\.kt's site for the mark in the one composition"),
 ):
     doctored = perturb(f"layers ({label})", rel, pattern, repl)
     score_or_die(introduced(layers_clauses(**{rel: doctored}), layers_out, finding), label)
