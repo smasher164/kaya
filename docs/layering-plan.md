@@ -534,10 +534,13 @@ container's inset along its edge; the caption's contrast held, 17.1:1 to
 its text sits 10 to 13 pt from the picture's edge (docs/traps.md, the layering
 entries). A fade panel inside an image ground (Y3) is NOT made flush: the
 ground's inset pads all its children, and the panel sits where the column's
-flow puts it, so a middle or nested panel touches no edge. RECOMMEND that a
-flush fade over a picture be spelled as layers (the picture as the base, the
-fade panel as an overlay), and that Y3's fade keep the ground's inset until a
-consumer asks otherwise; for the maintainer.
+flow puts it, so a middle or nested panel touches no edge. RULED 2026-11-17
+as recommended ("alright let's go with your recommendation then"): a flush
+fade over a picture is spelled as layers (the picture as the base, the fade
+panel as an overlay), and Y3's fade keeps the ground's inset. BOTH MECHANISMS
+STAY: in layers the picture sizes the box and the text fits inside it; on an
+image ground the content sizes the box and the picture covers it, which layers
+cannot spell, since its base is always the bottom-most child.
 
 ### LY10. Safe areas, scroll, hidden and grow
 
