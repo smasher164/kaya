@@ -1,6 +1,6 @@
 // The grounds scene (tools/scenes/grounds.steps; docs/styling-pass-plan.md
-// Y2, Y3): an artist header covered by the picture with the name on the
-// platform's panel, at the top of a window giving no inset (on a phone it runs
+// Y2, Y3): an artist header whose name and a short line, on the platform's
+// panel, size the box the picture covers (docs/layering-plan.md LY9), at the top of a window giving no inset (on a phone it runs
 // under the status bar, docs/media-player-plan.md M15), an album header fading
 // from the art's own colour into the page, and a column with no ground.
 package grounds
@@ -20,9 +20,10 @@ func App() *kaya.App {
 		}
 		tx.Mount(tx.Column(func() {
 			tx.Column(func() {
-				tx.Row(func() {
+				tx.Column(func() {
 					tx.LabelText("Miles Davis")
-				}).Filled(kaya.TintOverlay).A11yID("scrim")
+					tx.CaptionText("Trumpeter, bandleader, composer").A11yID("bio")
+				}).Spacing(4).Filled(kaya.TintOverlay).A11yID("scrim")
 			}).Inset(24).GroundImage(art).A11yID("hero")
 			tx.Column(func() {
 				tx.HeadingText("Kind of Blue").A11yID("title")

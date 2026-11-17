@@ -21239,3 +21239,17 @@ loss went green with it. A live layer is never touched: the 2026-11-05
 editor-go face (an animation still on a layer in a window) stays open in
 docs/deferred.md. GUARD: check-flightrec NH24 to NH27.
 
+
+## A template's fade panel refused under LY3 for the place the core stamped (measured 2026-11-17)
+
+In a template body, `stamp_fade_edges` pushed the core's `place` onto every fade
+panel that is not an overlay itself BEFORE `check_skin_template` ran, and the
+template's LY3 check reads every `place` in the body as the app's: a row filled
+`overlay_fade` inside a placed overlay column of a layers died with "template
+node 13 (Some(Row)) declares `place` and is not an overlay", where the same
+tree in the live zone stood (the live edges go out as apply ops, never into
+the marks). Measured with a template twin of the live case in
+`a_fade_panel_is_told_its_edge`, which failed with that sentence; the
+stamping now runs after the template checks (nested bodies close and are
+checked on their own, so no parent check ever sees a stamped place), and the
+same test is the guard.

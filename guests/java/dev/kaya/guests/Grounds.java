@@ -18,12 +18,14 @@ public final class Grounds {
             KayaApp.Signal<String> title = tx.signal("Kind of Blue");
             KayaApp.Signal<String> artist = tx.signal("Miles Davis · 1959");
             KayaApp.Signal<String> name = tx.signal("Miles Davis");
+            KayaApp.Signal<String> bio = tx.signal("Trumpeter, bandleader, composer");
             KayaApp.Signal<String> plain = tx.signal("Plain");
             tx.mount(tx.column(root -> {
                 tx.column(hero -> {
-                    tx.row(scrim -> {
+                    tx.column(scrim -> {
                         tx.label(name);
-                    }).filled(Tint.OVERLAY).a11yId("scrim");
+                        tx.caption(bio).a11yId("bio");
+                    }).spacing(4).filled(Tint.OVERLAY).a11yId("scrim");
                 }).inset(24).groundImage(art).a11yId("hero");
                 tx.column(header -> {
                     tx.heading(title).a11yId("title");

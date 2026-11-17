@@ -18,7 +18,10 @@ main = kayaMain $ \app -> do
         [Spacing 12]
         [ column
             [Inset 24, GroundImage art, A11yId "hero"]
-            [row [Filled TintOverlay, A11yId "scrim"] [labelText "Miles Davis"]],
+            [ column
+                [Spacing 4, Filled TintOverlay, A11yId "scrim"]
+                [labelText "Miles Davis", captionText "Trumpeter, bandleader, composer" [A11yId "bio"]]
+            ],
           column
             [Inset 24, GroundGradient colour, A11yId "header"]
             [headingText "Kind of Blue" [A11yId "title"], captionText "Miles Davis · 1959"],

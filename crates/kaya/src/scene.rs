@@ -1573,8 +1573,8 @@ fn is_text_kind(kind: WidgetKind) -> bool {
 fn bare_text_refusal(text: &str, ground: &str) -> String {
     format!(
         "kaya: {text} sits bare on the image ground of {ground} — text over a picture has no \
-         contrast anyone can promise; put it inside a container `filled` with `overlay` or \
-         `overlay_fade` (docs/styling-pass-plan.md Y3)"
+         contrast anyone can promise; put it inside a container `filled` with `overlay` \
+         (docs/styling-pass-plan.md Y3)"
     )
 }
 
@@ -1584,6 +1584,15 @@ fn bare_overlay_text_refusal(text: &str, base: &str, layers: &str) -> String {
         "kaya: {text} is an overlay of {layers} sitting bare over its picture base {base} — text \
          over a picture has no contrast anyone can promise; put it inside a container `filled` \
          with `overlay` or `overlay_fade` (docs/layering-plan.md LY9)"
+    )
+}
+
+/// LY9, ruled 2026-11-17: an image ground takes flat `overlay` panels only.
+fn fade_on_ground_refusal(panel: &str, ground: &str) -> String {
+    format!(
+        "kaya: {panel} is filled with `overlay_fade` inside the image ground of {ground} — an image \
+         ground takes flat `overlay` panels only; a fade over a picture is spelled as `layers`, \
+         the picture as the base and the fade panel an overlay over it (docs/layering-plan.md LY9)"
     )
 }
 
@@ -4238,14 +4247,34 @@ impl Scene {
 
     /// N3 in the template zone (docs/network-images-plan.md).
     /// Y3 (docs/styling-pass-plan.md): text whose nearest ground is a picture
-    /// sits inside a filled container, or is refused, live zone.
-    fn bare_text_on_image(&self) -> Option<String> {
+    /// sits inside a filled container, or is refused, live zone; and no fade
+    /// panel sits inside an image ground (LY9).
+    fn picture_refusal(&self) -> Option<String> {
         let image_grounds: Vec<WidgetId> = self
             .skin_boxes
             .iter()
             .filter(|(id, b)| b.ground == Some(crate::wire::GROUND_IMAGE) && self.widgets.contains_key(id))
             .map(|(id, _)| *id)
             .collect();
+        let picture_base = |layers: WidgetId| {
+            self.children_of.get(&layers).and_then(|k| k.first()).is_some_and(|base| {
+                self.widgets.get(base).copied().is_some_and(is_picture_kind)
+                    || self.skin_boxes.get(base).is_some_and(|b| b.ground == Some(crate::wire::GROUND_IMAGE))
+            })
+        };
+        for top in &image_grounds {
+            let mut stack: Vec<WidgetId> = self.children_of.get(top).cloned().unwrap_or_default();
+            while let Some(id) = stack.pop() {
+                if self.skin_boxes.get(&id).is_some_and(|b| b.fade) {
+                    let panel = self.widgets.get(&id).map_or_else(|| format!("{id:?}"), |kind| format!("{kind:?} {id:?}"));
+                    return Some(fade_on_ground_refusal(&panel, &format!("{top:?}")));
+                }
+                if self.widgets.get(&id) == Some(&WidgetKind::Layers) && picture_base(id) {
+                    continue;
+                }
+                stack.extend(self.children_of.get(&id).cloned().unwrap_or_default());
+            }
+        }
         for top in image_grounds {
             let mut stack: Vec<WidgetId> = self.children_of.get(&top).cloned().unwrap_or_default();
             while let Some(id) = stack.pop() {
@@ -4314,10 +4343,6 @@ impl Scene {
                     edge = fade_edge(self.layer_marks.get(&node).and_then(|m| m.place).unwrap_or(crate::wire::PLACE_CENTER));
                     break;
                 }
-                if self.skin_boxes.get(&parent).is_some_and(|b| b.ground == Some(crate::wire::GROUND_IMAGE)) {
-                    edge = if index == 0 && siblings.len() > 1 { 2 } else { 8 };
-                    break;
-                }
                 node = parent;
             }
             if self.fade_edges.insert(panel, edge) != Some(edge) {
@@ -4334,7 +4359,6 @@ impl Scene {
         let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
         let mut places: HashMap<u64, i64> = HashMap::new();
         let mut fades: Vec<u64> = Vec::new();
-        let mut image_grounds: HashSet<u64> = HashSet::new();
         for op in &body.ops {
             match op {
                 TplOp::Widget { node, kind } => {
@@ -4354,13 +4378,6 @@ impl Scene {
                         fades.push(*node);
                     }
                 }
-                TplOp::SetProp { node, prop: Prop::Ground, value } => {
-                    if matches!(value, PropValue::Const(Value::I64(g)) if *g == crate::wire::GROUND_IMAGE) {
-                        image_grounds.insert(*node);
-                    } else {
-                        image_grounds.remove(node);
-                    }
-                }
                 _ => {}
             }
         }
@@ -4378,10 +4395,6 @@ impl Scene {
                 let index = siblings.iter().position(|c| *c == node).unwrap_or(0);
                 if kinds.get(&parent) == Some(&WidgetKind::Layers) && index > 0 {
                     edge = fade_edge(places.get(&node).copied().unwrap_or(crate::wire::PLACE_CENTER));
-                    break;
-                }
-                if image_grounds.contains(&parent) {
-                    edge = if index == 0 && siblings.len() > 1 { 2 } else { 8 };
                     break;
                 }
                 node = parent;
@@ -4428,6 +4441,20 @@ impl Scene {
             }
             if b.ground != Some(crate::wire::GROUND_IMAGE) {
                 continue;
+            }
+            let mut stack = children.get(node).cloned().unwrap_or_default();
+            while let Some(id) = stack.pop() {
+                if boxes.get(&id).is_some_and(|b| b.fade) {
+                    panic!("{}", fade_on_ground_refusal(&format!("template node {id}"), &format!("template node {node}")));
+                }
+                let kids = children.get(&id).cloned().unwrap_or_default();
+                let picture_base = kids.first().is_some_and(|base| {
+                    kinds.get(base).copied().is_some_and(is_picture_kind)
+                        || boxes.get(base).is_some_and(|b| b.ground == Some(crate::wire::GROUND_IMAGE))
+                });
+                if !(kinds.get(&id) == Some(&WidgetKind::Layers) && picture_base) {
+                    stack.extend(kids);
+                }
             }
             let mut stack = children.get(node).cloned().unwrap_or_default();
             while let Some(id) = stack.pop() {
@@ -7198,7 +7225,7 @@ impl Scene {
         }
         if !skin_dirty.is_empty() || self.skin_text_dirty {
             self.skin_text_dirty = false;
-            if let Some(why) = self.bare_text_on_image() {
+            if let Some(why) = self.picture_refusal() {
                 panic!("{why}");
             }
             self.emit_fade_edges(&mut out);
@@ -10728,16 +10755,6 @@ impl Scene {
             TxOp::TemplateEnd => {
                 let closed = scopes.pop().unwrap();
                 let mut bodies = self.close_scope_bodies(closed);
-                match &mut bodies {
-                    ClosedScope::For { bodies, .. } => {
-                        for body in bodies.iter_mut() {
-                            Self::stamp_fade_edges(Arc::get_mut(body).expect("a closing body is unshared"));
-                        }
-                    }
-                    ClosedScope::When { body, .. } => {
-                        Self::stamp_fade_edges(Arc::get_mut(body).expect("a closing body is unshared"));
-                    }
-                }
                 let in_for = scopes.iter().any(|s| matches!(s.header, ScopeHeader::For { .. }));
                 match &bodies {
                     ClosedScope::For { bodies, .. } => {
@@ -10759,6 +10776,17 @@ impl Scene {
                         Self::check_icon_template(body);
                         Self::check_image_template(body);
                         Self::check_skin_template(body);
+                    }
+                }
+                // After the checks: a stamped place is the core's, not the app's (docs/traps.md).
+                match &mut bodies {
+                    ClosedScope::For { bodies, .. } => {
+                        for body in bodies.iter_mut() {
+                            Self::stamp_fade_edges(Arc::get_mut(body).expect("a closing body is unshared"));
+                        }
+                    }
+                    ClosedScope::When { body, .. } => {
+                        Self::stamp_fade_edges(Arc::get_mut(body).expect("a closing body is unshared"));
                     }
                 }
                 match (scopes.last_mut(), bodies) {
@@ -25784,7 +25812,7 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
     }
 
     /// LY9: a fade panel that is not an overlay itself is told the edge it
-    /// sits against: its overlay's place, or its seat in an image ground.
+    /// sits against, its overlay's place.
     #[test]
     fn a_fade_panel_is_told_its_edge() {
         let fade = Value::I64(i64::from(crate::wire::TINT_OVERLAY_FADE));
@@ -25809,22 +25837,97 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
         let got = places(&ops);
         assert!(got.contains(&(4, 2)), "{got:?}");
         assert!(!got.iter().any(|(id, p)| *id == 5 && *p != 5 && *p != 9), "{got:?}");
+        Scene::new().apply(vec![
+            w(1, WidgetKind::Column),
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str]] },
+            TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+            w(10, WidgetKind::Layers),
+            w(11, WidgetKind::Image),
+            add(10, 11),
+            w(12, WidgetKind::Column),
+            add(10, 12),
+            set(12, Prop::Place, Value::I64(3)),
+            w(13, WidgetKind::Row),
+            add(12, 13),
+            set(13, Prop::Filled, fade.clone()),
+            TxOp::TemplateEnd,
+            add(1, 2),
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+    }
+
+    /// LY9, ruled 2026-11-17: an image ground takes flat `overlay` panels
+    /// only; a fade anywhere inside it dies naming `layers`, in both zones and
+    /// when a later transaction turns a flat panel into a fade, while a fade
+    /// overlay of a layers whose base is a picture stands inside the ground.
+    #[test]
+    fn a_fade_inside_an_image_ground_is_refused_in_both_zones() {
         let art = Value::Blob(crate::protocol::Blob::from(&b"\xff\xd8 art"[..]));
-        let header = |rows: u64| {
+        let fade = || Value::I64(i64::from(crate::wire::TINT_OVERLAY_FADE));
+        let flat = || Value::I64(i64::from(crate::wire::TINT_OVERLAY));
+        let ground = |nested: bool, panel: Value| {
             let mut tx = vec![
                 w(1, WidgetKind::Column),
                 set(1, Prop::Ground, Value::I64(crate::wire::GROUND_IMAGE)),
                 set(1, Prop::Source, art.clone()),
+                w(2, WidgetKind::Column),
+                add(1, 2),
+                w(3, WidgetKind::Row),
+                add(if nested { 2 } else { 1 }, 3),
+                set(3, Prop::Filled, panel),
+                w(4, WidgetKind::Label),
+                add(3, 4),
             ];
-            for id in 2..2 + rows {
-                tx.extend([w(id, WidgetKind::Row), add(1, id), set(id, Prop::Filled, fade.clone())]);
-            }
+            tx.extend([w(5, WidgetKind::Layers), add(1, 5), w(6, WidgetKind::Image), add(5, 6)]);
+            tx.extend([w(7, WidgetKind::Row), add(5, 7), set(7, Prop::Filled, fade()), w(8, WidgetKind::Label), add(7, 8)]);
             mounted(tx, 1)
         };
-        assert_eq!(places(&Scene::new().apply(header(1))), vec![(2, 8)]);
-        let mut two = places(&Scene::new().apply(header(2)));
-        two.sort();
-        assert_eq!(two, vec![(2, 2), (3, 8)]);
+        Scene::new().apply(ground(false, flat()));
+        for nested in [false, true] {
+            let msg = skin_refusal(ground(nested, fade()));
+            assert!(
+                msg.contains("Row WidgetId(3)") && msg.contains("WidgetId(1)") && msg.contains("`layers`") && msg.contains("LY9"),
+                "{msg}"
+            );
+        }
+        let mut scene = Scene::new();
+        scene.apply(ground(false, flat()));
+        let msg = panic_text(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                scene.apply(vec![set(3, Prop::Filled, fade())]);
+            }))
+            .expect_err("a flat panel turned fade inside an image ground stood"),
+        );
+        assert!(msg.contains("WidgetId(3)") && msg.contains("`layers`"), "{msg}");
+        let stamped = |panel: Value| {
+            let tx = vec![
+                w(1, WidgetKind::Column),
+                TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Blob]] },
+                TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+                w(10, WidgetKind::Column),
+                set(10, Prop::Ground, Value::I64(crate::wire::GROUND_IMAGE)),
+                TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Source, value: PropValue::Element { level: 0, field: 0 } },
+                w(11, WidgetKind::Row),
+                add(10, 11),
+                set(11, Prop::Filled, panel),
+                w(12, WidgetKind::Label),
+                add(11, 12),
+                w(13, WidgetKind::Layers),
+                add(10, 13),
+                w(14, WidgetKind::Image),
+                add(13, 14),
+                w(15, WidgetKind::Row),
+                add(13, 15),
+                set(15, Prop::Filled, fade()),
+                TxOp::TemplateEnd,
+                add(1, 2),
+                TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            ];
+            tx
+        };
+        Scene::new().apply(stamped(flat()));
+        let msg = skin_refusal(stamped(fade()));
+        assert!(msg.contains("template node 11") && msg.contains("template node 10") && msg.contains("`layers`"), "{msg}");
     }
 
     /// The Rust spelling of place agrees with the spec's numbers.

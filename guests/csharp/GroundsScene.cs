@@ -15,16 +15,18 @@ static class GroundsScene
             var title = tx.Signal("Kind of Blue");
             var artist = tx.Signal("Miles Davis · 1959");
             var name = tx.Signal("Miles Davis");
+            var bio = tx.Signal("Trumpeter, bandleader, composer");
             var plain = tx.Signal("Plain");
             tx.Mount(tx.Column(root =>
             {
                 tx.Column(hero =>
                 {
-                    tx.Row(scrim =>
+                    tx.Column(scrim =>
                     {
                         tx.Label(bind: name);
+                        tx.SetA11yId(tx.Caption(bind: bio), "bio");
                         tx.SetA11yId(scrim, "scrim");
-                    }, filled: Tint.Overlay);
+                    }, spacing: 4, filled: Tint.Overlay);
                     tx.SetA11yId(hero, "hero");
                 }, inset: 24, groundImage: art);
                 tx.Column(header =>

@@ -1,6 +1,6 @@
 //! The grounds scene (tools/scenes/grounds.steps; docs/styling-pass-plan.md
-//! Y2, Y3): an artist header covered by the picture with the name on the
-//! platform's panel, at the top of a window giving no inset (on a phone it runs
+//! Y2, Y3): an artist header whose name and a short line, on the platform's
+//! panel, size the box the picture covers (docs/layering-plan.md LY9), at the top of a window giving no inset (on a phone it runs
 //! under the status bar, docs/media-player-plan.md M15), an album header fading
 //! from the art's own colour into the page, and a column with no ground.
 
@@ -12,14 +12,21 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         tx.window(kaya::DEFAULT_WINDOW).title("grounds").size(480.0, 560.0).inset(0.0);
         let art = tx.asset("covers/cover-600.jpg").bytes().to_vec();
         let colour = kaya::image_dominant(&art).expect("the cover decodes");
-        let (title, artist, name, plain) =
-            (tx.signal("Kind of Blue"), tx.signal("Miles Davis · 1959"), tx.signal("Miles Davis"), tx.signal("Plain"));
+        let (title, artist, name, bio, plain) = (
+            tx.signal("Kind of Blue"),
+            tx.signal("Miles Davis · 1959"),
+            tx.signal("Miles Davis"),
+            tx.signal("Trumpeter, bandleader, composer"),
+            tx.signal("Plain"),
+        );
         let root = tx
             .column(|tx| {
                 tx.column(|tx| {
-                    tx.row(|tx| {
+                    tx.column(|tx| {
                         tx.label(name);
+                        tx.caption(bio).a11y_id("bio");
                     })
+                    .spacing(4.0)
                     .filled(Tint::Overlay)
                     .a11y_id("scrim");
                 })

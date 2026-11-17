@@ -10,8 +10,8 @@ light text (white text over it holds at least 5.7:1 on a white picture), no
 corner radius, and an overlay fade panel spans the box along its edge; its
 edge is an overlay's own place read as its nearest edge (a corner's vertical
 edge, the centre's bottom), and a fade panel that is not an overlay itself is
-told its edge by the core as a `place` (its overlay's, or in an image ground
-top when it is the first of several children, else bottom). The reading-order
+told its edge by the core as a `place` (its overlay's, else bottom; an image
+ground refuses the fade since 2026-11-17, LY9). The reading-order
 pin was measured needed on the Mac (unpinned SwiftUI read the overlays before
 the base) and had to be scoped by `.contain` (unscoped, the overlays sank
 below the window's other content); the SwiftUI content shape measured belt
@@ -144,12 +144,11 @@ right. The container props are `spacing`, `align`, `inset` and `inset_x`,
 ### §2.2 What the styling pass already covers (the album header)
 
 Y3 (docs/styling-pass-plan.md) is an image GROUND on a row or column with
-text allowed only inside an `overlay` fill; tools/scenes/grounds.steps'
-artist header is exactly "the name on a panel at the foot of the picture".
-The music app's album header, a title over the art, IS COVERED by Y3: the
-art is the column's ground, the title sits in a filled `overlay` row inside
-it, and the column's own layout places it. Layering adds nothing there and
-the music app should not move to it. Layering is needed where the thing
+text allowed only inside an `overlay` fill: a BACKDROP, the content sizing the
+box and the picture covering it, which tools/scenes/grounds.steps' artist
+header models (a name and a short line on a flat panel). The music app's
+artist header is that shape and stays on Y3. A fade over a picture is not:
+it is spelled as layers, the picture the base (LY9, ruled 2026-11-17). Layering is needed where the thing
 underneath is a WIDGET (a video, a surface, a canvas, a button, a list) or
 where the thing on top must sit at a corner independent of the base's own
 layout: the call's self-view, a badge over an avatar, a loading veil over a
@@ -248,7 +247,7 @@ The lowering, per backend (a sketch for the build; §6 rules the semantics):
   `layers`, or on the base; `grow` on any child of `layers` (the container
   carries it); `fill` on the base. Each sentence names the widget, its
   parent and the remedy. Unit tests for every refusal, live and template.
-- **Text over a picture** (LY9): `bare_text_on_image` in crates/kaya/src/scene.rs
+- **Text over a picture** (LY9): `picture_refusal` in crates/kaya/src/scene.rs
   and its template twin `check_skin_template` widen from image grounds to
   overlays over a picture base, so the scene dies naming the label; unit
   tests both zones.
@@ -541,6 +540,22 @@ panel as an overlay), and Y3's fade keeps the ground's inset. BOTH MECHANISMS
 STAY: in layers the picture sizes the box and the text fits inside it; on an
 image ground the content sizes the box and the picture covers it, which layers
 cannot spell, since its base is always the bottom-most child.
+
+RULED 2026-11-17 (the maintainer, after the artist header side by side,
+claude.ai/artifact/WK523qe7o7DzjdEbdQjMP6: "sounds good"): KEEP BOTH, AND THE
+FADE IS LAYERS'. Use layers when the picture is the subject and sizes the box,
+and what sits on it must not change its shape (album art with a title, a
+video with controls, the call's self-view, a badge). Use an image ground when
+the picture is a backdrop and the content sizes the box, the picture covering
+whatever size that is (the artist header with a bio of any length, the chat
+wallpaper, a form on a photo). The root REFUSES `overlay_fade` anywhere inside
+an image ground, both zones, naming the panel, the ground and `layers`; an
+image ground takes flat `overlay` panels only, and a layers inside it whose
+base is a picture keeps its own fade overlays. This reverses the 2026-11-16
+ruling above that the fade reaches Y3, and Y3's fade keeping the ground's
+inset is moot. Guard: scene.rs's `picture_refusal` and `check_skin_template`,
+unit test `a_fade_inside_an_image_ground_is_refused_in_both_zones`, each zone
+watched red with its check cut; the grounds scene's hero became a backdrop.
 
 ### LY10. Safe areas, scroll, hidden and grow
 

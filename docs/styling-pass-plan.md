@@ -415,6 +415,10 @@ blur radius or scrim opacity knob; a video as a ground.
 AMENDED 2026-11-16 (docs/layering-plan.md LY9, ruled B): the `overlay` fill
 gains a fade form, a gradient scrim darkening toward the picture's edge the
 panel sits against, its darkness kaya's; still no opacity knob.
+AMENDED 2026-11-17 (docs/layering-plan.md LY9's last ruling, "sounds good"):
+the fade form is REFUSED inside an image ground, both zones, the error naming
+`layers`; an image ground is a backdrop the content sizes and takes flat
+`overlay` panels only, and a fade over a picture is spelled as layers.
 
 ### Y4: A container that takes a click as a whole, with the platform's hover and selection (RULED 2026-10-15)
 

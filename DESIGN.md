@@ -1196,7 +1196,10 @@ offered at most the box less the inset and clipped to it, `fill` spanning
 it. Declaration order is z-order; an overlay takes every pointer event in its
 own box; assistive technology reads the base, then the overlays as declared,
 pinned on every platform. Text over a picture base sits in a `filled`
-container (Y3 reaches overlays). `bleed` is the base's alone and no child of
+container (Y3 reaches overlays). Layers is for a picture that sizes the box;
+an image ground (Y3) is a backdrop the content sizes, so its panels are flat
+`overlay` fills and the root refuses `overlay_fade` inside it: a fade over a
+picture is spelled as layers (LY9). `bleed` is the base's alone and no child of
 layers takes `grow`. SwiftUI lowers it to the base's `.overlay` over a ZStack
 of placed overlays, Compose to a wrap-content Box with matchParentSize hosts,
 GTK to a GtkOverlay, WinUI to a one-cell Grid with a host sized to the base.

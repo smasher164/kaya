@@ -11,8 +11,9 @@ KayaApp.run { app in
         tx.window(title: "grounds", width: 480, height: 560, inset: 0)
         let root = tx.column(spacing: 12) { root in
             tx.column(inset: 24) { hero in
-                tx.row(filled: .overlay) { scrim in
+                tx.column(spacing: 4, filled: .overlay) { scrim in
                     tx.label("Miles Davis")
+                    tx.setA11yId(tx.caption("Trumpeter, bandleader, composer"), "bio")
                     tx.setA11yId(scrim, "scrim")
                 }
                 tx.setGroundImage(hero, art)

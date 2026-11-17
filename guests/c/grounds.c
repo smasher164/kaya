@@ -1,7 +1,7 @@
 /* The grounds scene (tools/scenes/grounds.steps; docs/styling-pass-plan.md
  * Y2, Y3) with every field explicit: the gradient ground as the `ground`
  * enum beside the `color` the core's kaya_image_dominant answers, the image
- * ground beside its `source`, the name on an `overlay` fill. See
+ * ground beside its `source`, the name and a short line on an `overlay` fill. See
  * guests/rust/grounds.rs. */
 
 #include <kaya.h>
@@ -22,6 +22,7 @@
 #define W_NAME 7
 #define W_PLAIN 8
 #define W_PLAIN_TEXT 9
+#define W_BIO 10
 
 static void submit(KayaTx *tx) {
     if (!kaya_tx_ok(tx)) {
@@ -79,12 +80,19 @@ static void build_scene(void) {
     kaya_tx_set_color(&tx, W_HEADER, (uint8_t)(rgb >> 16), (uint8_t)(rgb >> 8), (uint8_t)rgb, 0xFF);
     kaya_tx_set_a11y_id(&tx, W_HEADER, "header");
 
-    /* The hero: the picture as the ground, the name on the overlay panel. */
+    /* The hero: the picture as the ground, the name and a short line on the
+     * overlay panel, which size the box the picture covers. */
     kaya_tx_create_widget(&tx, W_HERO, KAYA_KIND_COLUMN);
-    kaya_tx_create_widget(&tx, W_SCRIM, KAYA_KIND_ROW);
+    kaya_tx_create_widget(&tx, W_SCRIM, KAYA_KIND_COLUMN);
+    kaya_tx_set_spacing(&tx, W_SCRIM, 4.0);
     kaya_tx_create_widget(&tx, W_NAME, KAYA_KIND_LABEL);
     kaya_tx_set_text(&tx, W_NAME, "Miles Davis");
     kaya_tx_add_child(&tx, W_SCRIM, W_NAME);
+    kaya_tx_create_widget(&tx, W_BIO, KAYA_KIND_LABEL);
+    kaya_tx_set_text(&tx, W_BIO, "Trumpeter, bandleader, composer");
+    kaya_tx_set_role(&tx, W_BIO, KAYA_ROLE_CAPTION);
+    kaya_tx_set_a11y_id(&tx, W_BIO, "bio");
+    kaya_tx_add_child(&tx, W_SCRIM, W_BIO);
     kaya_tx_set_filled(&tx, W_SCRIM, KAYA_TINT_OVERLAY);
     kaya_tx_set_a11y_id(&tx, W_SCRIM, "scrim");
     kaya_tx_add_child(&tx, W_HERO, W_SCRIM);

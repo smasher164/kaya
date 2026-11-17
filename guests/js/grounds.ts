@@ -1,6 +1,6 @@
 // The grounds scene (tools/scenes/grounds.steps; docs/styling-pass-plan.md
-// Y2, Y3): an artist header covered by the picture with the name on the
-// platform's panel, at the top of a window giving no inset (on a phone it runs
+// Y2, Y3): an artist header whose name and a short line, on the platform's
+// panel, size the box the picture covers (docs/layering-plan.md LY9), at the top of a window giving no inset (on a phone it runs
 // under the status bar, docs/media-player-plan.md M15), an album header fading
 // from the art's own colour into the page, and a column with no ground. See guests/rust/grounds.rs.
 
@@ -15,9 +15,10 @@ app.window({ title: "grounds", width: 480, height: 560, inset: 0 }, () => {
   kaya.column({ spacing: 12 }, () => {
     kaya.column({ inset: 24, groundImage: art }, (hero) => {
       hero.a11yId("hero");
-      kaya.row({ filled: "overlay" }, (scrim) => {
+      kaya.column({ spacing: 4, filled: "overlay" }, (scrim) => {
         scrim.a11yId("scrim");
         kaya.label("Miles Davis");
+        kaya.caption("Trumpeter, bandleader, composer").a11yId("bio");
       });
     });
     kaya.column({ inset: 24, groundGradient: colour }, (header) => {
