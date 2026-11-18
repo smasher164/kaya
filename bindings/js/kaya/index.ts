@@ -2791,6 +2791,14 @@ export class PickedFile {
     return runtime.readPicked(this.handle);
   }
 
+  /** A durable reference to this file (docs/restoration-plan.md SR11),
+   * redeemed at a later launch by `redeem`; throws KayaReferenceError. */
+  reference(): string {
+    const [code, text] = runtime.referenceMint(this.handle);
+    if (code !== 0) throw new KayaReferenceError(code, text);
+    return text;
+  }
+
   /** Replace the file's content — what a save dialog's answer opens as
    * (docs/save-plan.md D1). A string is written as UTF-8. BLOCKS. */
   write(bytes: Uint8Array | string): void {
@@ -4450,6 +4458,99 @@ const thePrefs: Prefs = Object.freeze({
 /** The app's preferences store — one per process. */
 export function prefs(): Prefs {
   return thePrefs;
+}
+
+function sessionKey(key: string): string {
+  if (key === "") throw new Error("kaya: a session key must not be empty");
+  return key;
+}
+
+function sessionWriteKey(key: string): string {
+  sessionKey(key);
+  if (key.startsWith("kaya.")) {
+    throw new Error(`kaya: session key "${key}" is reserved (the kaya. prefix is kaya's own)`);
+  }
+  return key;
+}
+
+function sessionScope(scope: number, id: number): Prefs {
+  return Object.freeze({
+    getString: (key: string, def: string): string => (runtime.sessionGet(scope, id, sessionKey(key), 0) as string | undefined) ?? def,
+    getI64: (key: string, def: number): number => (runtime.sessionGet(scope, id, sessionKey(key), 1) as number | undefined) ?? def,
+    getF64: (key: string, def: number): number => (runtime.sessionGet(scope, id, sessionKey(key), 2) as number | undefined) ?? def,
+    getBool: (key: string, def: boolean): boolean => (runtime.sessionGet(scope, id, sessionKey(key), 3) as boolean | undefined) ?? def,
+    setString: (key: string, value: string): void => runtime.sessionSet(scope, id, sessionWriteKey(key), 0, String(value)),
+    setI64: (key: string, value: number): void => runtime.sessionSet(scope, id, sessionWriteKey(key), 1, Math.trunc(value)),
+    setF64: (key: string, value: number): void => runtime.sessionSet(scope, id, sessionWriteKey(key), 2, Number(value)),
+    setBool: (key: string, value: boolean): void => runtime.sessionSet(scope, id, sessionWriteKey(key), 3, Boolean(value)),
+    remove: (key: string): void => runtime.sessionRemove(scope, id, sessionWriteKey(key)),
+  });
+}
+
+/** The session store (docs/restoration-plan.md SR3): the preferences' four
+ * types with a session's lifetime, scoped to the app, a window or a
+ * document. The platform decides whether a launch continues the last
+ * (`restored()`). Do not put secrets in it (SR7). `session` is the media
+ * session's name here, as in Python. */
+export function appSession(): Prefs {
+  return sessionScope(0, 0);
+}
+
+/** A window's session scope, discarded with the window (SR9). */
+export function windowSession(windowId: number): Prefs {
+  return sessionScope(1, windowId);
+}
+
+/** A document's session scope, discarded with the document (SR9). */
+export function documentSession(documentId: number): Prefs {
+  return sessionScope(2, documentId);
+}
+
+/** Which launch this is (SR6). */
+export function restored(): "fresh" | "resumed" | "recovered" {
+  return (["fresh", "resumed", "recovered"] as const)[runtime.sessionRestored()] ?? "fresh";
+}
+
+/** One window as the last launch left it (SR9); activeDocument and section
+ * are 0 for none. */
+export type RestoredWindow = {
+  readonly id: number;
+  readonly documents: readonly number[];
+  readonly activeDocument: number;
+  readonly section: number;
+  readonly depth: number;
+};
+
+/** The windows the last launch left, the primary first; empty on a fresh
+ * launch. */
+export function restoredWindows(): RestoredWindow[] {
+  return runtime.sessionWindows().map(([id, activeDocument, section, depth, documents]) => ({ id, documents, activeDocument, section, depth }));
+}
+
+const REFUSALS = ["", "missing", "revoked", "provider_gone", "foreign", "cap"] as const;
+
+/** A durable reference that did not mint or redeem (SR12). */
+export class KayaReferenceError extends Error {
+  readonly refusal: "missing" | "revoked" | "provider_gone" | "foreign" | "cap";
+
+  /** @internal */
+  constructor(code: number, message: string) {
+    super(message);
+    this.refusal = REFUSALS[code] as KayaReferenceError["refusal"];
+  }
+}
+
+/** An ordinary picked file for a token `PickedFile.reference()` minted, at
+ * this launch or an earlier one (SR11); throws KayaReferenceError. */
+export function redeem(token: string): { file: PickedFile; token: string } {
+  const [code, handle, text] = runtime.referenceRedeem(token);
+  if (code !== 0) throw new KayaReferenceError(code, text);
+  return { file: new PickedFile(handle, runtime.pickedText(handle, 0), runtime.pickedText(handle, 1)), token: text };
+}
+
+/** Releases a reference from kaya's durable count (SR13). */
+export function forget(token: string): void {
+  runtime.referenceForget(token);
 }
 
 /** How much of a date or time to write: the numeric form, the abbreviated
@@ -6229,6 +6330,9 @@ export type WindowOptions = WindowProps & {
    * this one's. */
   onDocumentsDetached?: (window: number, documents: number[]) => void;
   windowId?: number;
+  /** createWindow only: take back the session scope the window was saved
+   * under (docs/restoration-plan.md SR9). */
+  restore?: number;
 };
 
 export type DocumentOptions = {
@@ -6247,6 +6351,8 @@ export type DocumentOptions = {
   /** Fires when the user drags it to another place or window. */
   onMoved?: (window: number, index: number) => void;
   window?: number;
+  /** Take back the session scope the document was saved under (SR9). */
+  restore?: number;
 };
 
 /** The window construct's props, emitted into the ambient transaction —
@@ -7807,6 +7913,7 @@ export class App {
     if (opts.onFullscreenChanged !== undefined) this._fullscreenChanged.set(windowId, opts.onFullscreenChanged);
     this._registerHistory(windowId, opts.onUndone, opts.onRedone);
     this._registerDocuments(windowId, opts);
+    if (opts.restore !== undefined) runtime.sessionRestore(1, opts.restore, windowId);
     return runScope<T>("window", body, windowId, () => {
       records().push(wire.tx_create_window(windowId));
       windowProps(windowId, opts);
@@ -7937,6 +8044,7 @@ export class App {
     if (opts.onCloseRequested !== undefined) this._documentCloseRequested.set(documentId, opts.onCloseRequested);
     if (opts.onClosed !== undefined) this._documentClosed.set(documentId, opts.onClosed);
     if (opts.onMoved !== undefined) this._documentMoved.set(documentId, opts.onMoved);
+    if (opts.restore !== undefined) runtime.sessionRestore(2, opts.restore, documentId);
     return runScope<T>("document", body, documentId, () => {
       records().push(...recs);
     });

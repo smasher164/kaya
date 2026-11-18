@@ -458,9 +458,9 @@ ORDER = [
     ("drain",),
     ("auxquit", ("rust",)),
     ("drain",),
-    ("restore", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java")),
-    ("references", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java")),
-    ("restoredocs", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java")),
+    ("restore", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java", "js")),
+    ("references", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java", "js")),
+    ("restoredocs", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java", "js")),
     ("drain",),
     # APP LINKS (docs/app-links-plan.md L5): the tasks guest a third
     # time, warm through NSWorkspace and cold through `open`. Alone

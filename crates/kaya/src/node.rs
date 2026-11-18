@@ -165,6 +165,19 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("prefSetF64", pref_set_f64),
         ("prefSetBool", pref_set_bool),
         ("prefRemove", pref_remove),
+        // The session store, restored windows and durable references
+        // (docs/restoration-plan.md SR3, SR9, SR11); runtime.ts reads the
+        // shapes.
+        ("sessionGet", session_get),
+        ("sessionSet", session_set),
+        ("sessionRemove", session_remove),
+        ("sessionRestored", session_restored),
+        ("sessionWindows", session_windows),
+        ("sessionRestore", session_restore),
+        ("referenceMint", reference_mint),
+        ("referenceRedeem", reference_redeem),
+        ("referenceForget", reference_forget),
+        ("pickedText", picked_text),
         ("openPicked", open_picked),
         ("pickedRead", picked_read),
         ("pickedWrite", picked_write),
@@ -805,6 +818,188 @@ unsafe extern "C" fn tr(env: Env, info: CbInfo) -> Value {
             capi::kaya_tr(key.as_ptr(), records.as_ptr(), records.len(), out, cap)
         })
     }
+}
+
+// A get or set names its type by tag: 0 string, 1 i64, 2 f64, 3 bool (rides
+// as 0/1, the preferences' own rule).
+unsafe extern "C" fn session_get(env: Env, info: CbInfo) -> Value {
+    let [sc, i, k, t] = unsafe { args::<4>(env, info) };
+    let scope = try_or_throw!(env, unsafe { u64_arg(env, sc, "sessionGet scope") }) as u32;
+    let id = try_or_throw!(env, unsafe { u64_arg(env, i, "sessionGet id") });
+    let key = try_or_throw!(env, unsafe { string_arg(env, k, "sessionGet key") });
+    let tag = try_or_throw!(env, unsafe { u64_arg(env, t, "sessionGet tag") });
+    let (kp, kn) = (key.as_ptr(), key.len());
+    unsafe {
+        match tag {
+            0 => {
+                let mut len = 0usize;
+                if capi::kaya_session_get_string(scope, id, kp, kn, ptr::null_mut(), 0, &mut len) == 0 {
+                    return undefined(env);
+                }
+                let mut buf = vec![0u8; len];
+                let mut got = 0usize;
+                capi::kaya_session_get_string(scope, id, kp, kn, buf.as_mut_ptr(), len, &mut got);
+                buf.truncate(got.min(len));
+                string(env, &buf)
+            }
+            1 => {
+                let mut out = 0i64;
+                if capi::kaya_session_get_i64(scope, id, kp, kn, &mut out) == 0 {
+                    return undefined(env);
+                }
+                number(env, out as f64)
+            }
+            2 => {
+                let mut out = 0f64;
+                if capi::kaya_session_get_f64(scope, id, kp, kn, &mut out) == 0 {
+                    return undefined(env);
+                }
+                number(env, out)
+            }
+            _ => {
+                let mut out = 0u8;
+                if capi::kaya_session_get_bool(scope, id, kp, kn, &mut out) == 0 {
+                    return undefined(env);
+                }
+                boolean(env, out != 0)
+            }
+        }
+    }
+}
+
+unsafe extern "C" fn session_set(env: Env, info: CbInfo) -> Value {
+    let [sc, i, k, t, v] = unsafe { args::<5>(env, info) };
+    let scope = try_or_throw!(env, unsafe { u64_arg(env, sc, "sessionSet scope") }) as u32;
+    let id = try_or_throw!(env, unsafe { u64_arg(env, i, "sessionSet id") });
+    let key = try_or_throw!(env, unsafe { string_arg(env, k, "sessionSet key") });
+    let tag = try_or_throw!(env, unsafe { u64_arg(env, t, "sessionSet tag") });
+    let (kp, kn) = (key.as_ptr(), key.len());
+    unsafe {
+        match tag {
+            0 => {
+                let value = try_or_throw!(env, string_arg(env, v, "sessionSet value"));
+                capi::kaya_session_set_string(scope, id, kp, kn, value.as_ptr(), value.len());
+            }
+            1 => {
+                let value = try_or_throw!(env, f64_arg(env, v, "sessionSet value"));
+                capi::kaya_session_set_i64(scope, id, kp, kn, value as i64);
+            }
+            2 => {
+                let value = try_or_throw!(env, f64_arg(env, v, "sessionSet value"));
+                capi::kaya_session_set_f64(scope, id, kp, kn, value);
+            }
+            _ => {
+                let value = try_or_throw!(env, u64_arg(env, v, "sessionSet value"));
+                capi::kaya_session_set_bool(scope, id, kp, kn, u8::from(value != 0));
+            }
+        }
+        undefined(env)
+    }
+}
+
+unsafe extern "C" fn session_remove(env: Env, info: CbInfo) -> Value {
+    let [sc, i, k] = unsafe { args::<3>(env, info) };
+    let scope = try_or_throw!(env, unsafe { u64_arg(env, sc, "sessionRemove scope") }) as u32;
+    let id = try_or_throw!(env, unsafe { u64_arg(env, i, "sessionRemove id") });
+    let key = try_or_throw!(env, unsafe { string_arg(env, k, "sessionRemove key") });
+    unsafe { capi::kaya_session_remove(scope, id, key.as_ptr(), key.len()) };
+    unsafe { undefined(env) }
+}
+
+unsafe extern "C" fn session_restored(env: Env, _info: CbInfo) -> Value {
+    unsafe { number(env, f64::from(capi::kaya_session_restored())) }
+}
+
+/// One line per window: its id, active document, section, depth, then its
+/// documents, space-separated.
+unsafe extern "C" fn session_windows(env: Env, _info: CbInfo) -> Value {
+    let mut lines = Vec::new();
+    for i in 0..capi::kaya_session_window_count() {
+        let (mut w, mut a, mut sec, mut d) = (0u64, 0u64, 0u64, 0u32);
+        let n = unsafe { capi::kaya_session_window(i, &mut w, &mut a, &mut sec, &mut d, ptr::null_mut(), 0) };
+        if n < 0 {
+            continue;
+        }
+        let mut docs = vec![0u64; n as usize];
+        unsafe {
+            capi::kaya_session_window(i, ptr::null_mut(), ptr::null_mut(), ptr::null_mut(), ptr::null_mut(), docs.as_mut_ptr(), docs.len())
+        };
+        let mut line = format!("{w} {a} {sec} {d}");
+        for doc in docs {
+            line.push_str(&format!(" {doc}"));
+        }
+        lines.push(line);
+    }
+    unsafe { string(env, lines.join("\n").as_bytes()) }
+}
+
+unsafe extern "C" fn session_restore(env: Env, info: CbInfo) -> Value {
+    let [sc, s, n] = unsafe { args::<3>(env, info) };
+    let scope = try_or_throw!(env, unsafe { u64_arg(env, sc, "sessionRestore scope") }) as u32;
+    let saved = try_or_throw!(env, unsafe { u64_arg(env, s, "sessionRestore saved") });
+    let now = try_or_throw!(env, unsafe { u64_arg(env, n, "sessionRestore now") });
+    capi::kaya_session_restore(scope, saved, now);
+    unsafe { undefined(env) }
+}
+
+fn coded(ask: impl Fn(*mut u8, usize, &mut usize) -> u32) -> (u32, Vec<u8>) {
+    let mut len = 0usize;
+    let mut code = ask(ptr::null_mut(), 0, &mut len);
+    let mut buf = vec![0u8; len];
+    if len > 0 {
+        let cap = len;
+        code = ask(buf.as_mut_ptr(), cap, &mut len);
+        buf.truncate(len.min(cap));
+    }
+    (code, buf)
+}
+
+/// `<code>:<token or sentence>`.
+unsafe extern "C" fn reference_mint(env: Env, info: CbInfo) -> Value {
+    let [h] = unsafe { args::<1>(env, info) };
+    let handle = try_or_throw!(env, unsafe { u64_arg(env, h, "referenceMint") });
+    let (code, text) = coded(|out, cap, len| unsafe { capi::kaya_reference_mint(handle, out, cap, len) });
+    let mut answer = format!("{code}:").into_bytes();
+    answer.extend(text);
+    unsafe { string(env, &answer) }
+}
+
+/// `<code>:<handle>:<token or sentence>`.
+unsafe extern "C" fn reference_redeem(env: Env, info: CbInfo) -> Value {
+    let [t] = unsafe { args::<1>(env, info) };
+    let token = try_or_throw!(env, unsafe { string_arg(env, t, "referenceRedeem") });
+    let handle = std::cell::Cell::new(0u64);
+    let (code, text) = coded(|out, cap, len| {
+        let mut h = 0u64;
+        let code = unsafe { capi::kaya_reference_redeem(token.as_ptr(), token.len(), &mut h, out, cap, len) };
+        handle.set(h);
+        code
+    });
+    let mut answer = format!("{code}:{}:", handle.get()).into_bytes();
+    answer.extend(text);
+    unsafe { string(env, &answer) }
+}
+
+unsafe extern "C" fn reference_forget(env: Env, info: CbInfo) -> Value {
+    let [t] = unsafe { args::<1>(env, info) };
+    let token = try_or_throw!(env, unsafe { string_arg(env, t, "referenceForget") });
+    unsafe { capi::kaya_reference_forget(token.as_ptr(), token.len()) };
+    unsafe { undefined(env) }
+}
+
+unsafe extern "C" fn picked_text(env: Env, info: CbInfo) -> Value {
+    let [h, f] = unsafe { args::<2>(env, info) };
+    let handle = try_or_throw!(env, unsafe { u64_arg(env, h, "pickedText handle") });
+    let field = try_or_throw!(env, unsafe { u64_arg(env, f, "pickedText field") }) as u32;
+    let mut len = 0usize;
+    if unsafe { capi::kaya_picked_text(handle, field, ptr::null_mut(), 0, &mut len) } != 1 {
+        return unsafe { undefined(env) };
+    }
+    let mut buf = vec![0u8; len];
+    let mut got = 0usize;
+    unsafe { capi::kaya_picked_text(handle, field, buf.as_mut_ptr(), len, &mut got) };
+    buf.truncate(got.min(len));
+    unsafe { string(env, &buf) }
 }
 
 unsafe extern "C" fn pref_get_string(env: Env, info: CbInfo) -> Value {

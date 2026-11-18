@@ -35,6 +35,20 @@ type Floor = {
   prefSetF64(key: string, value: number): void;
   prefSetBool(key: string, value: number): void;
   prefRemove(key: string): void;
+  // The session store, restored windows and durable references
+  // (docs/restoration-plan.md SR3, SR9, SR11): a get or set names its type
+  // by tag (0 string, 1 i64, 2 f64, 3 bool as 0/1); node.rs spells the
+  // shapes of the windows and the coded answers.
+  sessionGet(scope: number, id: number, key: string, tag: number): string | number | boolean | undefined;
+  sessionSet(scope: number, id: number, key: string, tag: number, value: string | number): void;
+  sessionRemove(scope: number, id: number, key: string): void;
+  sessionRestored(): number;
+  sessionWindows(): string;
+  sessionRestore(scope: number, saved: number, now: number): void;
+  referenceMint(handle: number): string;
+  referenceRedeem(token: string): string;
+  referenceForget(token: string): void;
+  pickedText(handle: number, field: number): string | undefined;
   // The formatter door and the catalog (docs/compliance-plan.md §3): the
   // C API's kaya_fmt_* / kaya_locale / kaya_direction / kaya_text_scale /
   // kaya_catalog / kaya_tr, dates and times PACKED (YYYYMMDD, HHMM),
@@ -290,6 +304,59 @@ export function prefSetBool(key: string, value: boolean): void {
 
 export function prefRemove(key: string): void {
   lib.prefRemove(key);
+}
+
+export function sessionGet(scope: number, id: number, key: string, tag: number): string | number | boolean | undefined {
+  return lib.sessionGet(scope, id, key, tag);
+}
+
+export function sessionSet(scope: number, id: number, key: string, tag: number, value: string | number | boolean): void {
+  lib.sessionSet(scope, id, key, tag, typeof value === "boolean" ? (value ? 1 : 0) : value);
+}
+
+export function sessionRemove(scope: number, id: number, key: string): void {
+  lib.sessionRemove(scope, id, key);
+}
+
+export function sessionRestored(): number {
+  return lib.sessionRestored();
+}
+
+/** Each window the last launch left: id, active, section, depth, documents. */
+export function sessionWindows(): [number, number, number, number, number[]][] {
+  const text = lib.sessionWindows();
+  if (text === "") return [];
+  return text.split("\n").map((line) => {
+    const [w = 0, a = 0, s = 0, d = 0, ...docs] = line.split(" ").map(Number);
+    return [w, a, s, d, docs];
+  });
+}
+
+export function sessionRestore(scope: number, saved: number, now: number): void {
+  lib.sessionRestore(scope, saved, now);
+}
+
+/** The code and the token or the sentence. */
+export function referenceMint(handle: number): [number, string] {
+  const answer = lib.referenceMint(handle);
+  const at = answer.indexOf(":");
+  return [Number(answer.slice(0, at)), answer.slice(at + 1)];
+}
+
+/** The code, the handle, and the token or the sentence. */
+export function referenceRedeem(token: string): [number, number, string] {
+  const answer = lib.referenceRedeem(token);
+  const first = answer.indexOf(":");
+  const second = answer.indexOf(":", first + 1);
+  return [Number(answer.slice(0, first)), Number(answer.slice(first + 1, second)), answer.slice(second + 1)];
+}
+
+export function referenceForget(token: string): void {
+  lib.referenceForget(token);
+}
+
+export function pickedText(handle: number, field: number): string {
+  return lib.pickedText(handle, field) ?? "";
 }
 
 export function fmtTimecode(frames: number, numerator: number, denominator: number, drop: boolean): string {
