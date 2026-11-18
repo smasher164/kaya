@@ -2111,7 +2111,7 @@ RELAUNCH = "relaunch"
 # notification door; `launch` is the plain one — the runner starts the same
 # artifact the way a user would, with nothing pending. Held here so the
 # grammar and the three harnesses' parsers cannot drift apart.
-RELAUNCH_DOORS = {"launch"}
+RELAUNCH_DOORS = {"launch", "resume"}
 # THE ONE DOOR WITH AN ARGUMENT (docs/app-links-plan.md L5): `relaunch
 # link "<url>"` — the runner starts the app THROUGH the platform with
 # that URL, and act one prints it on the `KAYA_RELAUNCH:` line for the

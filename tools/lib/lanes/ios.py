@@ -273,7 +273,7 @@ PAD_EXTRAS = {
 # AND ONLY IF a suite lists it, or it is declared here. window/panels
 # drive chrome no phone has; split/panes drive resize_window, which this
 # host rejects by design (DESIGN.md, Windows).
-DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem"]
+DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem", "auxquit"]
 UNWIRED_SCENES = []
 # Off with a reason: the safe save's leftover backup is Android's alone.
 OFF_SCENES = {"saferestore": "a rename cannot leave a backup, so there is no second act to run (docs/rich-document-plan.md §4.1)"}

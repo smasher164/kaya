@@ -626,11 +626,14 @@ platform's copy never saw).
   where `kayaForgetAppKitFrames` already reaches the NSWindow, or
   `.restorationBehavior(.disabled)` on macOS 15+, so neither AppKit nor
   SwiftUI reopens a window, and SR9's `restored_windows()` is the only party
-  that recreates an aux window. The yes or no is read from the global default
-  `NSQuitAlwaysKeepsWindows` at the save point (absent or false: keep, the
-  Lion default Chromium assumes; true: the user asked windows closed on quit,
-  so the launch after is fresh). What step 0 (a) found about the
-  Option-Command-Q inversion is recorded here when it is measured.
+  that recreates an aux window. The yes or no is read from
+  `NSQuitAlwaysKeepsWindows` at launch, before kaya overrides it for AppKit:
+  true keeps (the launch after a quit resumes), false or ABSENT closes (the
+  launch after is fresh). Step 0 (a) measured absent as "close" on macOS
+  26.6, not the Lion "keep" Chromium assumes (docs/traps.md, SwiftUI reopens
+  an aux window after a quit). AppKit offers no public API that tells an
+  app a quit was Option-Command-Q's inverted one, so kaya follows the
+  setting and that one-quit inversion is not honored.
 - **GTK and WinUI**: a clean exit leaves the token in place and a launch
   always resumes.
 
@@ -848,13 +851,14 @@ The doors, named per runner in `RELAUNCH_DOOR`:
 - `relaunch resume`: the platform's continuation. Android: home, `am kill` of
   the backgrounded package (process death), then a launch from Recents. iOS:
   background, `simctl terminate`, launch. macOS: a clean quit through
-  AppKit's terminate with the scratch domain's `NSQuitAlwaysKeepsWindows`
-  false. GTK and WinUI: a clean close and the plain launch.
+  AppKit's terminate, both acts started with `-NSQuitAlwaysKeepsWindows YES`
+  in the argument domain (the user keeps windows; the mac lane's `auxquit`
+  leg is its first user). GTK and WinUI: a clean close and the plain launch.
 - `relaunch fresh`: the user's dismissal. Android: `am force-stop` or a task
   removal. iOS: the switcher's force quit if the driver can reach it, else a
-  token-clearing knob stated as such. macOS: the harness sets the scratch
-  domain's `NSQuitAlwaysKeepsWindows` to true for the act and quits cleanly,
-  which is the user's own setting doing what it does (F5, F15). GTK and
+  token-clearing knob stated as such. macOS: the same clean quit with
+  `-NSQuitAlwaysKeepsWindows NO`, which is the user's own setting doing what
+  it does (F5, F15). GTK and
   WinUI: kaya's own `restoration` knob for the act, since no dismissal exists
   to drive.
 

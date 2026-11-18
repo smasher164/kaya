@@ -4,6 +4,51 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## SwiftUI reopens an aux window after a quit (measured 2026-11-17)
+
+On macOS 26.6 a kaya app whose user keeps windows at a quit
+(`NSQuitAlwaysKeepsWindows` true, the inverse of System Settings' "Close
+windows when quitting an application") came back from a quit with a
+`KayaAuxRoot` window for an id the guest had not allocated, and WITHOUT its
+primary when the primary was closed first: SwiftUI restores
+`WindowGroup(for: UInt64.self)` windows through AppKit's restorable state
+(swift/KayaSwiftUIEntry.swift). Measured with a scratch bundle running the
+panels guest (aux window 1 open), then the window guest (no aux window) under
+the same bundle id: one window titled with the bundle name, registered as
+`wid=1`, and no "window probe" window. The conditions, each measured:
+
+- The setting ABSENT from every domain (this host) restored nothing, so absent
+  reads as "close windows" on this macOS, not as Lion's "keep" default that
+  Chromium assumes (docs/restoration-plan.md SR6).
+- The setting passed as `-NSQuitAlwaysKeepsWindows YES` on the command line
+  (the argument domain) restores exactly as a `defaults write` does.
+- An app that is LSUIElement at the second launch restores nothing; an
+  accessory policy set at launch (KAYA_SELFTEST) still restores. The lane's
+  bundles are LSUIElement, which is why no lane ever saw it.
+- AppKit writes the state a moment after a window changes: an act one of
+  0.2 s left nothing to restore; one of 3 s did. A plain `exit(0)` after that
+  leaves the state as much as a terminate does.
+- An unbundled executable restores nothing.
+- `isRestorable = false` on every NSWindow at register made the second launch
+  show NO window at all (AppKit restored "no windows" and SwiftUI opened no
+  default one), so it is not the fix.
+
+The fix: kaya reads the user's answer into `kayaQuitKeepsWindows` and then
+sets `NSQuitAlwaysKeepsWindows` false and `ApplePersistenceIgnoreState` true in
+the argument domain before `KayaApp.main()`, so AppKit saves no window at a
+quit and ignores any state an older build saved (it logs "ApplePersistenceIgnoreState:
+Existing state will not be touched" on stderr at each launch). The guard is the
+mac lane's `auxquit` leg (tools/scenes/auxquit.steps, a regular bundle, door
+`relaunch resume` = the harness leaves through `NSApp.terminate` with the
+setting on in both acts) and the interpreter's verdict, which fails any leg in
+which an aux root appeared for an id the process's scene never held. Watched
+red with the call cut: "an aux window appeared for window id(s) [1], which this
+process's scene never held". A closing document's root re-renders as an aux
+root after its id leaves the scene, so the check keeps every id it has held.
+On macOS 15+ `.restorationBehavior(.disabled)` on the scenes is the SwiftUI
+spelling; it needs a second App struct below the macOS 13 floor and was not
+needed.
+
 ## cargo's target only ever grows (measured 2026-11-13/14)
 
 Cargo adds a unit for every new hash and never removes an old one. target/

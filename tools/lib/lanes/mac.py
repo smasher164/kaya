@@ -75,7 +75,10 @@ DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "not
                 # The far end of a call (docs/capture-plan.md §5), rust-only at depth.
                 "farend",
                 # A self-view over a player (docs/layering-plan.md LY7), rust-only.
-                "layersvideo"]
+                "layersvideo",
+                # A clean quit with an aux window open, the Mac's alone
+                # (docs/traps.md, SwiftUI reopens an aux window after a quit).
+                "auxquit"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -446,6 +449,8 @@ ORDER = [
     ("drain",),
     # The dragged sidebar across a relaunch (docs/tasks-s4-plan.md P8).
     ("windowmem", ("rust",)),
+    ("drain",),
+    ("auxquit", ("rust",)),
     ("drain",),
     # APP LINKS (docs/app-links-plan.md L5): the tasks guest a third
     # time, warm through NSWorkspace and cold through `open`. Alone
@@ -1112,7 +1117,13 @@ RUST_GUESTS = "target/rust-guests"
 # only from a bundle with an identifier — the identity manifest's `id`. The
 # rest stay bare executables (docs/deferred.md: an unbundled launch walks its
 # siblings, which is why the staging directory is small).
-BUNDLED_SCENES = {"notify", "tasks", "badge"}
+# auxquit: AppKit restores windows only for a bundle (docs/traps.md, SwiftUI
+# reopens an aux window after a quit).
+BUNDLED_SCENES = {"notify", "tasks", "badge", "auxquit"}
+# Bundled WITHOUT LSUIElement: AppKit restores no window of an LSUIElement
+# app, so auxquit's bundle is a regular app's (docs/traps.md, SwiftUI reopens
+# an aux window after a quit); KAYA_SELFTEST still makes it accessory at launch.
+REGULAR_BUNDLES = {"auxquit"}
 # The go scenes that post one: the one kaya-go binary, wrapped per scene.
 BUNDLED_GO_SCENES = {"chat", "chatcall"}
 GO_GUESTS = "target/go-guests"
@@ -1309,7 +1320,7 @@ def stage_rust(root, stems):
             shutil.copy2(built, dest)
             continue
         packaging_mac.bundle(root, built, staging, stem=stem,
-                             accessory=True)
+                             accessory=stem not in REGULAR_BUNDLES)
 CS_GUEST = "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 
 # THE SECOND ACT'S DOOR ON THIS LANE (docs/tasks-s9-plan.md R6a).
@@ -1320,6 +1331,9 @@ CS_GUEST = "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 # this table against the scenes that carry a `relaunch` line.
 RELAUNCH_DOOR = {"tasks": "launch-notification", "taskspersist": "launch",
                  "windowmem": "launch",
+                 # The user's clean quit with "close windows when quitting" off
+                 # (docs/restoration-plan.md SR15).
+                 "auxquit": "resume",
                  # THE LINK DOOR (docs/app-links-plan.md L5): `open` hands
                  # the URL to LaunchServices, which starts the bundle and
                  # delivers it as an Apple event 21 ms in.
@@ -1623,7 +1637,7 @@ def second_act(root, scene, argv, env, log, launch=None):
                     .strip())
             lf.write(f"{scene}: act two verdict {line}\n")
             return 0 if line.startswith("KAYA_SELFTEST: OK") else 1
-        if door == "launch":
+        if door in ("launch", "resume"):
             lf.write(f"== act two: {door} ==\n")
         else:
             notification = RELAUNCH_NOTIFICATION[scene]
@@ -1665,7 +1679,11 @@ def leg_argv(scene, lang, hs_bin):
     """The guest command for one leg, through require_modern's stamp wall;
     `hs_bin(stem)` resolves a Haskell binary (cabal list-bin)."""
     stem = guest_stem(scene)
-    return require_modern(_guest_argv(scene, lang, hs_bin, stem), lang)
+    argv = require_modern(_guest_argv(scene, lang, hs_bin, stem), lang)
+    if RELAUNCH_DOOR.get(scene) == "resume":
+        # Both acts run as a user who keeps windows at a quit.
+        argv = argv + ["-NSQuitAlwaysKeepsWindows", "YES"]
+    return argv
 
 
 def _guest_argv(scene, lang, hs_bin, stem):

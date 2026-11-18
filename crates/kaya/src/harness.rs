@@ -3953,6 +3953,8 @@ pub(crate) const PLAIN_DOOR: &str = "launch";
 /// (docs/app-links-plan.md L5). tools/check-steps.py holds the same word
 /// and the same shape from the scene side.
 pub(crate) const LINK_DOOR: &str = "link";
+/// The platform's continuation (docs/restoration-plan.md SR15).
+pub(crate) const RESUME_DOOR: &str = "resume";
 
 pub fn parse(script: &str) -> Result<Vec<Step>, String> {
     let mut steps = Vec::new();
@@ -4813,7 +4815,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 let arg = arg.trim();
                 if door.is_empty() {
                     Step::Relaunch(None, None)
-                } else if door == PLAIN_DOOR && arg.is_empty() {
+                } else if (door == PLAIN_DOOR || door == RESUME_DOOR) && arg.is_empty() {
                     Step::Relaunch(Some(door.to_owned()), None)
                 } else if door == LINK_DOOR {
                     // THE ONE DOOR WITH AN ARGUMENT: the URL the runner
@@ -4824,7 +4826,8 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!(
                         "relaunch takes no argument (the notification door), \
                          `{PLAIN_DOOR}` (the plain one — the runner starts the same \
-                         artifact the way a user would) or `{LINK_DOOR} \"<url>\"` \
+                         artifact the way a user would), `{RESUME_DOOR}` (the platform's \
+                         continuation) or `{LINK_DOOR} \"<url>\"` \
                          (the platform starts it with that link), not {rest:?}: {line:?}"
                     ));
                 }

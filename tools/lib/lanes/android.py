@@ -578,7 +578,7 @@ IME_SCENES = ["ranges", "richtext"]
 # is declared here. window/panels drive aux windows and panel chrome no
 # phone has; split/panes drive resize_window, which this host rejects
 # by design (the system owns surfaces; DESIGN.md, Windows).
-DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem"]
+DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem", "auxquit"]
 UNWIRED_SCENES = []
 
 

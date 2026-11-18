@@ -6121,6 +6121,7 @@ var kayaTearingDown: Set<UInt64> = []
             if kayaNSWindows[windowId] !== window {
                 kayaDiag("register wid=\(windowId) num=\(window.windowNumber)")
                 kayaNSWindows[windowId] = window
+                kayaSurfacesHeld.insert(windowId)
                 window.setFrameAutosaveName("")
                 // THE HAND RUN'S KNOB (tools/mac/dragwitness/run.py --hand): an
                 // accessory app's window opens behind the terminal that launched
@@ -12905,6 +12906,9 @@ private func kayaRunScript(_ script: String) {
     // Whether `relaunch` ended this run: the verdict says ACT 1 and the
     // runner then pushes the platform's door (docs/tasks-s9-plan.md R6a).
     var actOne = false
+    #if os(macOS)
+    var leaveByQuit = false
+    #endif
     // Whether the run already carried the core's fault into `failures`,
     // so the sweep after the loop cannot report the same one twice.
     var reportedFault = false
@@ -16276,6 +16280,9 @@ private func kayaRunScript(_ script: String) {
                     print("KAYA_HARNESS: step-failed \(why)")
                 }
                 actOne = true
+                #if os(macOS)
+                    leaveByQuit = door == "resume"
+                #endif
                 break scriptLines
             case "expect_alert":
                 // The REAL presented dialog's title (NSAlert's messageText /
@@ -19438,6 +19445,13 @@ private func kayaRunScript(_ script: String) {
     #if os(macOS)
         kayaPutBackHostPointer()
     #endif
+    let strays = DispatchQueue.main.sync { kayaStrayWindows }
+    if !strays.isEmpty {
+        let why = "an aux window appeared for window id(s) \(strays), which this process's scene never held "
+            + "(docs/traps.md, SwiftUI reopens an aux window after a quit)"
+        failures.append(why)
+        print("KAYA_HARNESS: step-failed \(why)")
+    }
     if failures.isEmpty && observed.isEmpty {
         failures.append("script has no expects")
     }
@@ -19458,6 +19472,14 @@ private func kayaRunScript(_ script: String) {
         kayaWriteActTwoVerdict(verdict)
         // `exit` runs atexit handlers and stdio teardown, which a
         // wedged main thread can hold; the grace leaves anyway.
+        #if os(macOS)
+            // `relaunch resume` (docs/restoration-plan.md SR15): the user's
+            // own clean quit, so AppKit's quit path runs and exits; a quit
+            // that returns falls through to the ordinary leave.
+            if leaveByQuit {
+                DispatchQueue.main.sync { NSApplication.shared.terminate(nil) }
+            }
+        #endif
         watchdog.published(0)
         exit(0)
     }
@@ -38916,6 +38938,12 @@ struct KayaEntryRoot: View {
 /// An auxiliary surface's content: the mounted root in the same normalized frame
 /// the primary uses, titled from its model. Presented via openWindow(value:)
 /// when a mount targets it.
+/// Aux roots that appeared for a window id this process's scene never held
+/// (a closing document's root re-renders after its id left, so "not held
+/// now" is not enough); the verdict fails on any.
+var kayaStrayWindows: [UInt64] = []
+var kayaSurfacesHeld: Set<UInt64> = []
+
 struct KayaAuxRoot: View {
     let windowId: UInt64
     @State private var scene = kayaScene
@@ -38964,7 +38992,14 @@ struct KayaAuxRoot: View {
         }
         .modifier(KayaSheetHost(surface: windowId))
         .modifier(KayaToastHost(windowId: windowId))
-        .onAppear { kayaDiag("auxRoot appear wid=\(windowId)") }
+        .onAppear {
+            kayaDiag("auxRoot appear wid=\(windowId)")
+            if kayaScene.windows[windowId] != nil || kayaScene.documentsById[windowId] != nil {
+                kayaSurfacesHeld.insert(windowId)
+            } else if !kayaSurfacesHeld.contains(windowId) {
+                kayaStrayWindows.append(windowId)
+            }
+        }
         // The brand rides every scene root, not window 0's alone (the
         // Phase A finding — see KayaRoot's tint note).
         .tint(kayaBrandTint())
@@ -44161,6 +44196,7 @@ func kayaRegisterDocumentWindow(_ did: UInt64, _ window: NSWindow) {
         d.id == did ? nil : kayaDocNSWindows[d.id]
     } ?? []
     kayaDocNSWindows[did] = window
+    kayaSurfacesHeld.insert(did)
     kayaDiag("document register did=\(did) wid=\(wid) num=\(window.windowNumber)")
     window.setFrameAutosaveName("")
     let proxy = KayaWindowDelegate(windowId: wid, original: window.delegate)

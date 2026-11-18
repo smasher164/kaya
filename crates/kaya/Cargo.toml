@@ -414,6 +414,10 @@ name = "table"
 path = "../../guests/rust/table.rs"
 
 [[example]]
+name = "auxquit"
+path = "../../guests/rust/auxquit.rs"
+
+[[example]]
 name = "windowed"
 path = "../../guests/rust/windowed.rs"
 

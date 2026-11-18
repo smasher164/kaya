@@ -1,0 +1,16 @@
+# A CLEAN QUIT WITH AN AUX WINDOW OPEN, by a user who keeps windows at a quit
+# (docs/traps.md, SwiftUI reopens an aux window after a quit): the relaunched
+# app shows its own primary, never a window the guest has not created.
+# The Mac's alone: each lane's OFF_SCENES says why the others are off.
+expect label#0 "first launch"
+expect_windows 2
+expect_title window#1 "inspector"
+# AppKit writes a window's restorable state a moment after it changes, not
+# at once; an act one shorter than that measures nothing.
+settle 3000
+
+relaunch resume
+
+expect_title "auxquit"
+expect label#0 "second launch"
+expect_windows 1

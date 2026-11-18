@@ -47,6 +47,21 @@ struct KayaApp: App {
 }
 
 #if os(macOS)
+/// The user's "close windows when quitting" answer, read before kaya overrides
+/// it for AppKit (docs/restoration-plan.md SR6): true keeps, false or absent closes.
+nonisolated(unsafe) var kayaQuitKeepsWindows = false
+
+/// kaya owns restoration, so AppKit neither saves windows at a quit nor reopens
+/// any an older build saved (docs/traps.md, SwiftUI reopens an aux window after a quit).
+func kayaTakeRestorationFromAppKit() {
+    let defaults = UserDefaults.standard
+    kayaQuitKeepsWindows = defaults.bool(forKey: "NSQuitAlwaysKeepsWindows")
+    var argument = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+    argument["NSQuitAlwaysKeepsWindows"] = false
+    argument["ApplePersistenceIgnoreState"] = true
+    defaults.setVolatileDomain(argument, forName: UserDefaults.argumentDomain)
+}
+
 final class KayaAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         kayaWatchChromeHelp()
@@ -165,6 +180,9 @@ public func kayaSwiftUIRun(_ api: UnsafePointer<KayaHostApi>) -> Int32 {
     #if os(macOS)
         // docs/traps.md, a script's path on the command line opens no window.
         UserDefaults.standard.register(defaults: ["NSTreatUnknownArgumentsAsOpen": "NO"])
+    #endif
+    #if os(macOS)
+        kayaTakeRestorationFromAppKit()
     #endif
     KayaApp.main() // takes over the calling (main) thread; does not return
     return 0
