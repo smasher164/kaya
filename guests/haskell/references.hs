@@ -62,14 +62,11 @@ main = kayaMain $ \app -> do
                 buildTx app (writeSignal status e.refusal)
               Right tok -> do
                 session.prefSetString "doc" tok
+                session.prefSetString "dir" (T.pack dir)
                 buildTx app (writeSignal status "minted")
         delete = do
-          r <- try (redeem saved)
-          case r of
-            Left (_ :: ReferenceError) -> return ()
-            Right redeemed -> do
-              _ <- try (removeFile redeemed.file.localPath) :: IO (Either SomeException ())
-              return ()
+          folder <- session.prefGetString "dir" ""
+          _ <- try (removeFile (T.unpack folder </> "picked.txt")) :: IO (Either SomeException ())
           reader status saved
     root <-
       column

@@ -59,6 +59,7 @@ pub type BookmarkResolver =
 pub(crate) static BOOKMARKER: std::sync::OnceLock<Bookmarker> = std::sync::OnceLock::new();
 pub(crate) static BOOKMARK_RESOLVER: std::sync::OnceLock<BookmarkResolver> = std::sync::OnceLock::new();
 
+#[cfg(target_os = "ios")]
 fn borrowed_text(text: *const c_char) -> String {
     if text.is_null() {
         return String::new();
@@ -67,6 +68,7 @@ fn borrowed_text(text: *const c_char) -> String {
 }
 
 /// The backend's bookmark of a picked locator.
+#[cfg(target_os = "ios")]
 pub(crate) fn bookmark(locator: &str) -> Result<Vec<u8>, String> {
     let make = BOOKMARKER.get().ok_or("this SwiftUI backend exports no bookmark maker; rebuild it")?;
     let locator = CString::new(locator).map_err(|e| format!("the locator would not cross: {e}"))?;
@@ -79,6 +81,7 @@ pub(crate) fn bookmark(locator: &str) -> Result<Vec<u8>, String> {
     Ok(unsafe { std::slice::from_raw_parts(bytes, len) }.to_vec())
 }
 
+#[cfg(target_os = "ios")]
 pub(crate) enum Resolved {
     Found { locator: String, stale: bool },
     Gone(String),
@@ -86,6 +89,7 @@ pub(crate) enum Resolved {
 }
 
 /// The backend's resolution of a bookmark; a found URL is registered there.
+#[cfg(target_os = "ios")]
 pub(crate) fn resolve_bookmark(bytes: &[u8]) -> Resolved {
     let Some(resolve) = BOOKMARK_RESOLVER.get() else {
         return Resolved::Unknown("this SwiftUI backend exports no bookmark resolver; rebuild it".to_owned());

@@ -63,6 +63,7 @@ static class ReferencesScene
                         try
                         {
                             KayaApp.Session().SetString("doc", files[0].Reference());
+                            KayaApp.Session().SetString("dir", dir);
                             t.Write(status, "minted");
                         }
                         catch (ReferenceException e)
@@ -76,13 +77,7 @@ static class ReferencesScene
                     "foreign");
                 tx.SetA11yId(tx.Button("delete", onClick: _ =>
                 {
-                    try
-                    {
-                        if (KayaApp.Redeem(saved).File.LocalPath is { } path) File.Delete(path);
-                    }
-                    catch (ReferenceException)
-                    {
-                    }
+                    File.Delete(Path.Combine(KayaApp.Session().GetString("dir", ""), "picked.txt"));
                     Reader(saved);
                 }), "delete");
                 return root;

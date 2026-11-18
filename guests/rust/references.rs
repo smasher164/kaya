@@ -5,8 +5,26 @@
 
 use std::io::Read;
 
+/// The place the script names as $TMP (guests/rust/filedialog.rs's scene_root).
+#[cfg(target_os = "android")]
+fn scene_root() -> std::path::PathBuf {
+    let root = std::env::var("EXTERNAL_STORAGE").unwrap_or_else(|_| "/sdcard".into());
+    std::path::PathBuf::from(root).join("Documents")
+}
+
+#[cfg(target_os = "ios")]
+fn scene_root() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_default();
+    std::path::PathBuf::from(home).join("Documents")
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn scene_root() -> std::path::PathBuf {
+    std::env::temp_dir()
+}
+
 fn picked_dir() -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("kaya-refs-{}", std::process::id()))
+    scene_root().join(format!("kaya-refs-{}", std::process::id()))
 }
 
 /// The bytes a token redeems for, or the refusal's branch; the sentence goes
@@ -83,12 +101,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         match msg {
             Msg::Pick => {
                 let session = session.clone();
+                let dir = dir.to_string_lossy().into_owned();
                 tasks.spawn(async move |app| {
                     let files = app.pick_file().filter("Text", "txt").await;
                     let said = match files.first().map(|f| f.reference()) {
                         None => "cancelled".to_string(),
                         Some(Ok(token)) => {
                             session.set_string("doc", &token);
+                            session.set_string("dir", &dir);
                             "minted".to_string()
                         }
                         Some(Err(e)) => {
@@ -101,9 +121,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             }
             Msg::Foreign => reader("kaya-ref1:beos:AAAA:00000000".to_string()),
             Msg::Delete => {
-                if let Ok(redeemed) = kaya::redeem(&saved) {
-                    let _ = std::fs::remove_file(&redeemed.file.local_path);
-                }
+                let picked = std::path::Path::new(&session.get_string("dir", "")).join("picked.txt");
+                let _ = std::fs::remove_file(picked);
                 reader(saved.clone());
             }
         }

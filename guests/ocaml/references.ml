@@ -61,6 +61,7 @@ let () =
                 write status refusal
             | token ->
                 session.set_string "doc" token;
+                session.set_string "dir" dir;
                 write status "minted")
       in
       mount
@@ -78,9 +79,8 @@ let () =
              (fun () ->
                button ~a11y_id:"delete" ~text:"delete"
                  ~on_click:(fun () ->
-                   (match redeem saved with
-                   | exception Reference_error _ -> ()
-                   | redeemed -> (try Sys.remove redeemed.file.local_path with Sys_error _ -> ()));
+                   (try Sys.remove (Filename.concat (session.get_string "dir" "") "picked.txt")
+                    with Sys_error _ -> ());
                    reader saved)
                  ());
            ]

@@ -65,7 +65,7 @@ func App() *kaya.App {
 	}
 
 	session := kaya.Session()
-	saved := session.GetString("doc", "")
+	var saved string
 	var status kaya.Signal[string]
 	reader := func(token string) {
 		go func() {
@@ -86,10 +86,12 @@ func App() *kaya.App {
 			return
 		}
 		session.SetString("doc", token)
+		session.SetString("dir", dir)
 		tx.Write(status, "minted")
 	}
 
 	app.Build(func(tx *kaya.Tx) {
+		saved = session.GetString("doc", "")
 		tx.Window(0).Title("references")
 		first := "no reference"
 		if saved != "" {
@@ -105,9 +107,7 @@ func App() *kaya.App {
 				reader("kaya-ref1:beos:AAAA:00000000")
 			}).A11yID("foreign")
 			tx.Button("delete", func(*kaya.Tx) {
-				if redeemed, err := kaya.Redeem(saved); err == nil {
-					_ = os.Remove(redeemed.File.LocalPath)
-				}
+				_ = os.Remove(filepath.Join(session.GetString("dir", ""), "picked.txt"))
 				reader(saved)
 			}).A11yID("delete")
 		}))

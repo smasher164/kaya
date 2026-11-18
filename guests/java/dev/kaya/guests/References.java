@@ -72,6 +72,7 @@ public final class References {
                             }
                             try {
                                 session.setString("doc", files.get(0).reference());
+                                session.setString("dir", dir.toString());
                                 t.write(status, "minted");
                             } catch (KayaApp.ReferenceException refused) {
                                 System.err.println("references: " + refused.getMessage());
@@ -82,8 +83,8 @@ public final class References {
                         .a11yId("foreign");
                 tx.button("delete", inner -> {
                     try {
-                        Files.deleteIfExists(Paths.get(KayaApp.redeem(saved).file().localPath()));
-                    } catch (KayaApp.ReferenceException | IOException ignored) {
+                        Files.deleteIfExists(Paths.get(session.getString("dir", ""), "picked.txt"));
+                    } catch (IOException ignored) {
                         // The read below names what is left.
                     }
                     reader.accept(saved);

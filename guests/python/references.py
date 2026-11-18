@@ -12,7 +12,15 @@ import kaya
 
 app = kaya.App()
 
-folder = os.path.join(tempfile.gettempdir(), f"kaya-refs-{os.getpid()}")
+# The place the script names as $TMP: on a phone the app's Documents, where
+# the picker can see it (guests/go/filedialog/filedialog.go's sceneRoot).
+if sys.platform == "ios":
+    root = os.path.expanduser("~/Documents")
+elif sys.platform == "android":
+    root = os.path.join(os.environ.get("EXTERNAL_STORAGE", "/sdcard"), "Documents")
+else:
+    root = tempfile.gettempdir()
+folder = os.path.join(root, f"kaya-refs-{os.getpid()}")
 os.makedirs(folder, exist_ok=True)
 with open(os.path.join(folder, "picked.txt"), "wb") as f:
     f.write(b"picked bytes")
@@ -48,6 +56,7 @@ def picked(files) -> None:
         return
     try:
         kaya.app_session().set("doc", files[0].reference())
+        kaya.app_session().set("dir", folder)
         status.set("minted")
     except kaya.KayaReferenceError as e:
         print(f"references: {e}", file=sys.stderr)
@@ -56,10 +65,8 @@ def picked(files) -> None:
 
 def delete() -> None:
     try:
-        path = kaya.redeem(saved).file.local_path
-        if path is not None:
-            os.remove(path)
-    except kaya.KayaReferenceError:
+        os.remove(os.path.join(kaya.app_session().get("dir", ""), "picked.txt"))
+    except FileNotFoundError:
         pass
     reader(saved)
 

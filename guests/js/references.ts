@@ -48,6 +48,7 @@ async function pick(): Promise<void> {
   }
   try {
     store.setString("doc", file.reference());
+    store.setString("dir", dir);
     status.set("minted");
   } catch (e) {
     if (!(e instanceof kaya.KayaReferenceError)) throw e;
@@ -57,12 +58,7 @@ async function pick(): Promise<void> {
 }
 
 function remove(): void {
-  try {
-    const path = kaya.redeem(saved).file.localPath;
-    if (path !== null) rmSync(path, { force: true });
-  } catch {
-    // The read below names what is left.
-  }
+  rmSync(join(store.getString("dir", ""), "picked.txt"), { force: true });
   reader(saved);
 }
 

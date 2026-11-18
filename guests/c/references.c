@@ -27,6 +27,7 @@
 static const char *const REFUSALS[] = {"", "missing", "revoked", "provider_gone", "foreign", "cap"};
 
 static char saved[8192];
+static char dir[1024];
 
 static void status(const char *text) {
     uint8_t buf[512];
@@ -46,9 +47,8 @@ static void write_scene_file(const char *dir, const char *name, const char *body
 }
 
 /* The bytes a token redeems for, or the refusal's branch; the sentence goes
- * to stderr, where the leg log keeps it. `path`, when given, receives the
- * redeemed file's local path. */
-static void read_back(const char *token, char *out, size_t cap, char *path, size_t path_cap) {
+ * to stderr, where the leg log keeps it. */
+static void read_back(const char *token, char *out, size_t cap) {
     uint64_t handle = 0;
     char text[8192];
     size_t len = 0;
@@ -58,12 +58,6 @@ static void read_back(const char *token, char *out, size_t cap, char *path, size
     if (code != 0) {
         fprintf(stderr, "references: %s\n", text);
         snprintf(out, cap, "%s", code < 6 ? REFUSALS[code] : "refused");
-        return;
-    }
-    if (path) {
-        size_t plen = 0;
-        kaya_picked_text(handle, 1, (uint8_t *)path, path_cap - 1, &plen);
-        path[plen < path_cap ? plen : path_cap - 1] = 0;
         return;
     }
     int64_t raw;
@@ -132,7 +126,7 @@ static void *app(void *arg) {
     build_scene();
     char said[512];
     if (saved[0]) {
-        read_back(saved, said, sizeof said, NULL, 0);
+        read_back(saved, said, sizeof said);
         status(said);
     }
     const uint8_t *rec;
@@ -152,14 +146,18 @@ static void *app(void *arg) {
                 kaya_tx_show_file_dialog(&tx, 0, DIALOG, 0, KAYA_FILE_CONTENT_ANY, NULL, 0);
                 kaya_submit(tx.buf, tx.len);
             } else if (id == W_FOREIGN) {
-                read_back("kaya-ref1:beos:AAAA:00000000", said, sizeof said, NULL, 0);
+                read_back("kaya-ref1:beos:AAAA:00000000", said, sizeof said);
                 status(said);
             } else if (id == W_DELETE) {
-                char path[1024] = "";
-                read_back(saved, said, sizeof said, path, sizeof path);
-                if (path[0])
-                    unlink(path);
-                read_back(saved, said, sizeof said, NULL, 0);
+                char folder[1024], path[1100];
+                size_t flen = 0;
+                if (kaya_session_get_string(SCOPE_APP, 0, (const uint8_t *)"dir", 3, (uint8_t *)folder,
+                                            sizeof folder - 1, &flen) == 0)
+                    flen = 0;
+                folder[flen < sizeof folder ? flen : sizeof folder - 1] = 0;
+                snprintf(path, sizeof path, "%s/picked.txt", folder);
+                unlink(path);
+                read_back(saved, said, sizeof said);
                 status(said);
             }
         } else if (parse_picked(rec, &count, &handle)) {
@@ -177,6 +175,7 @@ static void *app(void *arg) {
                 continue;
             }
             kaya_session_set_string(SCOPE_APP, 0, (const uint8_t *)"doc", 3, (const uint8_t *)token, len);
+            kaya_session_set_string(SCOPE_APP, 0, (const uint8_t *)"dir", 3, (const uint8_t *)dir, strlen(dir));
             status("minted");
         }
     }
@@ -189,7 +188,6 @@ int main(void) {
         return 1;
     }
     const char *tmp = getenv("TMPDIR");
-    char dir[1024];
     snprintf(dir, sizeof dir, "%s/kaya-refs-%d", tmp && *tmp ? tmp : "/tmp", (int)getpid());
     if (mkdir(dir, 0755) != 0 && errno != EEXIST)
         fprintf(stderr, "references: cannot make %s: %s\n", dir, strerror(errno));

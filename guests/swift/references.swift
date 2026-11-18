@@ -62,6 +62,7 @@ KayaApp.run { app in
             }
             do {
                 session.set("doc", try file.reference())
+                session.set("dir", dir)
                 tx.write(status, .str("minted"))
             } catch let refused as KayaReferenceError {
                 FileHandle.standardError.write(Data("references: \(refused.message)\n".utf8))
@@ -85,9 +86,9 @@ KayaApp.run { app in
                 "foreign")
             tx.setA11yId(
                 tx.button("delete", onClick: { _ in
-                    if let redeemed = try? KayaApp.redeem(saved), let path = redeemed.file.localPath {
-                        try? FileManager.default.removeItem(atPath: path)
-                    }
+                    let folder = session.get("dir", default: "")
+                    try? FileManager.default.removeItem(
+                        atPath: (folder as NSString).appendingPathComponent("picked.txt"))
                     reader(saved)
                 }), "delete")
             return root
