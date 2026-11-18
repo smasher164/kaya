@@ -6538,6 +6538,23 @@ var kayaTearingDown: Set<UInt64> = []
         return stale.count
     }
 
+    /// AppKit saves a window's frame into the app's REAL domain the moment it
+    /// is named for autosave, before register() clears the name (docs/traps.md,
+    /// AppKit's autosave wrote the real domain at every launch); kaya owns the
+    /// frames (P4), so the names SwiftUI gives kaya's windows never reach AppKit.
+    func kayaRefuseAppKitFrameAutosave() {
+        let sel = #selector(NSWindow.saveFrame(usingName:))
+        guard let method = class_getInstanceMethod(NSWindow.self, sel) else { return }
+        typealias Original = @convention(c) (NSWindow, Selector, NSString) -> Void
+        let original = unsafeBitCast(method_getImplementation(method), to: Original.self)
+        let refuse: @convention(block) (NSWindow, NSString) -> Void = { window, name in
+            let text = name as String
+            if text.contains("KayaRoot") || text.contains("KayaAuxRoot") { return }
+            original(window, sel, name)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(refuse))
+    }
+
     func kayaWindowFrameText(_ rect: NSRect) -> String {
         let n = { (v: CGFloat) in String(Int(v.rounded())) }
         return "\(n(rect.origin.x)) \(n(rect.origin.y)) \(n(rect.width)) \(n(rect.height))"

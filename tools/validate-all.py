@@ -132,7 +132,10 @@ BUDGETS = {
     # second two-act leg (links, ~35s through open -a) and the S4/app-links
     # matrices read 984, 839 and 1014 against 1000; 1100 is 1.08x over the
     # top, every leg green.
-    "mac": 1100,
+    # 1250 since 2026-11-18 (session restoration): 32 new legs (restore,
+    # restoredocs, references in ten languages, auxquit, restorefresh) summing
+    # 71s; matrix #7 read 1169 net, 1098 without them. 1250 is 1.07x over it.
+    "mac": 1250,
     # 600 since 2026-09-01: the ninth binding took the roster 604 -> 684
     # legs (one js leg per python leg on both protocols); the first
     # contended matrix after read 459s. 700 since 2026-09-04: the roster
@@ -221,7 +224,11 @@ BUDGETS = {
     # 1167-1252 net with every leg green; 1350 is about 1.08x over the
     # highest. This net figure moves with the token's waits as well
     # (docs/deferred.md, the iOS net-duration entry).
-    "ios": 1350,
+    # 1550 since 2026-11-18 (session restoration): 13 new legs summing 225s
+    # (80s of it on the swift suite's device, the resume door's background
+    # and settle included) and the picker press's provider settle, 13 waits
+    # summing 77.5s on matrix #7, which read 1441 net. 1550 is 1.08x over it.
+    "ios": 1550,
     # 310 since 2026-08-20: the pool-degradation trap's remedy is a COLD
     # BOOT (docs/traps.md), and a reboot run carries ~60-90s of emulator
     # startup a warm-pool ceiling read as an anomaly; a measured cold-boot
@@ -272,7 +279,9 @@ BUDGETS = {
     # which is load and not kind (the six sweeps that day read 403, 260,
     # 262, 481, 432 and 513). 600 is 1.17x over it; the sweep yields the
     # token, so the netting above cannot help it.
-    "gates": 600,
+    # 660 since 2026-11-18: check-restore joined the sweep and matrix #7's
+    # sweep read 612; 660 is 1.08x over it.
+    "gates": 660,
 }
 
 

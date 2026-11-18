@@ -4,6 +4,23 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## AppKit's frame autosave wrote the app's real domain at every launch (measured 2026-11-18)
+
+Matrix #7's real-store wall named ~/Library/Preferences/dev.kaya.aurora.notes.plist
+with no change in its content. Polling the domain through `defaults export`
+every 50 ms during the mac `links` leg alone (its act two is the lane's one
+LaunchServices start of the bundle with the real id) read `NSWindow Frame
+main.KayaRoot-1-AppWindow-1` appear and go a second later: SwiftUI saves each
+window's frame under its autosave name before register() clears the name, and
+the next launch's kayaForgetAppKitFrames removes it, so only the file's time
+moved. Refusing `setFrameAutosaveName:` changed nothing (SwiftUI does not go
+through it); refusing `saveFrameUsingName:` for KayaRoot and KayaAuxRoot names
+(kayaRefuseAppKitFrameAutosave, before any window exists) left the domain
+untouched. Watched: the call cut, `validate-all --only links` refused its
+verdict naming the plist; restored from the copy, sha equal. The plist's
+other keys (`kaya.window.0/1.frame`, `NSNavPanel*`) date from 03:17 and did not
+come back after the frame keys were deleted, so no lane leg writes them.
+
 ## Android's continuation: no std file lock, launch extras on a restored activity, `am kill` after a pick (measured 2026-11-18)
 
 Three things the restoration scenes' first Android runs met, each read from
@@ -52,12 +69,16 @@ A Go guest's first `Build` runs on the calling goroutine, which on iOS is the
 process main thread BEFORE `kaya_run`: its session read came before any scene
 existed and could not wait for one (the main thread is where the token
 arrives). The core refuses that read with a sentence and starts the launch
-headless (fresh, writing nothing), so the file survives; the Go binding now
-queues a build made before Serve on iOS and runs it on the app thread. Any
-binding whose first build runs on the main thread before `kaya_run` meets the
-same wall on a phone. Watched: restore-go red before the fix ("restored fresh,
-wanted resumed"), and restore-swiftui red with the vehicle cut (the 5 s
-no-token sentence printed).
+headless (fresh, writing nothing), so the file survives. The first fix queued
+every Build made before Serve on iOS, and matrix #7 (2026-11-18) read it wrong:
+Build is synchronous everywhere else, and go, entry-go and undo-go panicked on
+a widget their Build had not yet assigned. Build is synchronous again; the Go
+binding's session reads panic before Run on iOS, naming app.Post, and the Go
+restoration guests build their session-dependent tree inside app.Post on every
+lane. Any binding whose guest code runs on the main thread before `kaya_run`
+meets the same wall on a phone. Watched: restore-go red before the fix
+("restored fresh, wanted resumed"), and restore-swiftui red with the vehicle
+cut (the 5 s no-token sentence printed).
 
 ## A relaunch leg's second act met its first still exiting (measured 2026-11-18)
 

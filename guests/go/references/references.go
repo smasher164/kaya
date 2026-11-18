@@ -90,7 +90,8 @@ func App() *kaya.App {
 		tx.Write(status, "minted")
 	}
 
-	app.Build(func(tx *kaya.Tx) {
+	// Posted: the session answers once the app runs (docs/traps.md, iOS's restoration token).
+	app.Post(func(tx *kaya.Tx) {
 		saved = session.GetString("doc", "")
 		tx.Window(0).Title("references")
 		first := "no reference"

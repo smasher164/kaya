@@ -433,7 +433,19 @@ func prefRemove(key string) {
 	})
 }
 
+// sessionServing is the iOS wall: the platform hands its restoration token
+// only once Run has started, and code before Run is on the main thread,
+// where the core cannot wait for it (docs/traps.md, iOS's restoration token).
+func sessionServing() {
+	if runtime.GOOS == "ios" && appThread.Load() == 0 {
+		panic("kaya: the session store was read before Run on iOS, where the platform hands its " +
+			"restoration token only once the app is running: read it inside app.Post or a handler " +
+			"(docs/traps.md, iOS's restoration token)")
+	}
+}
+
 func sessionGetString(scope uint32, id uint64, key string) (value string, present bool) {
+	sessionServing()
 	withKey(key, func(p *C.uint8_t, n C.size_t) {
 		var length C.size_t
 		if C.kaya_session_get_string(C.uint32_t(scope), C.uint64_t(id), p, n, nil, 0, &length) == 0 {
@@ -454,6 +466,7 @@ func sessionGetString(scope uint32, id uint64, key string) (value string, presen
 }
 
 func sessionGetI64(scope uint32, id uint64, key string) (value int64, present bool) {
+	sessionServing()
 	withKey(key, func(p *C.uint8_t, n C.size_t) {
 		var out C.int64_t
 		if C.kaya_session_get_i64(C.uint32_t(scope), C.uint64_t(id), p, n, &out) != 0 {
@@ -464,6 +477,7 @@ func sessionGetI64(scope uint32, id uint64, key string) (value int64, present bo
 }
 
 func sessionGetF64(scope uint32, id uint64, key string) (value float64, present bool) {
+	sessionServing()
 	withKey(key, func(p *C.uint8_t, n C.size_t) {
 		var out C.double
 		if C.kaya_session_get_f64(C.uint32_t(scope), C.uint64_t(id), p, n, &out) != 0 {
@@ -474,6 +488,7 @@ func sessionGetF64(scope uint32, id uint64, key string) (value float64, present 
 }
 
 func sessionGetBool(scope uint32, id uint64, key string) (value bool, present bool) {
+	sessionServing()
 	withKey(key, func(p *C.uint8_t, n C.size_t) {
 		var out C.uint8_t
 		if C.kaya_session_get_bool(C.uint32_t(scope), C.uint64_t(id), p, n, &out) != 0 {
@@ -519,9 +534,13 @@ func sessionRemove(scope uint32, id uint64, key string) {
 	})
 }
 
-func sessionRestored() int { return int(C.kaya_session_restored()) }
+func sessionRestored() int {
+	sessionServing()
+	return int(C.kaya_session_restored())
+}
 
 func sessionWindows() []RestoredWindow {
+	sessionServing()
 	count := int(C.kaya_session_window_count())
 	out := make([]RestoredWindow, 0, count)
 	for i := 0; i < count; i++ {

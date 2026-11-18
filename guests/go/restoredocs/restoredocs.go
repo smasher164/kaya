@@ -11,7 +11,8 @@ import (
 func App() *kaya.App {
 	app := kaya.NewApp()
 
-	app.Build(func(tx *kaya.Tx) {
+	// Posted: the session answers once the app runs (docs/traps.md, iOS's restoration token).
+	app.Post(func(tx *kaya.Tx) {
 		documents := []uint64{10, 11, 12}
 		active := uint64(0)
 		restored := false

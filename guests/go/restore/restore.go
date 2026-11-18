@@ -19,7 +19,8 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 	session := kaya.Session()
 
-	app.Build(func(tx *kaya.Tx) {
+	// Posted: the session answers once the app runs (docs/traps.md, iOS's restoration token).
+	app.Post(func(tx *kaya.Tx) {
 		tx.Window(0).Title("restore")
 		messages := MessageCollection(tx)
 		launch := tx.Signal("launch " + kaya.Restored())

@@ -8,7 +8,6 @@ import (
 	"iter"
 	"os"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -390,9 +389,6 @@ func Forget(token string) { referenceForget(token) }
 // edits it and queues the wire delta in the same call.
 type App struct {
 	c              counters
-	// iOS's builds before Serve (docs/traps.md, a Go guest's first build
-	// read the session store on the main thread).
-	beforeServe []func(*Tx)
 	widgetHandlers map[uint64]func(*Tx)
 	// Table sort requests, keyed by the For container's widget id
 	// (docs/tables-plan.md): the handler receives the 0-based column.
@@ -920,10 +916,6 @@ func (tx *Tx) mirror(c Collection) *instance {
 // fn abandons the transaction — the records never ship and the journal
 // restores the mirror — then the panic continues to the caller.
 func (a *App) Build(fn func(*Tx)) {
-	if runtime.GOOS == "ios" && appThread.Load() == 0 {
-		a.beforeServe = append(a.beforeServe, fn)
-		return
-	}
 	requireAppThread()
 	if a.journal != nil {
 		panic("kaya: Build inside Build — one transaction at a time")
@@ -8165,11 +8157,6 @@ func (a *App) Serve() {
 	// goroutine is the only reader, telling "the app ended" from "the
 	// app never started".
 	served.Store(true)
-	pending := a.beforeServe
-	a.beforeServe = nil
-	for _, fn := range pending {
-		a.Build(fn)
-	}
 	for {
 		// Posted work first, then the ring, then park. Draining at the
 		// TOP is what makes a wake sufficient. Posts queued after the
