@@ -66,6 +66,9 @@ import (
 	"dev.kaya/guests/go/safearea"
 	"dev.kaya/guests/go/save"
 	"dev.kaya/guests/go/scroll"
+	"dev.kaya/guests/go/references"
+	"dev.kaya/guests/go/restore"
+	"dev.kaya/guests/go/restoredocs"
 	"dev.kaya/guests/go/scrollto"
 	"dev.kaya/guests/go/search"
 	"dev.kaya/guests/go/sections"
@@ -180,6 +183,9 @@ var scenes = map[string]func() *kaya.App{
 	"table":            table.App,
 	"save":             save.App,
 	"scroll":           scroll.App,
+	"references":       references.App,
+	"restore":          restore.App,
+	"restoredocs":      restoredocs.App,
 	"scrollto":         scrollto.App,
 	"chat":             chat.App,
 	"chatcall":         chat.App,

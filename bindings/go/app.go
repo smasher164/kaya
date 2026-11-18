@@ -235,6 +235,155 @@ func (PrefsHandle) Remove(key string) {
 	prefRemove(prefWriteKey(key))
 }
 
+// SessionHandle is the session store (docs/restoration-plan.md SR3):
+// Prefs' four types with a session's lifetime, scoped to the app, a
+// window or a document, read before the first build and written whenever
+// a value changes. The platform decides whether a launch continues the
+// last (Restored). Do not put secrets in it (SR7).
+type SessionHandle struct {
+	scope uint32
+	id    uint64
+}
+
+// Session answers the app's scope.
+func Session() SessionHandle { return SessionHandle{} }
+
+// WindowSession answers a window's scope, discarded with the window (SR9).
+func WindowSession(window uint64) SessionHandle { return SessionHandle{scope: 1, id: window} }
+
+// DocumentSession answers a document's scope, discarded with it (SR9).
+func DocumentSession(document uint64) SessionHandle { return SessionHandle{scope: 2, id: document} }
+
+func sessionKey(key string) string {
+	if key == "" {
+		panic("kaya: a session key must not be empty")
+	}
+	return key
+}
+
+func sessionWriteKey(key string) string {
+	sessionKey(key)
+	if strings.HasPrefix(key, "kaya.") {
+		panic(fmt.Sprintf(
+			"kaya: session key %q is reserved (the kaya. prefix is kaya's own)",
+			key))
+	}
+	return key
+}
+
+func (s SessionHandle) GetString(key, def string) string {
+	if v, ok := sessionGetString(s.scope, s.id, sessionKey(key)); ok {
+		return v
+	}
+	return def
+}
+
+func (s SessionHandle) GetI64(key string, def int64) int64 {
+	if v, ok := sessionGetI64(s.scope, s.id, sessionKey(key)); ok {
+		return v
+	}
+	return def
+}
+
+func (s SessionHandle) GetF64(key string, def float64) float64 {
+	if v, ok := sessionGetF64(s.scope, s.id, sessionKey(key)); ok {
+		return v
+	}
+	return def
+}
+
+func (s SessionHandle) GetBool(key string, def bool) bool {
+	if v, ok := sessionGetBool(s.scope, s.id, sessionKey(key)); ok {
+		return v
+	}
+	return def
+}
+
+func (s SessionHandle) SetString(key, value string) {
+	sessionSetString(s.scope, s.id, sessionWriteKey(key), value)
+}
+
+func (s SessionHandle) SetI64(key string, value int64) {
+	sessionSetI64(s.scope, s.id, sessionWriteKey(key), value)
+}
+
+func (s SessionHandle) SetF64(key string, value float64) {
+	sessionSetF64(s.scope, s.id, sessionWriteKey(key), value)
+}
+
+func (s SessionHandle) SetBool(key string, value bool) {
+	sessionSetBool(s.scope, s.id, sessionWriteKey(key), value)
+}
+
+func (s SessionHandle) Remove(key string) {
+	sessionRemove(s.scope, s.id, sessionWriteKey(key))
+}
+
+// Restored says which launch this is (SR6): "fresh", "resumed" or
+// "recovered", final before the first build.
+func Restored() string {
+	return [...]string{"fresh", "resumed", "recovered"}[sessionRestored()]
+}
+
+// RestoredWindow is one window as the last launch left it (SR9). Recreate
+// it from its scope's values and hand the id back through Restore.
+// ActiveDocument and Section are 0 for none.
+type RestoredWindow struct {
+	ID             uint64
+	Documents      []uint64
+	ActiveDocument uint64
+	Section        uint64
+	Depth          uint32
+}
+
+// RestoredWindows answers the windows the last launch left, the primary
+// first; empty on a fresh launch. A scope not taken back is discarded at
+// the first idle after the first build.
+func RestoredWindows() []RestoredWindow { return sessionWindows() }
+
+// ReferenceError is a durable reference that did not mint or redeem
+// (SR12): Refusal is one of missing, revoked, provider_gone, foreign, cap.
+// A failed redeem does not forget the token.
+type ReferenceError struct {
+	Refusal string
+	Message string
+}
+
+func (e *ReferenceError) Error() string { return e.Message }
+
+var refusals = [...]string{"", "missing", "revoked", "provider_gone", "foreign", "cap"}
+
+// Reference mints a durable reference to the file (SR11): a text token,
+// at most 8 KiB, to store anywhere and redeem at a later launch.
+func (f PickedFile) Reference() (string, error) {
+	code, text := referenceMint(f.Handle)
+	if code != 0 {
+		return "", &ReferenceError{Refusal: refusals[code], Message: text}
+	}
+	return text, nil
+}
+
+// Redeemed is a redeemed reference: the file, and the token to keep,
+// which is a new one when the platform re-minted it.
+type Redeemed struct {
+	File  PickedFile
+	Token string
+}
+
+// Redeem answers an ordinary picked file for a token Reference minted, at
+// this launch or an earlier one (SR11).
+func Redeem(token string) (Redeemed, error) {
+	code, handle, text := referenceRedeem(token)
+	if code != 0 {
+		return Redeemed{}, &ReferenceError{Refusal: refusals[code], Message: text}
+	}
+	file := PickedFile{Handle: handle, Name: pickedText(handle, 0), LocalPath: pickedText(handle, 1)}
+	return Redeemed{File: file, Token: text}, nil
+}
+
+// Forget releases a reference from kaya's durable count (SR13).
+func Forget(token string) { referenceForget(token) }
+
 // App owns the id counters, the dispatch tables and the collection
 // model. The collection IS the model, the only copy: every mutation
 // edits it and queues the wire delta in the same call.
@@ -5514,6 +5663,19 @@ func (r SectionRef) Id() uint64 {
 type DocumentRef struct {
 	tx *Tx
 	id uint64
+}
+
+// Restore takes back the session scope this document was saved under (SR9).
+func (d DocumentRef) Restore(saved uint64) DocumentRef {
+	sessionRestore(2, saved, d.id)
+	return d
+}
+
+// Restore takes back the session scope this window was saved under (SR9);
+// an id that moved loses it, with one line naming both.
+func (w WindowRef) Restore(saved uint64) WindowRef {
+	sessionRestore(1, saved, w.id)
+	return w
 }
 
 // Title names the document: its tab's title, and the window's while it

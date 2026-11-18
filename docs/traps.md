@@ -20,6 +20,12 @@ themselves, the preferences' own rule. GUARD: the restore, restoredocs and
 references legs in Python on the mac lane; restore-python watched red with
 the call cut (act one read the last run's scratch: `restored resumed, wanted
 fresh`), sha restored.
+The same entry point bit Go a second way: the one Go binary picks its
+scene from KAYA_SELFTEST in `main`, so act two (no environment) ran the
+default scene. guests/go/cmd/main_desktop.go calls kaya.PrepareProcess()
+before it reads; restoredocs-go watched red with that call cut (title
+"milestone2"). Every other binding whose host picks a scene from the
+environment needs the same call when its relaunch legs are wired.
 
 ## The WiFi off a cold boot lost (measured 2026-11-18)
 

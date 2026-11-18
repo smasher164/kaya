@@ -20,6 +20,7 @@ func init() {
 }
 
 func main() {
+	kaya.PrepareProcess()
 	// kaya.Env AND NEVER os.Getenv, uniformly with the Android tail.
 	scene := kaya.Env("KAYA_SELFTEST")
 	if scene == "" {

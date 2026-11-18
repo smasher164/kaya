@@ -88,6 +88,12 @@ func Init() {
 // where C.getenv("KAYA_SELFTEST") reads the scene name (docs/traps.md:
 // os.Getenv is empty forever in a c-shared library). tools/check-go-env.py
 // bans it and doctors BOTH C.getenv sites here, so the spelling stays.
+// PrepareProcess does what Run does first (kaya_prepare_process): a guest
+// that picks its scene from the environment calls it before reading, since
+// act two of a relaunch learns its scene only from the marker this adopts
+// (docs/traps.md, a Python guest read the session store before kaya_run).
+func PrepareProcess() { C.kaya_prepare_process() }
+
 func Env(name string) string {
 	value, _ := LookupEnv(name)
 	return value
@@ -404,6 +410,158 @@ func prefRemove(key string) {
 	withKey(key, func(p *C.uint8_t, n C.size_t) {
 		C.kaya_pref_remove(p, n)
 	})
+}
+
+func sessionGetString(scope uint32, id uint64, key string) (value string, present bool) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		var length C.size_t
+		if C.kaya_session_get_string(C.uint32_t(scope), C.uint64_t(id), p, n, nil, 0, &length) == 0 {
+			return
+		}
+		if length == 0 {
+			present = true
+			return
+		}
+		out := make([]byte, int(length))
+		if C.kaya_session_get_string(C.uint32_t(scope), C.uint64_t(id), p, n,
+			(*C.uint8_t)(unsafe.Pointer(&out[0])), length, &length) == 0 {
+			return
+		}
+		value, present = string(out[:int(length)]), true
+	})
+	return
+}
+
+func sessionGetI64(scope uint32, id uint64, key string) (value int64, present bool) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		var out C.int64_t
+		if C.kaya_session_get_i64(C.uint32_t(scope), C.uint64_t(id), p, n, &out) != 0 {
+			value, present = int64(out), true
+		}
+	})
+	return
+}
+
+func sessionGetF64(scope uint32, id uint64, key string) (value float64, present bool) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		var out C.double
+		if C.kaya_session_get_f64(C.uint32_t(scope), C.uint64_t(id), p, n, &out) != 0 {
+			value, present = float64(out), true
+		}
+	})
+	return
+}
+
+func sessionGetBool(scope uint32, id uint64, key string) (value bool, present bool) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		var out C.uint8_t
+		if C.kaya_session_get_bool(C.uint32_t(scope), C.uint64_t(id), p, n, &out) != 0 {
+			value, present = out != 0, true
+		}
+	})
+	return
+}
+
+func sessionSetString(scope uint32, id uint64, key, value string) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		withKey(value, func(v *C.uint8_t, vn C.size_t) {
+			C.kaya_session_set_string(C.uint32_t(scope), C.uint64_t(id), p, n, v, vn)
+		})
+	})
+}
+
+func sessionSetI64(scope uint32, id uint64, key string, value int64) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		C.kaya_session_set_i64(C.uint32_t(scope), C.uint64_t(id), p, n, C.int64_t(value))
+	})
+}
+
+func sessionSetF64(scope uint32, id uint64, key string, value float64) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		C.kaya_session_set_f64(C.uint32_t(scope), C.uint64_t(id), p, n, C.double(value))
+	})
+}
+
+func sessionSetBool(scope uint32, id uint64, key string, value bool) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		var raw C.uint8_t
+		if value {
+			raw = 1
+		}
+		C.kaya_session_set_bool(C.uint32_t(scope), C.uint64_t(id), p, n, raw)
+	})
+}
+
+func sessionRemove(scope uint32, id uint64, key string) {
+	withKey(key, func(p *C.uint8_t, n C.size_t) {
+		C.kaya_session_remove(C.uint32_t(scope), C.uint64_t(id), p, n)
+	})
+}
+
+func sessionRestored() int { return int(C.kaya_session_restored()) }
+
+func sessionWindows() []RestoredWindow {
+	count := int(C.kaya_session_window_count())
+	out := make([]RestoredWindow, 0, count)
+	for i := 0; i < count; i++ {
+		var w, active, section C.uint64_t
+		var depth C.uint32_t
+		n := int(C.kaya_session_window(C.uint32_t(i), &w, &active, &section, &depth, nil, 0))
+		if n < 0 {
+			break
+		}
+		docs := make([]uint64, n)
+		if n > 0 {
+			C.kaya_session_window(C.uint32_t(i), nil, nil, nil, nil,
+				(*C.uint64_t)(unsafe.Pointer(&docs[0])), C.size_t(n))
+		}
+		out = append(out, RestoredWindow{ID: uint64(w), Documents: docs,
+			ActiveDocument: uint64(active), Section: uint64(section), Depth: uint32(depth)})
+	}
+	return out
+}
+
+func sessionRestore(scope uint32, saved, now uint64) {
+	C.kaya_session_restore(C.uint32_t(scope), C.uint64_t(saved), C.uint64_t(now))
+}
+
+const referenceCap = 16 * 1024
+
+func referenceMint(handle uint64) (int, string) {
+	out := make([]byte, referenceCap)
+	var length C.size_t
+	code := C.kaya_reference_mint(C.uint64_t(handle),
+		(*C.uint8_t)(unsafe.Pointer(&out[0])), C.size_t(referenceCap), &length)
+	return int(code), string(out[:min(int(length), referenceCap)])
+}
+
+func referenceRedeem(token string) (code int, handle uint64, text string) {
+	withKey(token, func(p *C.uint8_t, n C.size_t) {
+		out := make([]byte, referenceCap)
+		var length C.size_t
+		var h C.uint64_t
+		code = int(C.kaya_reference_redeem(p, n, &h,
+			(*C.uint8_t)(unsafe.Pointer(&out[0])), C.size_t(referenceCap), &length))
+		handle, text = uint64(h), string(out[:min(int(length), referenceCap)])
+	})
+	return
+}
+
+func referenceForget(token string) {
+	withKey(token, func(p *C.uint8_t, n C.size_t) {
+		C.kaya_reference_forget(p, n)
+	})
+}
+
+func pickedText(handle uint64, field uint32) string {
+	var length C.size_t
+	if C.kaya_picked_text(C.uint64_t(handle), C.uint32_t(field), nil, 0, &length) == 0 || length == 0 {
+		return ""
+	}
+	out := make([]byte, int(length))
+	C.kaya_picked_text(C.uint64_t(handle), C.uint32_t(field),
+		(*C.uint8_t)(unsafe.Pointer(&out[0])), length, &length)
+	return string(out[:int(length)])
 }
 
 // Name is what Tx.Asset was given, not a path: there is no path to hand
