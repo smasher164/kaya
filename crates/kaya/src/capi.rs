@@ -3421,6 +3421,26 @@ pub extern "C" fn kaya_session_idle() {
     crate::session::idle();
 }
 
+/// A textarea's caret and selection, in UTF-8 bytes, for restoration
+/// (docs/restoration-plan.md SR1, SR5).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_session_caret(widget: u64, start: u64, stop: u64) {
+    with_window_scene("reporting a caret for restoration", |scene| {
+        scene.report_caret(crate::protocol::WidgetId(widget), start, stop);
+        (Vec::new(), ())
+    })
+}
+
+/// The row at the top of a For container's viewport, named by its copy's
+/// root widget, for restoration (docs/restoration-plan.md SR1, SR5).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_session_top_row(container: u64, copy: u64) {
+    with_window_scene("reporting a top row for restoration", |scene| {
+        scene.report_top_row(crate::protocol::WidgetId(container), crate::protocol::WidgetId(copy));
+        (Vec::new(), ())
+    })
+}
+
 /// A platform save point (SR5): synchronous.
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_session_save_point() {
@@ -4290,6 +4310,57 @@ pub(crate) fn picked_locator(handle: crate::protocol::PickedId) -> String {
              file handle comes from a picker result",
             handle.0
         ),
+    }
+}
+
+/// The phones' reference arms are the fan-out's (docs/restoration-plan.md §5
+/// step 4); no lane wires the references scene there yet.
+#[cfg(any(target_os = "ios", target_os = "android"))]
+fn references_unbuilt() -> ! {
+    panic!("kaya: durable references are not built on this platform yet (docs/restoration-plan.md §5 step 4)")
+}
+
+/// SR11: a durable reference for a picked file.
+pub(crate) fn picked_reference(handle: crate::protocol::PickedId) -> Result<String, crate::reference::ReferenceError> {
+    let source = picked_source(handle).unwrap_or_else(|| {
+        panic!("kaya: reference() names picked file {}, which was never minted — a file handle comes from a picker result", handle.0)
+    });
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        crate::reference::mint(crate::protocol::PickedSource::locator(&*source))
+    }
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        let _ = source;
+        references_unbuilt()
+    }
+}
+
+/// SR11: a token redeemed for a fresh picked handle, and the token to keep.
+pub(crate) fn redeem_reference(token: &str) -> Result<(crate::protocol::PickedFile, String), crate::reference::ReferenceError> {
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let (path, token) = crate::reference::redeem(token)?;
+        let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let source = std::sync::Arc::new(crate::protocol::PathSource { name: name.clone(), path: path.clone() });
+        let handle = picked_register(source);
+        Ok((crate::protocol::PickedFile { handle, name, local_path: path }, token))
+    }
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        let _ = token;
+        references_unbuilt()
+    }
+}
+
+/// SR11, SR13: the token leaves the durable count.
+pub(crate) fn forget_reference(token: &str) {
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    crate::reference::forget(token);
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        let _ = token;
+        references_unbuilt()
     }
 }
 

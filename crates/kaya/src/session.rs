@@ -59,11 +59,32 @@ impl Scope {
 
 pub(crate) type Values = BTreeMap<String, BTreeMap<String, PrefValue>>;
 
+/// A presentation facet kaya restores on its own (SR1 C, spec.rs's facet
+/// table): a textarea's caret and selection in UTF-8 offsets, or a For
+/// container's top row by key.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Facet {
+    Caret { start: u64, stop: u64 },
+    Row { key: crate::protocol::Value },
+}
+
+/// A facet as saved: the kind it was reported on (SR2: a facet whose id now
+/// names another kind is dropped) and its value.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Saved {
+    pub(crate) kind: String,
+    pub(crate) facet: Facet,
+}
+
+/// Facets by scope, then by a11y_id (SR2).
+pub(crate) type Facets = BTreeMap<String, BTreeMap<String, Saved>>;
+
 /// The file as read back, and the launch it makes (§4, the file's sweep).
 #[derive(Debug, PartialEq)]
 pub(crate) struct Swept {
     pub(crate) restored: Restored,
     pub(crate) values: Values,
+    pub(crate) facets: Facets,
     /// The one line the sweep prints, or none for an ordinary launch.
     pub(crate) why: Option<String>,
 }
@@ -83,7 +104,7 @@ pub(crate) fn bound_refusal(key: &str) -> String {
 /// The sweep, pure: the file's text, this app's id and restore version, and
 /// the platform's word.
 pub(crate) fn sweep(text: Option<&str>, app_id: &str, restore_version: i64, token: &Token) -> Swept {
-    let fresh = |why: Option<String>| Swept { restored: Restored::Fresh, values: Values::new(), why };
+    let fresh = |why: Option<String>| Swept { restored: Restored::Fresh, values: Values::new(), facets: Facets::new(), why };
     let Some(text) = text else {
         return fresh(None);
     };
@@ -109,6 +130,7 @@ pub(crate) fn sweep(text: Option<&str>, app_id: &str, restore_version: i64, toke
         return Swept {
             restored: Restored::Recovered,
             values: Values::new(),
+            facets: Facets::new(),
             why: Some(format!(
                 "kaya: the last launch (session {file_session}) ended before its first idle, \
                  so its state is discarded rather than restored into a second crash"
@@ -123,6 +145,7 @@ pub(crate) fn sweep(text: Option<&str>, app_id: &str, restore_version: i64, toke
             return Swept {
                 restored: Restored::Recovered,
                 values: Values::new(),
+                facets: Facets::new(),
                 why: Some(format!(
                     "kaya: the platform's token names session {id}, and the session file holds \
                      session {file_session}: the file is from a launch the platform's copy never saw"
@@ -135,13 +158,70 @@ pub(crate) fn sweep(text: Option<&str>, app_id: &str, restore_version: i64, toke
         return Swept {
             restored: Restored::Resumed,
             values: Values::new(),
+            facets: decode_facets(doc.get("facets")),
             why: Some(format!(
                 "kaya: the app's restore version moved from {file_version} to {restore_version}: \
                  its session values are discarded"
             )),
         };
     }
-    Swept { restored: Restored::Resumed, values: decode_values(doc.get("values")), why: None }
+    Swept {
+        restored: Restored::Resumed,
+        values: decode_values(doc.get("values")),
+        facets: decode_facets(doc.get("facets")),
+        why: None,
+    }
+}
+
+fn decode_facets(v: Option<&serde_json::Value>) -> Facets {
+    let mut out = Facets::new();
+    let Some(scopes) = v.and_then(|v| v.as_object()) else { return out };
+    for (scope, entries) in scopes {
+        let Some(entries) = entries.as_object() else { continue };
+        let mut map = BTreeMap::new();
+        for (id, entry) in entries {
+            let Some(kind) = entry.get("kind").and_then(|k| k.as_str()) else { continue };
+            let facet = if let Some([start, stop]) = entry.get("caret").and_then(|c| c.as_array()).map(|a| a.as_slice()) {
+                match (start.as_u64(), stop.as_u64()) {
+                    (Some(start), Some(stop)) => Facet::Caret { start, stop },
+                    _ => continue,
+                }
+            } else {
+                match entry.get("row").map(|r| (r.get("t").and_then(|t| t.as_str()), r.get("v"))) {
+                    Some((Some("i"), Some(v))) if v.is_i64() => Facet::Row { key: crate::protocol::Value::I64(v.as_i64().unwrap_or(0)) },
+                    Some((Some("s"), Some(serde_json::Value::String(s)))) => Facet::Row { key: crate::protocol::Value::Str(s.clone()) },
+                    _ => continue,
+                }
+            };
+            map.insert(id.clone(), Saved { kind: kind.to_owned(), facet });
+        }
+        out.insert(scope.clone(), map);
+    }
+    out
+}
+
+fn encode_facets(facets: &Facets) -> serde_json::Value {
+    let mut scopes = serde_json::Map::new();
+    for (scope, entries) in facets {
+        let mut map = serde_json::Map::new();
+        for (id, saved) in entries {
+            let entry = match &saved.facet {
+                Facet::Caret { start, stop } => serde_json::json!({ "kind": saved.kind, "caret": [start, stop] }),
+                Facet::Row { key: crate::protocol::Value::I64(n) } => {
+                    serde_json::json!({ "kind": saved.kind, "row": { "t": "i", "v": n } })
+                }
+                Facet::Row { key: crate::protocol::Value::Str(s) } => {
+                    serde_json::json!({ "kind": saved.kind, "row": { "t": "s", "v": s } })
+                }
+                Facet::Row { .. } => continue,
+            };
+            map.insert(id.clone(), entry);
+        }
+        if !map.is_empty() {
+            scopes.insert(scope.clone(), serde_json::Value::Object(map));
+        }
+    }
+    serde_json::Value::Object(scopes)
 }
 
 fn decode_values(v: Option<&serde_json::Value>) -> Values {
@@ -177,7 +257,7 @@ fn encode_value(value: &PrefValue) -> serde_json::Value {
 }
 
 /// The header and values as the file holds them.
-pub(crate) fn encode(app_id: &str, restore_version: i64, session: &str, first_idle: bool, values: &Values) -> String {
+pub(crate) fn encode(app_id: &str, restore_version: i64, session: &str, first_idle: bool, values: &Values, facets: &Facets) -> String {
     let mut scopes = serde_json::Map::new();
     for (scope, entries) in values {
         if entries.is_empty() {
@@ -197,6 +277,7 @@ pub(crate) fn encode(app_id: &str, restore_version: i64, session: &str, first_id
         "writer": { "pid": std::process::id() },
         "first_idle": first_idle,
         "values": serde_json::Value::Object(scopes),
+        "facets": encode_facets(facets),
     });
     serde_json::to_string_pretty(&doc).unwrap_or_default()
 }
@@ -205,6 +286,9 @@ pub(crate) fn encode(app_id: &str, restore_version: i64, session: &str, first_id
 
 struct Store {
     values: Values,
+    facets: Facets,
+    /// The facets the file brought, handed to the scene once (SR4).
+    restorable: Option<Facets>,
     restored: Restored,
     session: String,
     app_id: String,
@@ -277,6 +361,19 @@ fn session_dir() -> Option<PathBuf> {
         return Some(crate::prefs::selftest_session_root()?.join("selftest").join(&id).join("session"));
     }
     real_dir(&id)
+}
+
+/// A sibling of the session directory for another of kaya's cross-launch
+/// notes (the reference ledger, SR13), scratch under the harness like it.
+pub(crate) fn store_dir(leaf: &str) -> Option<PathBuf> {
+    if cfg!(test) {
+        return None;
+    }
+    let id = crate::scene::declared_id()?;
+    if crate::prefs::selftest() {
+        return Some(crate::prefs::selftest_session_root()?.join("selftest").join(&id).join(leaf));
+    }
+    Some(real_dir(&id)?.parent()?.join(leaf))
 }
 
 #[cfg(target_os = "macos")]
@@ -352,6 +449,8 @@ fn load_with(declared: Declared, token: Token, app_id: String, dir: Option<PathB
     let session = new_session_id();
     let mut store = Store {
         values: Values::new(),
+        facets: Facets::new(),
+        restorable: None,
         restored: Restored::Fresh,
         session,
         app_id: app_id.clone(),
@@ -385,6 +484,8 @@ fn load_with(declared: Declared, token: Token, app_id: String, dir: Option<PathB
     }
     store.restored = swept.restored;
     store.values = swept.values;
+    store.restorable = Some(swept.facets.clone());
+    store.facets = swept.facets;
     // THE CRASH-AT-LAUNCH MARK (SR6): written now, cleared at the first idle.
     store.dirty = true;
     flush_locked(&mut store);
@@ -421,7 +522,7 @@ fn flush_locked(store: &mut Store) {
         return;
     }
     let Some(dir) = store.dir.clone() else { return };
-    let text = encode(&store.app_id, store.restore_version, &store.session, store.first_idle, &store.values);
+    let text = encode(&store.app_id, store.restore_version, &store.session, store.first_idle, &store.values, &store.facets);
     if let Err(e) = write_atomic(&dir, &text) {
         say(&format!("kaya: the session file could not be written to {}: {e}", dir.display()));
         return;
@@ -461,7 +562,7 @@ pub(crate) fn set(scope: Scope, key: &str, value: PrefValue) -> Result<(), Strin
     }
     with(|s| {
         let prior = s.values.entry(scope.key()).or_default().insert(key.to_owned(), value);
-        let size = encode(&s.app_id, s.restore_version, &s.session, true, &s.values).len();
+        let size = encode(&s.app_id, s.restore_version, &s.session, true, &s.values, &s.facets).len();
         if size > BOUND {
             let entries = s.values.entry(scope.key()).or_default();
             match prior {
@@ -500,6 +601,43 @@ pub(crate) fn discard_scope(scope: Scope) {
     });
 }
 
+/// The facets the file brought, once: the scene restores them after the
+/// transaction that mounts each widget (SR4).
+pub(crate) fn take_restorable() -> Facets {
+    with(|s| s.restorable.take().unwrap_or_default())
+}
+
+/// A backend's report of a facet that settled (SR5): latest wins, written at
+/// the next idle. A report that would pass the file's bound is dropped.
+pub(crate) fn report_facet(scope: Scope, id: &str, saved: Saved) {
+    with(|s| {
+        let entries = s.facets.entry(scope.key()).or_default();
+        if entries.get(id) == Some(&saved) {
+            return;
+        }
+        let prior = entries.insert(id.to_owned(), saved);
+        let size = encode(&s.app_id, s.restore_version, &s.session, true, &s.values, &s.facets).len();
+        if size > BOUND {
+            let entries = s.facets.entry(scope.key()).or_default();
+            match prior {
+                Some(p) => entries.insert(id.to_owned(), p),
+                None => entries.remove(id),
+            };
+            return;
+        }
+        s.dirty = true;
+    });
+}
+
+/// A saved facet the scene found stale (SR2's kind change, SR4's expired hold).
+pub(crate) fn drop_facet(scope: Scope, id: &str) {
+    with(|s| {
+        if s.facets.get_mut(&scope.key()).and_then(|m| m.remove(id)).is_some() {
+            s.dirty = true;
+        }
+    });
+}
+
 static FIRST_BUILD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// A root was mounted: an idle after this is past the first build (SR6).
@@ -533,6 +671,9 @@ pub(crate) fn clear_selftest_scratch() {
     if let Some(dir) = session_dir() {
         let _ = std::fs::remove_file(dir.join(FILE));
     }
+    if let Some(dir) = store_dir("kaya-references") {
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
 
 #[cfg(test)]
@@ -545,7 +686,7 @@ mod tests {
         let mut values = Values::new();
         values.entry("app".into()).or_default().insert("draft".into(), PrefValue::Str("half typed".into()));
         values.entry("window.1".into()).or_default().insert("zoom".into(), PrefValue::F64(1.5));
-        let text = encode(APP, version, session, first_idle, &values);
+        let text = encode(APP, version, session, first_idle, &values, &Facets::new());
         text
     }
 
@@ -676,7 +817,23 @@ mod tests {
         app.insert("i".into(), PrefValue::I64(-42));
         app.insert("f".into(), PrefValue::F64(0.25));
         app.insert("b".into(), PrefValue::Bool(false));
-        let text = encode(APP, 0, "s1", true, &values);
+        let text = encode(APP, 0, "s1", true, &values, &Facets::new());
         assert_eq!(sweep(Some(&text), APP, 0, &Token::NoRule).values, values);
+    }
+
+    // SR8: facets are kept per entry across a restore-version move, which
+    // discards only the app's values; a fresh launch discards both.
+    #[test]
+    fn facets_round_trip_and_outlive_a_restore_version_move() {
+        let mut facets = Facets::new();
+        let w = facets.entry("window.0".into()).or_default();
+        w.insert("doc".into(), Saved { kind: "textarea".into(), facet: Facet::Caret { start: 2, stop: 6 } });
+        w.insert("rows".into(), Saved { kind: "column".into(), facet: Facet::Row { key: crate::protocol::Value::Str("m10".into()) } });
+        w.insert("ids".into(), Saved { kind: "column".into(), facet: Facet::Row { key: crate::protocol::Value::I64(-3) } });
+        let text = encode(APP, 0, "s1", true, &Values::new(), &facets);
+        assert_eq!(sweep(Some(&text), APP, 0, &Token::NoRule).facets, facets);
+        assert_eq!(sweep(Some(&text), APP, 1, &Token::NoRule).facets, facets);
+        assert!(sweep(Some(&text), APP, 0, &Token::Absent).facets.is_empty());
+        assert!(sweep(Some(&text), APP, 0, &Token::Session("s9".into())).facets.is_empty());
     }
 }

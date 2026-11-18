@@ -704,6 +704,13 @@ impl PickedFile {
         }
         Ok(())
     }
+
+    /// A DURABLE REFERENCE (docs/restoration-plan.md SR11): a text token of at
+    /// most 8 KiB the app stores anywhere and hands to [`crate::redeem`] at a
+    /// later launch. Fails at kaya's cap of 128 live references (SR13).
+    pub fn reference(&self) -> Result<String, crate::ReferenceError> {
+        crate::capi::picked_reference(self.handle)
+    }
 }
 
 /// A backup a safe save left behind that the next launch could not prove

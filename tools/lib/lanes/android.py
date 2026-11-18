@@ -571,7 +571,7 @@ MODS = {
 # verbs: the scenes that leave the app for DocumentsUI or read what an
 # assistive service is handed (the accessibility service), and the one
 # that opens a composing region (the helper IME).
-A11Y_SCENES = ["chat", "filedialog", "save", "saferestore", "editor", "media_picked", "toast"]
+A11Y_SCENES = ["chat", "filedialog", "save", "saferestore", "editor", "media_picked", "toast", "references"]
 IME_SCENES = ["ranges", "richtext"]
 
 # A scene is wired on this lane IF AND ONLY IF a suite lists it, or it
@@ -580,7 +580,7 @@ IME_SCENES = ["ranges", "richtext"]
 # by design (the system owns surfaces; DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem", "auxquit"]
 # docs/restoration-plan.md §5: the Mac first, then the fan-out wires it here.
-UNWIRED_SCENES = ["restore"]
+UNWIRED_SCENES = ["restore", "references"]
 
 
 def scene_of(leg):

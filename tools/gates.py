@@ -217,6 +217,9 @@ GATES = [
     ("check-doctabs", ["tools/check-doctabs.py"], False,
      "no input set is declared for it in build-id.py's GATES; same shape as "
      "check-tx-liveness above"),
+    # docs/restoration-plan.md §4: the facet table, the core and each
+    # backend's report are one census.
+    ("check-restore", ["tools/check-restore.py"], True, ""),
     ("check-verbs", ["tools/check-verbs.py"], True, ""),
     # The file-mode numbers against the spec that owns them: five
     # hand-written sites decode the integer kaya_open_picked takes.

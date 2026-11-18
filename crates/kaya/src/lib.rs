@@ -50,6 +50,8 @@ mod prefs_android;
 mod prefs_keyfile;
 // docs/restoration-plan.md: the session store and its file.
 mod session;
+// docs/restoration-plan.md SR11 to SR13: durable file references.
+mod reference;
 // App links (docs/app-links-plan.md §4): the route table, the one
 // matcher, and the door every platform arm hands a URL to. Ungated —
 // every target has a door.
@@ -153,6 +155,8 @@ pub use app::{
     Prefs, app_data_dir, prefs,
     // docs/restoration-plan.md SR3, SR6: the session store.
     Session, Restored, document_session, restored, session, window_session,
+    // docs/restoration-plan.md SR11 to SR13: durable file references.
+    Redeemed, forget, redeem,
     Field, ForScope, Inset, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     PathKey,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
@@ -172,6 +176,8 @@ pub use app::{
     // docs/network-images-plan.md N2, N12.
     ImagePhaseKind, RowImages,
 };
+
+pub use reference::{ReferenceError, ReferenceRefusal};
 
 /// A captured frame as the app's callback is handed it (docs/capture-plan.md §4).
 pub use capture::CaptureFrame;

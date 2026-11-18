@@ -275,7 +275,7 @@ PAD_EXTRAS = {
 # host rejects by design (DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem", "auxquit"]
 # docs/restoration-plan.md §5: the Mac first, then the fan-out wires it here.
-UNWIRED_SCENES = ["restore"]
+UNWIRED_SCENES = ["restore", "references"]
 # Off with a reason: the safe save's leftover backup is Android's alone.
 OFF_SCENES = {"saferestore": "a rename cannot leave a backup, so there is no second act to run (docs/rich-document-plan.md §4.1)"}
 

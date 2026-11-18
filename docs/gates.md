@@ -2247,6 +2247,18 @@ WINUI KEEPS THE ACTIVE TAB WHEN ANOTHER CLOSES since 2026-11-03 (docs/traps.md,
 the WinUI tab close that selected another tab). Five watched negatives,
 perturbed in memory with their counts printed, red on every run)
 
+## tools/check-restore.py
+
+`tools/check-restore.py` (SESSION RESTORATION'S FACETS, docs/restoration-plan.md
+§4 and SR1. spec.rs's RESTORE_FACETS names, per kind, the presentation facets
+kaya restores on its own; every row has its arm in scene.rs's restore, every
+variant of session::Facet has its row, a secure_field has none, and each
+backend either reports the facet (the SwiftUI interpreter's sessionCaret and
+sessionTopRow) or is listed in the gate's DEFERRED table with its reason, so a
+new facet is wanted on every backend the day it is added. Four negatives,
+perturbed in memory with their counts printed: a facet row cut, SwiftUI's row
+report cut, a secure_field given a facet, the scene's caret arm cut)
+
 ## tools/check-keyed.py
 
 `tools/check-keyed.py` (the gate cache is honest: a change inside a

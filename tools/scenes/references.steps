@@ -1,0 +1,20 @@
+# DURABLE FILE REFERENCES (docs/restoration-plan.md SR11, SR12): a picked
+# file's reference rides the session store across the platform's
+# continuation and redeems for the same bytes; a token with a foreign
+# checksum and a file deleted since are each refused by name.
+expect_title "references"
+expect label@status "no reference"
+file_dialog_goto $TMP/kaya-refs-$PID
+click button@pick
+expect_file_dialog kaya-refs-$PID decoy.txt picked.txt
+file_choose picked.txt
+expect label@status "minted"
+
+relaunch resume
+
+expect_title "references"
+expect label@status "redeemed: picked bytes"
+click button@foreign
+expect label@status "foreign"
+click button@delete
+expect label@status "missing"

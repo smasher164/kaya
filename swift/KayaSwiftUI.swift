@@ -2306,6 +2306,37 @@ func kayaTryScrollRow(_ node: KayaNode) {
     kayaPendingRowScrolls.remove(node.id)
 }
 
+/// docs/restoration-plan.md SR1: a named textarea's caret, for the session.
+func kayaReportCaret(_ node: KayaNode, _ text: String, _ range: NSRange) {
+    guard !node.a11yId.isEmpty else { return }
+    let start = kayaByteOffset(text, range.location)
+    let end = kayaByteOffset(text, NSMaxRange(range))
+    if start >= 0, end >= 0 { KayaHost.sessionCaret(node.id, start, end) }
+}
+
+/// The top row last reported per For container (SR1, SR5): a scroll reports
+/// when the row at its viewport's top changes, not per frame.
+var kayaReportedTopRow: [UInt64: UInt64] = [:]
+
+/// docs/restoration-plan.md SR1: the row at the top of each named For
+/// container inside this scroll, from the window-space frames the layout
+/// reported (kayaScrolledTo's reading).
+func kayaReportTopRows(_ scroll: KayaNode) {
+    let viewport = scroll.scrollViewportGlobal
+    guard viewport.height > 0, !kayaScrollHorizontal(scroll) else { return }
+    for container in scroll.children where !container.a11yId.isEmpty && container.tableColumns.isEmpty {
+        let rows = container.children.filter { kayaTableStamp($0.tag) != nil }
+        guard !rows.isEmpty else { continue }
+        let top = rows.first { row in
+            guard let frame = kayaNodeFrames[row.id] else { return false }
+            return frame.maxY > viewport.minY + 2
+        }
+        guard let top, kayaReportedTopRow[container.id] != top.id else { continue }
+        kayaReportedTopRow[container.id] = top.id
+        KayaHost.sessionTopRow(container.id, top.id)
+    }
+}
+
 func kayaDrainRowScrolls() {
     for id in kayaPendingRowScrolls {
         if let node = kayaScene.nodes[id] { kayaTryScrollRow(node) }
@@ -7120,6 +7151,14 @@ enum KayaHost {
 
     static func textReportedEdit(_ widget: UInt64, _ start: Int, _ end: Int, inserted: Int) {
         api.text_reported_edit(widget, UInt64(start), UInt64(end), UInt64(inserted))
+    }
+
+    static func sessionCaret(_ widget: UInt64, _ start: Int, _ end: Int) {
+        api.session_caret(widget, UInt64(start), UInt64(end))
+    }
+
+    static func sessionTopRow(_ container: UInt64, _ copy: UInt64) {
+        api.session_top_row(container, copy)
     }
 
     static func textSelection(_ widget: UInt64, _ start: Int, _ end: Int) {
@@ -33102,6 +33141,7 @@ struct KayaRender: View {
                                             node.scrollContentMaxX = f.maxX
                                             node.scrollContentMinX = f.minX
                                             kayaDrainRowScrolls()
+                                            DispatchQueue.main.async { kayaReportTopRows(node) }
                                             // docs/follow-end-plan.md §1: growth keeps
                                             // the end in view when the view sat at it
                                             // BEFORE the growth, along the scroll's axis.
@@ -40969,6 +41009,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let node, let view = notification.object as? NSTextView else { return }
             if restored, !view.hasMarkedText() { node.keptSelection = view.selectedRange }
+            if !view.hasMarkedText() { kayaReportCaret(node, view.string, view.selectedRange) }
             guard node.rich else { return }
             if let manager = view.textLayoutManager, let storage = view.textStorage {
                 kayaMarkSelectionMoved(manager, storage, view.selectedRange())
@@ -42070,6 +42111,9 @@ nonisolated(unsafe) var kayaSettingPanelColor = false
             func textViewDidChangeSelection(_ textView: UITextView) {
                 guard let node else { return }
                 if restored, textView.markedTextRange == nil { node.keptSelection = textView.selectedRange }
+                if textView.markedTextRange == nil {
+                    kayaReportCaret(node, textView.text ?? "", textView.selectedRange)
+                }
                 // docs/traps.md, the caret a point under a squeezed field: a
                 // selection a key or the app set is kept in view as an edit is.
                 (textView as? KayaTextView)?.selectionChangedAt = Date()

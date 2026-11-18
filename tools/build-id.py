@@ -64,6 +64,7 @@ GATES = {
     # Everything it reads is under tools/, which rides every key (gate_key).
     "check-python": [],
     "check-mirror": ["CLAUDE.md", "AGENTS.md"],
+    "check-restore": ["crates", "swift", "android", "docs"],
     # AGENTS.md is declared unread, per the over-approximate rule.
     "check-gates": ["CLAUDE.md", "AGENTS.md", "docs/gates.md"],
     "check-ledger": ["docs"],

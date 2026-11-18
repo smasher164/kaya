@@ -1005,6 +1005,26 @@ pub fn document_session(document: WindowId) -> Session {
 }
 
 /// Which launch this is (SR6): final before the first build.
+/// A redeemed reference: the file, and the token to keep, which is a new one
+/// when the platform re-minted it (docs/restoration-plan.md SR11).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Redeemed {
+    pub file: crate::PickedFile,
+    pub token: String,
+}
+
+/// Redeem a token [`crate::PickedFile::reference`] minted, at this launch or
+/// an earlier one (SR11). A refusal names its branch (SR12) and does not
+/// forget the token.
+pub fn redeem(token: &str) -> Result<Redeemed, crate::ReferenceError> {
+    crate::capi::redeem_reference(token).map(|(file, token)| Redeemed { file, token })
+}
+
+/// Release a reference from kaya's durable count (SR13).
+pub fn forget(token: &str) {
+    crate::capi::forget_reference(token)
+}
+
 pub fn restored() -> Restored {
     crate::session::restored()
 }

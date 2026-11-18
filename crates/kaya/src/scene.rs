@@ -951,6 +951,36 @@ struct HeaderBar {
     titles: Vec<String>,
 }
 
+/// A saved facet waiting for its widget (docs/restoration-plan.md SR4).
+/// `held` is the For's row count when it mounted without the saved key (F7).
+struct PendingFacet {
+    window: WindowId,
+    id: String,
+    saved: crate::session::Saved,
+    held: Option<usize>,
+}
+
+enum FacetOutcome {
+    Wait,
+    Applied,
+    Stale,
+}
+
+fn facet_kind(kind: WidgetKind) -> String {
+    format!("{kind:?}").to_lowercase()
+}
+
+/// The widgets a batch's own commands decide (SR4: the app's build wins).
+fn facet_commands(tx: &Transaction) -> std::collections::HashSet<WidgetId> {
+    tx.iter()
+        .filter_map(|op| match op {
+            TxOp::SelectRange { widget, .. } | TxOp::ScrollToRow { widget, .. } => Some(*widget),
+            TxOp::WidgetCommand { widget, command: CommandKind::Focus } => Some(*widget),
+            _ => None,
+        })
+        .collect()
+}
+
 #[derive(Default)]
 pub(crate) struct Scene {
     /// The brand accent, once set — brand is identity, not state, so
@@ -1354,6 +1384,12 @@ pub(crate) struct Scene {
     /// One per textarea declared `rich`; every delta is derived from it
     /// (docs/rich-text-plan.md R1/R4).
     rich: HashMap<WidgetId, RichDoc>,
+    /// Each live widget's authored a11y_id, the name a facet is saved under
+    /// (docs/restoration-plan.md SR2).
+    a11y_ids: HashMap<WidgetId, String>,
+    /// The facets the session file brought that no widget has taken yet
+    /// (SR4, F7); None until the first batch's tail reads them.
+    facet_pending: Option<Vec<PendingFacet>>,
     /// Ranged acts the core made on a rich textarea outside a transaction (a
     /// key, the repair after an edit; docs/rich-document-plan.md §11), for
     /// the backend to apply: `take_rich_ops`.
@@ -4839,6 +4875,7 @@ impl Scene {
 
     fn apply_records(&mut self, tx: Transaction) -> Vec<ApplyOp> {
         self.preflight_number_rows(&tx);
+        let commanded = facet_commands(&tx);
         let number_before = self.number_ranges.clone();
         let mut out = Vec::new();
         // First-dirtied order, deduped.
@@ -5034,6 +5071,11 @@ impl Scene {
                         }
                         if !self.toggle_dirty.contains(&widget) {
                             self.toggle_dirty.push(widget);
+                        }
+                    }
+                    if let (Prop::A11yId, PropValue::Const(Value::Str(name))) = (prop, &value) {
+                        if widget.0 & INTERNAL_BIT == 0 {
+                            self.a11y_ids.insert(widget, name.clone());
                         }
                     }
                     if let (Prop::Accepts, PropValue::Const(Value::Str(list))) = (prop, &value) {
@@ -7450,6 +7492,7 @@ impl Scene {
         // differ).
         self.absorb_number_writes(&out);
         self.absorb_text_writes(&out);
+        self.restore_facets(&commanded, &mut out);
 
         let step = group.map(|cap| self.bank_group(cap, &dirty, &rollback, &mut out));
         self.settle_toasts(toast_steps, step, &mut out);
@@ -8217,6 +8260,185 @@ impl Scene {
     ) {
         if let Some(doc) = self.rich.get_mut(&widget) {
             doc.reported = Some((start, end, inserted_len));
+        }
+    }
+
+    /// The window a live widget is mounted in, through the surface its root
+    /// is mounted on; None while it is unmounted.
+    fn widget_window(&self, widget: WidgetId) -> Option<WindowId> {
+        let mut root = widget;
+        while let Some(parent) = self.parent_of.get(&root) {
+            root = *parent;
+        }
+        let mut surface = self.mounted_windows.iter().find(|(_, r)| **r == root).map(|(s, _)| *s)?;
+        for _ in 0..64 {
+            if surface == crate::protocol::DEFAULT_WINDOW || self.windows.contains(&surface) {
+                return Some(surface);
+            }
+            surface = *self
+                .nav_entries
+                .get(&surface)
+                .or_else(|| self.section_of.get(&surface))
+                .or_else(|| self.document_of.get(&surface))
+                .or_else(|| self.region_of.get(&surface))
+                .or_else(|| self.dock_of.get(&surface))
+                .or_else(|| self.sheets.get(&surface))?;
+        }
+        None
+    }
+
+    /// A widget's facet name and window, when it has both (SR2).
+    fn facet_owner(&self, widget: WidgetId) -> Option<(WindowId, String)> {
+        let id = self.a11y_ids.get(&widget)?;
+        if id.is_empty() {
+            return None;
+        }
+        Some((self.widget_window(widget)?, id.clone()))
+    }
+
+    fn facet_waiting(&self, window: WindowId, id: &str) -> bool {
+        self.facet_pending.as_ref().is_some_and(|p| p.iter().any(|f| f.window == window && f.id == id))
+    }
+
+    /// A backend's caret report (SR5): a textarea's selection in UTF-8 bytes.
+    /// A report while the saved one still waits is the mount's, not the user's.
+    pub(crate) fn report_caret(&mut self, widget: WidgetId, start: u64, stop: u64) {
+        if self.widgets.get(&widget) != Some(&WidgetKind::Textarea) {
+            return;
+        }
+        let Some((window, id)) = self.facet_owner(widget) else { return };
+        if self.facet_waiting(window, &id) {
+            return;
+        }
+        let saved = crate::session::Saved {
+            kind: facet_kind(WidgetKind::Textarea),
+            facet: crate::session::Facet::Caret { start: start.min(stop), stop: start.max(stop) },
+        };
+        crate::session::report_facet(crate::session::Scope::Window(window.0), &id, saved);
+    }
+
+    /// A backend's report of the row at the top of a For container's
+    /// viewport, named by its copy's root (SR1's row form).
+    pub(crate) fn report_top_row(&mut self, container: WidgetId, copy: WidgetId) {
+        let Some((window, id)) = self.facet_owner(container) else { return };
+        if self.facet_waiting(window, &id) {
+            return;
+        }
+        let Some(kind) = self.widgets.get(&container).copied() else { return };
+        let key = self.stamps.iter().find_map(|((collection, path, key), stamp)| {
+            let mine = self.for_sites.get(&(*collection, path.clone())).is_some_and(|s| s.container == container);
+            (mine && stamp.roots.first() == Some(&copy)).then(|| key.to_value())
+        });
+        let Some(key) = key else { return };
+        let saved = crate::session::Saved { kind: facet_kind(kind), facet: crate::session::Facet::Row { key } };
+        crate::session::report_facet(crate::session::Scope::Window(window.0), &id, saved);
+    }
+
+    /// SR4: after the batch that mounts a widget, its saved facet applies
+    /// through the app's own ops unless this batch commanded the widget.
+    fn restore_facets(&mut self, commanded: &std::collections::HashSet<WidgetId>, out: &mut Vec<ApplyOp>) {
+        if self.facet_pending.is_none() {
+            let mut pending = Vec::new();
+            for (scope, entries) in crate::session::take_restorable() {
+                let Some(window) = scope.strip_prefix("window.").and_then(|w| w.parse::<u64>().ok()) else {
+                    continue;
+                };
+                for (id, saved) in entries {
+                    pending.push(PendingFacet { window: WindowId(window), id, saved, held: None });
+                }
+            }
+            self.facet_pending = Some(pending);
+        }
+        if self.facet_pending.as_ref().is_none_or(|p| p.is_empty()) {
+            return;
+        }
+        let pending = self.facet_pending.take().unwrap_or_default();
+        let mut keep = Vec::new();
+        for mut facet in pending {
+            let hits: Vec<WidgetId> = self
+                .a11y_ids
+                .iter()
+                .filter(|(_, name)| **name == facet.id)
+                .map(|(w, _)| *w)
+                .filter(|w| self.widget_window(*w) == Some(facet.window))
+                .collect();
+            let outcome = match hits.as_slice() {
+                [] => FacetOutcome::Wait,
+                [widget] => self.restore_one(*widget, &mut facet, commanded, out),
+                _ => {
+                    let kinds: Vec<String> = hits.iter().map(|w| facet_kind(self.widgets[w])).collect();
+                    eprintln!(
+                        "kaya: {} widgets in window {} share a11y_id {:?} ({}): none is restored \
+                         (docs/restoration-plan.md SR2)",
+                        hits.len(),
+                        facet.window.0,
+                        facet.id,
+                        kinds.join(", ")
+                    );
+                    FacetOutcome::Applied
+                }
+            };
+            match outcome {
+                FacetOutcome::Wait => keep.push(facet),
+                FacetOutcome::Applied => {}
+                FacetOutcome::Stale => {
+                    crate::session::drop_facet(crate::session::Scope::Window(facet.window.0), &facet.id)
+                }
+            }
+        }
+        self.facet_pending = Some(keep);
+    }
+
+    fn restore_one(
+        &mut self,
+        widget: WidgetId,
+        facet: &mut PendingFacet,
+        commanded: &std::collections::HashSet<WidgetId>,
+        out: &mut Vec<ApplyOp>,
+    ) -> FacetOutcome {
+        let kind = self.widgets[&widget];
+        if facet_kind(kind) != facet.saved.kind {
+            return FacetOutcome::Stale;
+        }
+        if commanded.contains(&widget) {
+            return FacetOutcome::Applied;
+        }
+        match facet.saved.facet.clone() {
+            crate::session::Facet::Caret { start, stop } => {
+                if kind != WidgetKind::Textarea {
+                    return FacetOutcome::Stale;
+                }
+                let text = self.range_text(widget, "restore", out);
+                let clamp = |at: u64| {
+                    let mut at = (at as usize).min(text.len());
+                    while !text.is_char_boundary(at) {
+                        at -= 1;
+                    }
+                    at as u64
+                };
+                let range = TextRange::new(clamp(start), clamp(stop));
+                let native = check_range(&text, widget, "restore", range);
+                out.push(ApplyOp::SelectRange { id: widget, range: native });
+                FacetOutcome::Applied
+            }
+            crate::session::Facet::Row { key } => {
+                if let Some((index, copy)) = self.row_copy(widget.0, &key) {
+                    out.push(ApplyOp::ScrollToRow { id: widget, copy, index: index as u32 });
+                    return FacetOutcome::Applied;
+                }
+                let Some(site) = self.for_sites.iter().find(|(_, s)| s.container == widget).map(|(k, _)| k.clone()) else {
+                    return FacetOutcome::Stale;
+                };
+                let rows = self.coll_instances.get(&site).map(|c| c.order.len()).unwrap_or(0);
+                match facet.held {
+                    None => {
+                        facet.held = Some(rows);
+                        FacetOutcome::Wait
+                    }
+                    Some(at) if rows > at => FacetOutcome::Stale,
+                    Some(_) => FacetOutcome::Wait,
+                }
+            }
         }
     }
 
@@ -23766,6 +23988,166 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
         ops.iter()
             .filter(|op| matches!(op, ApplyOp::MoveChild { .. }))
             .count()
+    }
+
+    // --- Restored facets (docs/restoration-plan.md SR4, F7) -------------------
+
+    fn pending(id: &str, kind: &str, facet: crate::session::Facet) -> PendingFacet {
+        PendingFacet {
+            window: DEFAULT_WINDOW,
+            id: id.into(),
+            saved: crate::session::Saved { kind: kind.into(), facet },
+            held: None,
+        }
+    }
+
+    fn named(widget: u64, name: &str) -> TxOp {
+        TxOp::SetProperty { widget: WidgetId(widget), prop: Prop::A11yId, value: PropValue::Const(Value::Str(name.into())) }
+    }
+
+    fn selects(ops: &[ApplyOp]) -> Vec<(u64, u64)> {
+        ops.iter()
+            .filter_map(|op| match op {
+                ApplyOp::SelectRange { range, .. } => Some((range.start, range.stop)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn row_scrolls(ops: &[ApplyOp]) -> Vec<u32> {
+        ops.iter()
+            .filter_map(|op| match op {
+                ApplyOp::ScrollToRow { index, .. } => Some(*index),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn caret_scene(caret: (u64, u64)) -> Scene {
+        let mut scene = Scene::new();
+        scene.facet_pending =
+            Some(vec![pending("doc", "textarea", crate::session::Facet::Caret { start: caret.0, stop: caret.1 })]);
+        scene
+    }
+
+    #[test]
+    fn a_restored_caret_applies_after_the_batch_that_mounts_its_textarea() {
+        let mut scene = caret_scene((2, 6));
+        let mut tx = editor("hello world");
+        tx.insert(1, named(1, "doc"));
+        assert_eq!(selects(&scene.apply(tx)), vec![(2, 6)]);
+        assert!(scene.facet_pending.as_ref().unwrap().is_empty(), "a facet applies once");
+    }
+
+    #[test]
+    fn the_apps_own_select_range_in_its_first_build_wins() {
+        let mut scene = caret_scene((2, 6));
+        let mut tx = editor("hello world");
+        tx.insert(1, named(1, "doc"));
+        tx.push(TxOp::SelectRange { widget: WidgetId(1), range: TextRange::new(0, 1) });
+        assert_eq!(selects(&scene.apply(tx)), vec![(0, 1)]);
+    }
+
+    #[test]
+    fn a_caret_past_the_restored_text_clamps_to_its_end() {
+        let mut scene = caret_scene((20, 30));
+        let mut tx = editor("héllo");
+        tx.insert(1, named(1, "doc"));
+        let end = check_range("héllo", WidgetId(1), "t", TextRange::new(6, 6));
+        assert_eq!(selects(&scene.apply(tx)), vec![(end.start, end.stop)], "the end, six bytes in");
+        let mut scene = caret_scene((2, 2));
+        let mut tx = editor("héllo");
+        tx.insert(1, named(1, "doc"));
+        let floor = check_range("héllo", WidgetId(1), "t", TextRange::new(1, 1));
+        assert_eq!(selects(&scene.apply(tx)), vec![(floor.start, floor.stop)], "inside a character it floors to the boundary");
+    }
+
+    #[test]
+    fn a_facet_whose_id_now_names_another_kind_is_dropped() {
+        let mut scene = Scene::new();
+        scene.facet_pending =
+            Some(vec![pending("doc", "entry", crate::session::Facet::Caret { start: 1, stop: 1 })]);
+        let mut tx = editor("hello");
+        tx.insert(1, named(1, "doc"));
+        assert!(selects(&scene.apply(tx)).is_empty());
+        assert!(scene.facet_pending.as_ref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn two_live_widgets_sharing_an_id_are_both_left_unrestored() {
+        let mut scene = caret_scene((1, 1));
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(5), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Textarea },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Textarea },
+            named(1, "doc"),
+            named(2, "doc"),
+            TxOp::AddChild { parent: WidgetId(5), child: WidgetId(1) },
+            TxOp::AddChild { parent: WidgetId(5), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(5) },
+        ])
+        .iter()
+        .for_each(|op| assert!(!matches!(op, ApplyOp::SelectRange { .. })));
+    }
+
+    fn row_facet(key: i64) -> Scene {
+        let mut scene = Scene::new();
+        scene.declare_windowing();
+        scene.facet_pending =
+            Some(vec![pending("rows", "column", crate::session::Facet::Row { key: Value::I64(key) })]);
+        scene
+    }
+
+    fn named_table() -> Transaction {
+        let mut tx = table_scene(2);
+        tx.push(named(4, "rows"));
+        tx
+    }
+
+    #[test]
+    fn a_restored_row_lands_when_the_rows_arrive_in_the_mounting_batch() {
+        let mut scene = row_facet(3);
+        let mut tx = named_table();
+        tx.extend((0..10).map(row_insert));
+        assert_eq!(row_scrolls(&scene.apply(tx)), vec![3]);
+    }
+
+    #[test]
+    fn a_restored_row_is_held_until_rows_arrive_in_transaction_two() {
+        let mut scene = row_facet(3);
+        assert!(row_scrolls(&scene.apply(named_table())).is_empty());
+        assert_eq!(scene.facet_pending.as_ref().unwrap()[0].held, Some(0), "held at mount");
+        assert_eq!(row_scrolls(&scene.apply((0..10).map(row_insert).collect())), vec![3]);
+    }
+
+    #[test]
+    fn an_insert_without_the_key_ends_the_hold() {
+        let mut scene = row_facet(42);
+        scene.apply(named_table());
+        assert!(row_scrolls(&scene.apply((0..10).map(row_insert).collect())).is_empty());
+        assert!(scene.facet_pending.as_ref().unwrap().is_empty(), "discarded");
+        assert!(row_scrolls(&scene.apply(vec![row_insert(42)])).is_empty(), "and never comes back");
+    }
+
+    #[test]
+    fn the_apps_own_scroll_to_row_ends_the_hold() {
+        let mut scene = row_facet(3);
+        scene.apply(named_table());
+        let mut tx: Transaction = (0..10).map(row_insert).collect();
+        tx.push(TxOp::ScrollToRow { widget: WidgetId(4), key: Value::I64(7) });
+        assert_eq!(row_scrolls(&scene.apply(tx)), vec![7]);
+        assert!(scene.facet_pending.as_ref().unwrap().is_empty());
+    }
+
+    #[test]
+    fn reports_name_the_facet_by_a11y_id_and_wait_while_a_restore_is_pending() {
+        let mut scene = row_facet(99);
+        let mut tx = named_table();
+        tx.extend((0..10).map(row_insert));
+        scene.apply(tx);
+        assert_eq!(scene.facet_owner(WidgetId(4)), Some((DEFAULT_WINDOW, "rows".to_owned())));
+        assert!(scene.facet_waiting(DEFAULT_WINDOW, "rows"), "the hold swallows the layout's report");
+        assert_eq!(scene.facet_owner(WidgetId(1)), None, "no a11y_id, no facet");
     }
 
     /// docs/traps.md, an undo step's table delta replayed without the band.

@@ -3244,6 +3244,8 @@ typedef struct KayaHostApi {
   void (*session_idle)(void);
   void (*session_save_point)(void);
   uint32_t (*session_restored)(void);
+  void (*session_caret)(uint64_t, uint64_t, uint64_t);
+  void (*session_top_row)(uint64_t, uint64_t);
 } KayaHostApi;
 
 
@@ -3745,6 +3747,18 @@ uint32_t kaya_session_restored(void);
  * writes what changed.
  */
 void kaya_session_idle(void);
+
+/**
+ * A textarea's caret and selection, in UTF-8 bytes, for restoration
+ * (docs/restoration-plan.md SR1, SR5).
+ */
+void kaya_session_caret(uint64_t widget, uint64_t start, uint64_t stop);
+
+/**
+ * The row at the top of a For container's viewport, named by its copy's
+ * root widget, for restoration (docs/restoration-plan.md SR1, SR5).
+ */
+void kaya_session_top_row(uint64_t container, uint64_t copy);
 
 /**
  * A platform save point (SR5): synchronous.

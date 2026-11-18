@@ -500,6 +500,8 @@ pub struct KayaHostApi {
     pub session_idle: extern "C" fn(),
     pub session_save_point: extern "C" fn(),
     pub session_restored: extern "C" fn() -> u32,
+    pub session_caret: extern "C" fn(u64, u64, u64),
+    pub session_top_row: extern "C" fn(u64, u64),
 }
 
 /// # Safety
@@ -839,6 +841,8 @@ pub(crate) fn run() -> i32 {
         session_idle: crate::capi::kaya_session_idle,
         session_save_point: crate::capi::kaya_session_save_point,
         session_restored: crate::capi::kaya_session_restored,
+        session_caret: crate::capi::kaya_session_caret,
+        session_top_row: crate::capi::kaya_session_top_row,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

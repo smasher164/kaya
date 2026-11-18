@@ -353,6 +353,8 @@ docs/gates.md.
      flat, tokened card per platform.
    - `tools/check-doctabs.py` — document tabs: the Mac strip through public
      API only, every document prop applied or depth-stubbed per backend.
+   - `tools/check-restore.py` — every restored facet in spec.rs's table has
+     its core arm and each backend's report, or a stated deferral.
    - `tools/check-keyed.py` — the gate cache re-runs on input change and
      never caches a failure.
    - `tools/swift-typecheck.sh` — the Swift guests, the Swift bindings and

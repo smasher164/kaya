@@ -636,6 +636,12 @@ pub fn hash() -> u64 {
     h
 }
 
+/// The presentation facets kaya restores on its own, by kind
+/// (docs/restoration-plan.md SR1). tools/check-restore.py holds this table,
+/// session::Facet's variants and every backend's report to one census; a
+/// secure_field has no row, ever (SR7). Outside SPEC: it moves no hash.
+pub const RESTORE_FACETS: &[(&str, &str)] = &[("textarea", "caret"), ("for", "row")];
+
 pub const SPEC: ProtocolSpec = ProtocolSpec {
     tx: &[
         Record {
