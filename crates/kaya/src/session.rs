@@ -429,6 +429,8 @@ fn session_dir() -> Option<PathBuf> {
 /// A sibling of the session directory for another of kaya's cross-launch
 /// notes (the reference ledger, SR13), scratch under the harness like it.
 pub(crate) fn store_dir(leaf: &str) -> Option<PathBuf> {
+    #[cfg(not(any(test, target_os = "android")))]
+    crate::prepare_process();
     if cfg!(test) {
         return None;
     }
@@ -498,6 +500,11 @@ fn new_session_id() -> String {
 }
 
 fn load() -> Store {
+    // A binding may read the store before kaya_run (Python's top level), and
+    // act two learns it is a scene run only from the marker prepare_process
+    // adopts: without this, act two read the user's real store.
+    #[cfg(not(any(test, target_os = "android")))]
+    crate::prepare_process();
     let (declared, why) = parse_declared(crate::scene::declared_value);
     for line in &why {
         say(line);

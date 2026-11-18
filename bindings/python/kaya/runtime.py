@@ -128,6 +128,54 @@ _lib.kaya_pref_set_bool.restype = None
 _lib.kaya_pref_remove.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
 _lib.kaya_pref_remove.restype = None
 
+# The session store (docs/restoration-plan.md SR3): prefs' shape plus a
+# scope (0 app, 1 window, 2 document) and the surface's id.
+_SESSION_KEY = [ctypes.c_uint32, ctypes.c_uint64, ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_session_get_string.argtypes = _SESSION_KEY + [
+    ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)]
+_lib.kaya_session_get_string.restype = ctypes.c_int
+_lib.kaya_session_get_i64.argtypes = _SESSION_KEY + [ctypes.POINTER(ctypes.c_int64)]
+_lib.kaya_session_get_i64.restype = ctypes.c_int
+_lib.kaya_session_get_f64.argtypes = _SESSION_KEY + [ctypes.POINTER(ctypes.c_double)]
+_lib.kaya_session_get_f64.restype = ctypes.c_int
+_lib.kaya_session_get_bool.argtypes = _SESSION_KEY + [ctypes.POINTER(ctypes.c_uint8)]
+_lib.kaya_session_get_bool.restype = ctypes.c_int
+_lib.kaya_session_set_string.argtypes = _SESSION_KEY + [ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_session_set_string.restype = None
+_lib.kaya_session_set_i64.argtypes = _SESSION_KEY + [ctypes.c_int64]
+_lib.kaya_session_set_i64.restype = None
+_lib.kaya_session_set_f64.argtypes = _SESSION_KEY + [ctypes.c_double]
+_lib.kaya_session_set_f64.restype = None
+_lib.kaya_session_set_bool.argtypes = _SESSION_KEY + [ctypes.c_uint8]
+_lib.kaya_session_set_bool.restype = None
+_lib.kaya_session_remove.argtypes = _SESSION_KEY
+_lib.kaya_session_remove.restype = None
+_lib.kaya_session_restored.argtypes = []
+_lib.kaya_session_restored.restype = ctypes.c_uint32
+_lib.kaya_session_window_count.argtypes = []
+_lib.kaya_session_window_count.restype = ctypes.c_uint32
+_lib.kaya_session_window.argtypes = [
+    ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint64),
+    ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_uint32),
+    ctypes.POINTER(ctypes.c_uint64), ctypes.c_size_t]
+_lib.kaya_session_window.restype = ctypes.c_int64
+_lib.kaya_session_restore.argtypes = [ctypes.c_uint32, ctypes.c_uint64, ctypes.c_uint64]
+_lib.kaya_session_restore.restype = None
+# Durable references (SR11).
+_lib.kaya_reference_mint.argtypes = [
+    ctypes.c_uint64, ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)]
+_lib.kaya_reference_mint.restype = ctypes.c_uint32
+_lib.kaya_reference_redeem.argtypes = [
+    ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_uint64),
+    ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)]
+_lib.kaya_reference_redeem.restype = ctypes.c_uint32
+_lib.kaya_reference_forget.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_reference_forget.restype = None
+_lib.kaya_picked_text.argtypes = [
+    ctypes.c_uint64, ctypes.c_uint32, ctypes.c_char_p, ctypes.c_size_t,
+    ctypes.POINTER(ctypes.c_size_t)]
+_lib.kaya_picked_text.restype = ctypes.c_int
+
 # The formatter door and the catalog (docs/compliance-plan.md §3; the C
 # API block in crates/kaya/src/capi.rs).
 _lib.kaya_fmt_date.argtypes = [ctypes.c_int64, ctypes.c_int64, ctypes.c_char_p,
@@ -779,3 +827,128 @@ def pref_set_bool(key: str, value: bool) -> None:
 def pref_remove(key: str) -> None:
     raw, n = _key(key)
     _lib.kaya_pref_remove(raw, n)
+
+
+def session_get_string(scope: int, sid: int, key: str) -> str | None:
+    raw, n = _key(key)
+    length = ctypes.c_size_t(0)
+    if not _lib.kaya_session_get_string(scope, sid, raw, n, None, 0, ctypes.byref(length)):
+        return None
+    if length.value == 0:
+        return ""
+    out = ctypes.create_string_buffer(length.value)
+    if not _lib.kaya_session_get_string(scope, sid, raw, n, out, length.value,
+                                        ctypes.byref(length)):
+        return None
+    return out.raw[:length.value].decode("utf-8", "replace")
+
+
+def session_get_i64(scope: int, sid: int, key: str) -> int | None:
+    raw, n = _key(key)
+    out = ctypes.c_int64(0)
+    if not _lib.kaya_session_get_i64(scope, sid, raw, n, ctypes.byref(out)):
+        return None
+    return out.value
+
+
+def session_get_f64(scope: int, sid: int, key: str) -> float | None:
+    raw, n = _key(key)
+    out = ctypes.c_double(0.0)
+    if not _lib.kaya_session_get_f64(scope, sid, raw, n, ctypes.byref(out)):
+        return None
+    return out.value
+
+
+def session_get_bool(scope: int, sid: int, key: str) -> bool | None:
+    raw, n = _key(key)
+    out = ctypes.c_uint8(0)
+    if not _lib.kaya_session_get_bool(scope, sid, raw, n, ctypes.byref(out)):
+        return None
+    return out.value != 0
+
+
+def session_set_string(scope: int, sid: int, key: str, value: str) -> None:
+    raw, n = _key(key)
+    packed = value.encode("utf-8")
+    _lib.kaya_session_set_string(scope, sid, raw, n, packed, len(packed))
+
+
+def session_set_i64(scope: int, sid: int, key: str, value: int) -> None:
+    raw, n = _key(key)
+    _lib.kaya_session_set_i64(scope, sid, raw, n, value)
+
+
+def session_set_f64(scope: int, sid: int, key: str, value: float) -> None:
+    raw, n = _key(key)
+    _lib.kaya_session_set_f64(scope, sid, raw, n, value)
+
+
+def session_set_bool(scope: int, sid: int, key: str, value: bool) -> None:
+    raw, n = _key(key)
+    _lib.kaya_session_set_bool(scope, sid, raw, n, 1 if value else 0)
+
+
+def session_remove(scope: int, sid: int, key: str) -> None:
+    raw, n = _key(key)
+    _lib.kaya_session_remove(scope, sid, raw, n)
+
+
+def session_restored() -> int:
+    return int(_lib.kaya_session_restored())
+
+
+def session_windows() -> list[tuple[int, list[int], int, int, int]]:
+    """(window, documents, active, section, depth); 0 is none."""
+    out: list[tuple[int, list[int], int, int, int]] = []
+    for index in range(int(_lib.kaya_session_window_count())):
+        w, a, s = ctypes.c_uint64(0), ctypes.c_uint64(0), ctypes.c_uint64(0)
+        depth = ctypes.c_uint32(0)
+        count = _lib.kaya_session_window(index, ctypes.byref(w), ctypes.byref(a),
+                                         ctypes.byref(s), ctypes.byref(depth), None, 0)
+        if count < 0:
+            break
+        docs = (ctypes.c_uint64 * max(count, 1))()
+        _lib.kaya_session_window(index, None, None, None, None, docs, count)
+        out.append((w.value, [docs[i] for i in range(count)], a.value, s.value, depth.value))
+    return out
+
+
+def session_restore(scope: int, saved: int, now: int) -> None:
+    _lib.kaya_session_restore(scope, saved, now)
+
+
+_REFERENCE_CAP = 16 * 1024
+
+
+def reference_mint(handle: int) -> tuple[int, str]:
+    """(0, token) or (refusal code, sentence)."""
+    out = ctypes.create_string_buffer(_REFERENCE_CAP)
+    length = ctypes.c_size_t(0)
+    code = _lib.kaya_reference_mint(handle, out, _REFERENCE_CAP, ctypes.byref(length))
+    return int(code), out.raw[:min(length.value, _REFERENCE_CAP)].decode("utf-8", "replace")
+
+
+def reference_redeem(token: str) -> tuple[int, int, str]:
+    """(0, handle, token to keep) or (refusal code, 0, sentence)."""
+    raw = token.encode("utf-8")
+    handle = ctypes.c_uint64(0)
+    out = ctypes.create_string_buffer(_REFERENCE_CAP)
+    length = ctypes.c_size_t(0)
+    code = _lib.kaya_reference_redeem(raw, len(raw), ctypes.byref(handle), out,
+                                      _REFERENCE_CAP, ctypes.byref(length))
+    return (int(code), handle.value,
+            out.raw[:min(length.value, _REFERENCE_CAP)].decode("utf-8", "replace"))
+
+
+def reference_forget(token: str) -> None:
+    raw = token.encode("utf-8")
+    _lib.kaya_reference_forget(raw, len(raw))
+
+
+def picked_text(handle: int, field: int) -> str:
+    length = ctypes.c_size_t(0)
+    if not _lib.kaya_picked_text(handle, field, None, 0, ctypes.byref(length)):
+        return ""
+    out = ctypes.create_string_buffer(max(length.value, 1))
+    _lib.kaya_picked_text(handle, field, out, length.value, ctypes.byref(length))
+    return out.raw[:length.value].decode("utf-8", "replace")

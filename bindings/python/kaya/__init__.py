@@ -2999,8 +2999,57 @@ class PickedFile:
         on iOS and the desktops that never fires."""
         runtime.save_picked(self.handle, data)
 
+    def reference(self) -> str:
+        """A durable reference to this file (docs/restoration-plan.md
+        SR11): a text token, at most 8 KiB, to store anywhere and redeem
+        at a later launch with kaya.redeem. Raises KayaReferenceError naming
+        the cap (SR13)."""
+        code, text = runtime.reference_mint(self.handle)
+        if code:
+            raise KayaReferenceError(_REFUSALS[code], text)
+        return text
+
     def __repr__(self) -> str:
         return f"PickedFile(name={self.name!r}, local_path={self.local_path!r})"
+
+
+_REFUSALS = {1: "missing", 2: "revoked", 3: "provider_gone", 4: "foreign", 5: "cap"}
+
+
+class KayaReferenceError(KayaError):
+    """A durable reference that did not redeem or mint (SR12): `refusal`
+    is one of missing, revoked, provider_gone, foreign, cap, and the
+    message is kaya's sentence. A failed redeem does not forget the token."""
+
+    def __init__(self, refusal: str, message: str) -> None:
+        super().__init__(message)
+        self.refusal: str = refusal
+
+
+class Redeemed:
+    """A redeemed reference: the file, and the token to keep, which is a
+    new one when the platform re-minted it."""
+
+    __slots__ = ("file", "token")
+
+    def __init__(self, file: PickedFile, token: str) -> None:
+        self.file: PickedFile = file
+        self.token: str = token
+
+
+def redeem(token: str) -> Redeemed:
+    """Redeem a token PickedFile.reference minted, at this launch or an
+    earlier one (SR11), for an ordinary picked file."""
+    code, handle, text = runtime.reference_redeem(token)
+    if code:
+        raise KayaReferenceError(_REFUSALS[code], text)
+    return Redeemed(PickedFile(handle, runtime.picked_text(handle, 0),
+                               runtime.picked_text(handle, 1) or None), text)
+
+
+def forget(token: str) -> None:
+    """Release a reference from kaya's durable count (SR13)."""
+    runtime.reference_forget(token)
 
 
 class LeftoverBackup:
@@ -5129,6 +5178,127 @@ _PREFS = Prefs()
 def prefs() -> Prefs:
     """The app's preferences store — one per process."""
     return _PREFS
+
+
+def _session_key(key: object) -> str:
+    key = str(key)
+    if not key:
+        raise KayaValueError("kaya: a session key must not be empty")
+    return key
+
+
+def _session_write_key(key: object) -> str:
+    key = _session_key(key)
+    if key.startswith("kaya."):
+        raise KayaValueError(
+            f'kaya: session key "{key}" is reserved '
+            "(the kaya. prefix is kaya's own)")
+    return key
+
+
+class Session:
+    """The session store (docs/restoration-plan.md SR3): prefs' four types
+    with a session's lifetime, scoped to the app, a window or a document,
+    read before the first build and written whenever a value changes. The
+    platform decides whether a launch continues the last (kaya.restored()).
+    Do not put secrets in it (SR7)."""
+
+    __slots__ = ("_scope", "_id")
+
+    def __init__(self, scope: int, sid: int) -> None:
+        self._scope = scope
+        self._id = sid
+
+    @overload
+    def get(self, key: str, default: bool) -> bool: ...
+
+    @overload
+    def get(self, key: str, default: int) -> int: ...
+
+    @overload
+    def get(self, key: str, default: float) -> float: ...
+
+    @overload
+    def get(self, key: str, default: str) -> str: ...
+
+    def get(self, key: str, default: bool | int | float | str) -> Any:
+        """Prefs.get's dispatch on `default`'s type, bool before int."""
+        k = _session_key(key)
+        if isinstance(default, bool):
+            value: Any = runtime.session_get_bool(self._scope, self._id, k)
+        elif isinstance(default, int):
+            value = runtime.session_get_i64(self._scope, self._id, k)
+        elif isinstance(default, float):
+            value = runtime.session_get_f64(self._scope, self._id, k)
+        elif isinstance(default, str):
+            value = runtime.session_get_string(self._scope, self._id, k)
+        else:
+            raise KayaTypeError(
+                f"kaya: a session value's default is a bool, int, float or "
+                f"str, not {type(default).__name__}")
+        return default if value is None else value
+
+    def set(self, key: str, value: bool | int | float | str) -> None:
+        k = _session_write_key(key)
+        if isinstance(value, bool):
+            runtime.session_set_bool(self._scope, self._id, k, value)
+        elif isinstance(value, int):
+            runtime.session_set_i64(self._scope, self._id, k, value)
+        elif isinstance(value, float):
+            runtime.session_set_f64(self._scope, self._id, k, value)
+        elif isinstance(value, str):
+            runtime.session_set_string(self._scope, self._id, k, value)
+        else:
+            raise KayaTypeError(
+                f"kaya: a session value is a bool, int, float or "
+                f"str, not {type(value).__name__}")
+
+    def remove(self, key: str) -> None:
+        runtime.session_remove(self._scope, self._id, _session_write_key(key))
+
+
+def app_session() -> Session:
+    """The session store's app scope (SR3). Spelled app_session because
+    kaya.session declares the media session (docs/media-plan.md §5)."""
+    return Session(0, 0)
+
+
+def window_session(window: int) -> Session:
+    """A window's session scope, discarded with the window (SR9)."""
+    return Session(1, int(window))
+
+
+def document_session(document: int) -> Session:
+    """A document's session scope, discarded with the document (SR9)."""
+    return Session(2, int(document))
+
+
+def restored() -> str:
+    """Which launch this is (SR6): "fresh", "resumed" or "recovered",
+    final before the first build."""
+    return ("fresh", "resumed", "recovered")[runtime.session_restored()]
+
+
+class RestoredWindow:
+    """One window as the last launch left it (SR9). Recreate it from its
+    scope's values and hand the id back through `restore=`."""
+
+    __slots__ = ("id", "documents", "active_document", "section", "depth")
+
+    def __init__(self, wid: int, documents: list[int], active: int,
+                 section: int, depth: int) -> None:
+        self.id: int = wid
+        self.documents: list[int] = documents
+        self.active_document: int | None = active or None
+        self.section: int | None = section or None
+        self.depth: int = depth
+
+
+def restored_windows() -> list[RestoredWindow]:
+    """The windows the last launch left, the primary first; empty on a
+    fresh launch. A scope not taken back is discarded at the first idle
+    after the first build."""
+    return [RestoredWindow(*w) for w in runtime.session_windows()]
 
 
 def signal(initial: V) -> Signal[V]:
@@ -9000,7 +9170,8 @@ class App:
                       new_document: bool | None = None,
                       on_new_document: Callable[[], object] | None = None,
                       on_documents_close_requested: Callable[[list[int]], object] | None = None,
-                      on_documents_detached: Callable[[int, list[int]], object] | None = None
+                      on_documents_detached: Callable[[int, list[int]], object] | None = None,
+                      restore: int | None = None
                       ) -> _TxScope:
         """An auxiliary surface's scene scope: create_window plus its
         props on entry, and the single top-level container mounts INTO IT
@@ -9011,6 +9182,8 @@ class App:
         to agree. on_closed() fires when a non-veto auxiliary is
         chrome-closed and retires with it. The prop set is App.window's,
         called again with this surface's id."""
+        if restore is not None:
+            runtime.session_restore(1, int(restore), int(window_id))
         if on_close_requested is not None:
             self._close_requested[int(window_id)] = on_close_requested
         if on_closed is not None:
@@ -9233,7 +9406,7 @@ class App:
                      on_close_requested: Callable[[], object] | None = None,
                      on_closed: Callable[[], object] | None = None,
                      on_moved: Callable[[int, int], object] | None = None,
-                     window: int = 0) -> _TxScope:
+                     window: int = 0, restore: int | None = None) -> _TxScope:
         """A document's scene scope (docs/doctabs-plan.md §2): the single
         top-level container mounts INTO IT on exit. Document ids are
         guest-allocated in the shared surface namespace; the first one a
@@ -9247,6 +9420,8 @@ class App:
         on_moved(window, index) fires when the user drags it to another
         place or into another window."""
         did = int(document_id)
+        if restore is not None:
+            runtime.session_restore(2, int(restore), did)
         records = [wire.tx_add_document(int(window), did)]
         if on_selected is not None:
             self._document_selected[did] = on_selected

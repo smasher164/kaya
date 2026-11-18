@@ -3761,6 +3761,81 @@ void kaya_session_caret(uint64_t widget, uint64_t start, uint64_t stop);
 void kaya_session_top_row(uint64_t container, uint64_t copy);
 
 /**
+ * How many windows the last launch left (docs/restoration-plan.md SR9),
+ * the primary first; 0 on a fresh launch.
+ */
+uint32_t kaya_session_window_count(void);
+
+/**
+ * The `index`th restored window: its id, active document, selected section
+ * (0 = none, since 0 is the primary window and never a document or section)
+ * and navigation depth; its documents in order into `docs`, up to `cap`.
+ * Answers how many documents it has, or -1 past the end.
+ *
+ * # Safety
+ * Each out pointer null or valid for one value; `docs` null or valid for `cap`.
+ */
+int64_t kaya_session_window(uint32_t index,
+                            uint64_t *window,
+                            uint64_t *active,
+                            uint64_t *section,
+                            uint32_t *depth,
+                            uint64_t *docs,
+                            uintptr_t cap);
+
+/**
+ * `restore(saved)` on a surface (SR9): `scope` 1 a window, 2 a document. A
+ * scope that does not come back prints its one line.
+ */
+void kaya_session_restore(uint32_t scope, uint64_t saved, uint64_t now);
+
+/**
+ * SR11 at the floor: 0 with the token in `out`, or a refusal code (SR12)
+ * with its sentence in `out`; `*len` is the full length either way.
+ *
+ * # Safety
+ * `out` null or valid for `cap`; `len` null or valid for one `usize`.
+ */
+uint32_t kaya_reference_mint(uint64_t handle, uint8_t *out, uintptr_t cap, uintptr_t *len);
+
+/**
+ * SR11 at the floor: 0 with a fresh picked handle in `*handle` and the
+ * token to keep in `out`, or a refusal code with its sentence in `out`.
+ * The handle's name and local path are `kaya_picked_text`'s.
+ *
+ * # Safety
+ * `token` valid for `token_len`; `handle` null or valid for one `u64`;
+ * `out` null or valid for `cap`; `len` null or valid for one `usize`.
+ */
+uint32_t kaya_reference_redeem(const uint8_t *token,
+                               uintptr_t token_len,
+                               uint64_t *handle,
+                               uint8_t *out,
+                               uintptr_t cap,
+                               uintptr_t *len);
+
+/**
+ * SR13: the token leaves the durable count.
+ *
+ * # Safety
+ * `token` valid for `token_len`.
+ */
+void kaya_reference_forget(const uint8_t *token, uintptr_t token_len);
+
+/**
+ * A live picked handle's text: `field` 0 its name, 1 its local path (empty
+ * unless reopening the name works). 1 = live, 0 = no such handle.
+ *
+ * # Safety
+ * `out` null or valid for `cap`; `len` null or valid for one `usize`.
+ */
+int32_t kaya_picked_text(uint64_t handle,
+                         uint32_t field,
+                         uint8_t *out,
+                         uintptr_t cap,
+                         uintptr_t *len);
+
+/**
  * A platform save point (SR5): synchronous.
  */
 void kaya_session_save_point(void);

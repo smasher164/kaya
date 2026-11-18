@@ -4,6 +4,23 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A Python guest read the session store before kaya_run (measured 2026-11-18)
+
+The first Python run of the restore scene went red in act two with
+`restored recovered`, naming a session (pid 77489) that was neither act's,
+and a real `~/Library/Application Support/dev.kaya.aurora.notes/kaya-session/`
+appeared beside the scratch one. A Python guest reads its store at module top
+level, before `kaya_run`, and the store loaded there: before
+`prepare_process`, so act one's scratch had not been cleared, and act two
+(which has no environment; it learns it is a scene run only when
+`act2::arm` adopts the marker) read and wrote the USER'S real store. A Rust
+guest reads inside `app(ctx)`, after the entry, and never saw it. The store's
+first load and the reference ledger's directory now call `prepare_process`
+themselves, the preferences' own rule. GUARD: the restore, restoredocs and
+references legs in Python on the mac lane; restore-python watched red with
+the call cut (act one read the last run's scratch: `restored resumed, wanted
+fresh`), sha restored.
+
 ## The WiFi off a cold boot lost (measured 2026-11-18)
 
 The f6019c50 matrix's Android lane failed at admission in 59 s, no leg run:

@@ -3441,6 +3441,152 @@ pub extern "C" fn kaya_session_top_row(container: u64, copy: u64) {
     })
 }
 
+/// How many windows the last launch left (docs/restoration-plan.md SR9),
+/// the primary first; 0 on a fresh launch.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_session_window_count() -> u32 {
+    crate::session::restored_shape().len() as u32
+}
+
+/// The `index`th restored window: its id, active document, selected section
+/// (0 = none, since 0 is the primary window and never a document or section)
+/// and navigation depth; its documents in order into `docs`, up to `cap`.
+/// Answers how many documents it has, or -1 past the end.
+///
+/// # Safety
+/// Each out pointer null or valid for one value; `docs` null or valid for `cap`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_session_window(
+    index: u32,
+    window: *mut u64,
+    active: *mut u64,
+    section: *mut u64,
+    depth: *mut u32,
+    docs: *mut u64,
+    cap: usize,
+) -> i64 {
+    let shape = crate::session::restored_shape();
+    let Some(w) = shape.get(index as usize) else { return -1 };
+    unsafe {
+        if !window.is_null() {
+            *window = w.window;
+        }
+        if !active.is_null() {
+            *active = w.active.unwrap_or(0);
+        }
+        if !section.is_null() {
+            *section = w.section.unwrap_or(0);
+        }
+        if !depth.is_null() {
+            *depth = w.depth;
+        }
+        if !docs.is_null() {
+            for (i, d) in w.documents.iter().take(cap).enumerate() {
+                *docs.add(i) = *d;
+            }
+        }
+    }
+    w.documents.len() as i64
+}
+
+/// `restore(saved)` on a surface (SR9): `scope` 1 a window, 2 a document. A
+/// scope that does not come back prints its one line.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_session_restore(scope: u32, saved: u64, now: u64) {
+    if let Err(why) = crate::session::adopt(session_scope(scope, saved), session_scope(scope, now)) {
+        eprintln!("{why}");
+    }
+}
+
+/// The refusal's code at the floor: 0 none, then SR12's branches in order.
+fn refusal_code(r: crate::reference::ReferenceRefusal) -> u32 {
+    use crate::reference::ReferenceRefusal as R;
+    match r {
+        R::Missing => 1,
+        R::Revoked => 2,
+        R::ProviderGone => 3,
+        R::Foreign => 4,
+        R::Cap => 5,
+    }
+}
+
+/// SR11 at the floor: 0 with the token in `out`, or a refusal code (SR12)
+/// with its sentence in `out`; `*len` is the full length either way.
+///
+/// # Safety
+/// `out` null or valid for `cap`; `len` null or valid for one `usize`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_reference_mint(handle: u64, out: *mut u8, cap: usize, len: *mut usize) -> u32 {
+    let (code, text) = match picked_reference(crate::protocol::PickedId(handle)) {
+        Ok(token) => (0, token),
+        Err(e) => (refusal_code(e.refusal), e.message),
+    };
+    let full = unsafe { fill(text.as_bytes(), out, cap) };
+    if !len.is_null() {
+        unsafe { *len = full };
+    }
+    code
+}
+
+/// SR11 at the floor: 0 with a fresh picked handle in `*handle` and the
+/// token to keep in `out`, or a refusal code with its sentence in `out`.
+/// The handle's name and local path are `kaya_picked_text`'s.
+///
+/// # Safety
+/// `token` valid for `token_len`; `handle` null or valid for one `u64`;
+/// `out` null or valid for `cap`; `len` null or valid for one `usize`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_reference_redeem(
+    token: *const u8,
+    token_len: usize,
+    handle: *mut u64,
+    out: *mut u8,
+    cap: usize,
+    len: *mut usize,
+) -> u32 {
+    let Some(token) = (unsafe { borrowed_str(token, token_len) }) else { return refusal_code(crate::reference::ReferenceRefusal::Foreign) };
+    let (code, text) = match redeem_reference(&token) {
+        Ok((file, token)) => {
+            if !handle.is_null() {
+                unsafe { *handle = file.handle.0 };
+            }
+            (0, token)
+        }
+        Err(e) => (refusal_code(e.refusal), e.message),
+    };
+    let full = unsafe { fill(text.as_bytes(), out, cap) };
+    if !len.is_null() {
+        unsafe { *len = full };
+    }
+    code
+}
+
+/// SR13: the token leaves the durable count.
+///
+/// # Safety
+/// `token` valid for `token_len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_reference_forget(token: *const u8, token_len: usize) {
+    let Some(token) = (unsafe { borrowed_str(token, token_len) }) else { return };
+    forget_reference(&token);
+}
+
+/// A live picked handle's text: `field` 0 its name, 1 its local path (empty
+/// unless reopening the name works). 1 = live, 0 = no such handle.
+///
+/// # Safety
+/// `out` null or valid for `cap`; `len` null or valid for one `usize`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_picked_text(handle: u64, field: u32, out: *mut u8, cap: usize, len: *mut usize) -> i32 {
+    let Some(source) = picked_source(crate::protocol::PickedId(handle)) else { return 0 };
+    let text = if field == 1 { source.local_path().to_owned() } else { source.name().to_owned() };
+    let full = unsafe { fill(text.as_bytes(), out, cap) };
+    if !len.is_null() {
+        unsafe { *len = full };
+    }
+    1
+}
+
 /// A platform save point (SR5): synchronous.
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_session_save_point() {

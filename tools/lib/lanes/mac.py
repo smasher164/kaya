@@ -458,9 +458,9 @@ ORDER = [
     ("drain",),
     ("auxquit", ("rust",)),
     ("drain",),
-    ("restore", ("rust",)),
-    ("references", ("rust",)),
-    ("restoredocs", ("rust",)),
+    ("restore", ("rust", "python")),
+    ("references", ("rust", "python")),
+    ("restoredocs", ("rust", "python")),
     ("drain",),
     # APP LINKS (docs/app-links-plan.md L5): the tasks guest a third
     # time, warm through NSWorkspace and cold through `open`. Alone
