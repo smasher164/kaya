@@ -167,6 +167,12 @@ mod farend;
 mod sheet;
 #[path = "doctabs.rs"]
 mod doctabs;
+#[path = "restore.rs"]
+mod restore;
+#[path = "restoredocs.rs"]
+mod restoredocs;
+#[path = "references.rs"]
+mod references;
 #[path = "toast.rs"]
 mod toast;
 #[path = "format.rs"]
@@ -301,6 +307,9 @@ fn app(ctx: kaya::AppCtx) {
         Ok("farend") => farend::app(ctx),
         Ok("sheet") => sheet::app(ctx),
         Ok("doctabs") => doctabs::app(ctx),
+        Ok("restore") => restore::app(ctx),
+        Ok("restoredocs") => restoredocs::app(ctx),
+        Ok("references") => references::app(ctx),
         Ok("toast") => toast::app(ctx),
         // One guest under three locales (tools/lib/lanes/android.py's
         // SCENE_LOCALE): a scene selects a SCRIPT, never an app.

@@ -42,6 +42,9 @@ object GuestStart : KayaGuestStart {
             "nav" -> Nav::app
             "sheet" -> Sheet::app
             "doctabs" -> Doctabs::app
+            "restore" -> Restore::app
+            "restoredocs" -> Restoredocs::app
+            "references" -> References::app
             "format" -> Format::app
             "formatde" -> Format::app
             "formatar" -> Format::app
@@ -144,7 +147,7 @@ class MainActivity : ComponentActivity() {
 
         // The KAYA_* extras into the live environment (KayaEnv, which
         // says why it is called from BOTH doors).
-        KayaEnv.fromIntent(intent)
+        KayaEnv.fromIntent(intent, savedInstanceState)
 
         GuestStart.start(this)
         KayaCompose.mount(this)

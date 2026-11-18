@@ -510,7 +510,7 @@ def check(root):
                          f"{what} — the write then races CPython's read of "
                          f"environ (docs/traps.md, the iOS Python host's "
                          f"environment race)")
-        env_at = create_body.find("KayaEnv.fromIntent(intent)")
+        env_at = create_body.find("KayaEnv.fromIntent(intent, savedInstanceState)")
         start_at = create_body.find("GuestStart.start(this)")
         if start_at < 0:
             fail(f"{activity_rel}'s onCreate never calls GuestStart.start(this)")
@@ -661,7 +661,8 @@ negative(
 
 negative(
     "N5e", "mapped the intent's extras after the guest started", _ACTIVITY,
-    r"^(        KayaEnv\.fromIntent\(intent\)\n)(\n        GuestStart\.start\(this\)\n)",
+    r"^(        KayaEnv\.fromIntent\(intent, savedInstanceState\)\n)"
+    r"(\n        GuestStart\.start\(this\)\n)",
     r"\2\1",
     "starts the guest before KayaEnv.fromIntent(intent)",
     "N5e (the Android Python host mapping KAYA_* extras beside CPython's init)")

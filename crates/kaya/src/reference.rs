@@ -2,11 +2,13 @@
 //! file mints a bounded text token in kaya's own envelope, redeemed at a later
 //! launch for an ordinary picked handle or refused with a sentence.
 
+#[cfg(not(target_os = "android"))]
 use std::path::{Path, PathBuf};
 
 pub(crate) const PREFIX: &str = "kaya-ref1";
 pub(crate) const BOUND: usize = 8 * 1024;
 pub(crate) const CAP: usize = 128;
+#[cfg(not(target_os = "android"))]
 const LEDGER: &str = "ledger.json";
 
 /// Which of SR12's branches a refusal is.
@@ -148,6 +150,7 @@ pub(crate) fn open_envelope(token: &str, ours: &str) -> Result<Vec<u8>, Referenc
 
 /// The durable count (SR13, F3): one entry per distinct target, across
 /// launches. Android counts its persisted grants instead.
+#[cfg(not(target_os = "android"))]
 pub(crate) fn ledger_read(dir: &Path) -> Vec<String> {
     std::fs::read_to_string(dir.join(LEDGER))
         .ok()
@@ -155,6 +158,7 @@ pub(crate) fn ledger_read(dir: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[cfg(not(target_os = "android"))]
 fn ledger_write(dir: &Path, entries: &[String]) -> std::io::Result<()> {
     use std::io::Write as _;
     std::fs::create_dir_all(dir)?;
@@ -174,6 +178,7 @@ pub(crate) fn cap_refusal(held: usize) -> ReferenceError {
 }
 
 /// Count `target` in, unless it is already counted (a re-mint is free).
+#[cfg(not(target_os = "android"))]
 pub(crate) fn ledger_admit(dir: &Path, target: &str) -> Result<(), ReferenceError> {
     let mut entries = ledger_read(dir);
     if entries.iter().any(|e| e == target) {
@@ -189,6 +194,7 @@ pub(crate) fn ledger_admit(dir: &Path, target: &str) -> Result<(), ReferenceErro
     })
 }
 
+#[cfg(not(target_os = "android"))]
 pub(crate) fn ledger_forget(dir: &Path, target: &str) {
     let mut entries = ledger_read(dir);
     let before = entries.len();
@@ -198,6 +204,7 @@ pub(crate) fn ledger_forget(dir: &Path, target: &str) {
     }
 }
 
+#[cfg(not(target_os = "android"))]
 fn ledger_dir() -> Option<PathBuf> {
     crate::session::store_dir("kaya-references")
 }
@@ -377,6 +384,57 @@ pub(crate) fn forget(token: &str) {
     if let Some(dir) = ledger_dir() {
         ledger_forget(&dir, &locator);
     }
+}
+
+/// Android's row (SR11, SR13): the platform's persisted grant on the
+/// document's URI, which is the payload; the cap is the platform's own count
+/// of persisted grants (dev.kaya.KayaReferences).
+#[cfg(target_os = "android")]
+fn grant_refusal(branch: &str, text: String) -> ReferenceError {
+    let refusal = match branch {
+        "missing" => ReferenceRefusal::Missing,
+        "revoked" => ReferenceRefusal::Revoked,
+        "gone" => ReferenceRefusal::ProviderGone,
+        _ => ReferenceRefusal::Revoked,
+    };
+    refuse(refusal, format!("kaya: {text}"))
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn mint(uri: &str) -> Result<String, ReferenceError> {
+    let (branch, text) = crate::android::reference_grant("mint", uri).map_err(|why| refuse(ReferenceRefusal::Revoked, why))?;
+    match branch.as_str() {
+        "ok" => {}
+        "cap" => return Err(cap_refusal(text.parse().unwrap_or(CAP))),
+        _ => return Err(grant_refusal(&branch, text)),
+    }
+    let token = envelope(TAG, uri.as_bytes());
+    if token.len() > BOUND {
+        return Err(refuse(
+            ReferenceRefusal::Foreign,
+            format!("kaya: the platform's reference for {uri} is {} bytes in kaya's envelope, past the {BOUND}-byte bound", token.len()),
+        ));
+    }
+    Ok(token)
+}
+
+/// SR11 on Android: the URI, the document's display name, and the token to keep.
+#[cfg(target_os = "android")]
+pub(crate) fn redeem_named(token: &str) -> Result<(String, String, String), ReferenceError> {
+    let payload = open_envelope(token, TAG)?;
+    let uri = String::from_utf8(payload).map_err(|_| refuse(ReferenceRefusal::Foreign, "kaya: this reference's payload is not a URI".to_owned()))?;
+    let (branch, text) = crate::android::reference_grant("redeem", &uri).map_err(|why| refuse(ReferenceRefusal::Missing, why))?;
+    if branch != "ok" {
+        return Err(grant_refusal(&branch, text));
+    }
+    Ok((uri, text, token.to_owned()))
+}
+
+#[cfg(target_os = "android")]
+pub(crate) fn forget(token: &str) {
+    let Ok(payload) = open_envelope(token, TAG) else { return };
+    let Ok(uri) = String::from_utf8(payload) else { return };
+    let _ = crate::android::reference_grant("forget", &uri);
 }
 
 #[cfg(test)]

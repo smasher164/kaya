@@ -50,6 +50,11 @@ static APP_CONTEXT: std::sync::OnceLock<jni::objects::GlobalRef> = std::sync::On
 static PREFS_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
     std::sync::OnceLock::new();
 
+/// dev.kaya.KayaReferences, the durable references' grant half
+/// (crates/kaya/src/reference.rs), resolved beside KayaPrefs for its reason.
+static REFERENCES_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> =
+    std::sync::OnceLock::new();
+
 /// dev.kaya.KayaSafeSave, the safe save's ContentResolver half
 /// (crates/kaya/src/safesave.rs), resolved beside KayaAssets: a save runs
 /// on a guest thread, and the next launch's sweep runs before any mount.
@@ -331,6 +336,20 @@ fn remember_context(env: &mut JNIEnv, activity: &JObject) {
             log::warn!("kaya: dev.kaya.KayaSafeSave did not resolve ({e}); a picked file's save will refuse");
         }
     }
+    match env.find_class("dev/kaya/KayaReferences") {
+        Ok(class) => {
+            if let Ok(global) = env.new_global_ref(&class) {
+                let _ = REFERENCES_CLASS.set(global);
+            }
+        }
+        Err(e) => {
+            if env.exception_check().unwrap_or(false) {
+                let _ = env.exception_describe();
+                let _ = env.exception_clear();
+            }
+            log::warn!("kaya: dev.kaya.KayaReferences did not resolve ({e}); a reference will refuse");
+        }
+    }
     match env.find_class("dev/kaya/KayaPrefs") {
         Ok(class) => {
             if let Ok(global) = env.new_global_ref(&class) {
@@ -470,6 +489,32 @@ fn prefs_env() -> Option<(
     let context = APP_CONTEXT.get()?;
     let env = vm.attach_current_thread().ok()?;
     Some((env, class, context))
+}
+
+/// KayaReferences.<method>(context, uri): its `<branch>:<text>` answer, or why
+/// the platform could not be asked.
+pub(crate) fn reference_grant(method: &str, uri: &str) -> Result<(String, String), String> {
+    let (Some(vm), Some(class), Some(context)) = (JVM.get(), REFERENCES_CLASS.get(), APP_CONTEXT.get()) else {
+        return Err("kaya: dev.kaya.KayaReferences is not reachable in this process".to_owned());
+    };
+    let mut env = vm.attach_current_thread().map_err(|e| format!("kaya: attaching to the JVM failed: {e}"))?;
+    let uri = env.new_string(uri).map_err(|e| format!("kaya: the URI would not cross: {e}"))?;
+    let called = env.call_static_method(
+        class,
+        method,
+        "(Landroid/content/Context;Ljava/lang/String;)Ljava/lang/String;",
+        &[(context.as_obj()).into(), (&uri).into()],
+    );
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_describe();
+        let _ = env.exception_clear();
+        return Err(format!("kaya: dev.kaya.KayaReferences.{method} threw"));
+    }
+    let obj = called.and_then(|v| v.l()).map_err(|e| format!("kaya: KayaReferences.{method} answered nothing: {e}"))?;
+    let text: jni::objects::JString = obj.into();
+    let answer: String = env.get_string(&text).map_err(|e| format!("kaya: reading the answer failed: {e}"))?.into();
+    let (branch, rest) = answer.split_once(':').unwrap_or((answer.as_str(), ""));
+    Ok((branch.to_owned(), rest.to_owned()))
 }
 
 /// KayaPrefs.get: `<tag><text>`, or `None` for absent and for anything
@@ -717,6 +762,36 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 name: "sessionRestored".into(),
                 sig: "()I".into(),
                 fn_ptr: present_session_restored as *mut _,
+            },
+            NativeMethod {
+                name: "sessionIdle".into(),
+                sig: "()V".into(),
+                fn_ptr: present_session_idle as *mut _,
+            },
+            NativeMethod {
+                name: "sessionSavePoint".into(),
+                sig: "()V".into(),
+                fn_ptr: present_session_save_point as *mut _,
+            },
+            NativeMethod {
+                name: "sessionPlatformToken".into(),
+                sig: "(ILjava/lang/String;)V".into(),
+                fn_ptr: present_session_platform_token as *mut _,
+            },
+            NativeMethod {
+                name: "sessionId".into(),
+                sig: "()Ljava/lang/String;".into(),
+                fn_ptr: present_session_id as *mut _,
+            },
+            NativeMethod {
+                name: "sessionCaret".into(),
+                sig: "(JJJ)V".into(),
+                fn_ptr: present_session_caret as *mut _,
+            },
+            NativeMethod {
+                name: "sessionTopRow".into(),
+                sig: "(JJ)V".into(),
+                fn_ptr: present_session_top_row as *mut _,
             },
             NativeMethod {
                 name: "fault".into(),
@@ -1632,6 +1707,35 @@ fn open_through_resolver(uri: &str, mode: &str) -> std::io::Result<i64> {
 /// docs/restoration-plan.md SR15: `expect_restored`'s read.
 extern "system" fn present_session_restored(_env: JNIEnv, _class: JClass) -> i32 {
     crate::capi::kaya_session_restored() as i32
+}
+
+extern "system" fn present_session_idle(_env: JNIEnv, _class: JClass) {
+    crate::capi::kaya_session_idle();
+}
+
+extern "system" fn present_session_save_point(_env: JNIEnv, _class: JClass) {
+    crate::capi::kaya_session_save_point();
+}
+
+extern "system" fn present_session_platform_token(mut env: JNIEnv, _class: JClass, present: i32, token: JString) {
+    let id: Option<String> = if token.is_null() { None } else { env.get_string(&token).ok().map(Into::into) };
+    match (present, id) {
+        (1, Some(id)) => unsafe { crate::capi::kaya_session_platform_token(1, id.as_ptr(), id.len()) },
+        (2, _) => unsafe { crate::capi::kaya_session_platform_token(2, std::ptr::null(), 0) },
+        _ => unsafe { crate::capi::kaya_session_platform_token(0, std::ptr::null(), 0) },
+    }
+}
+
+extern "system" fn present_session_id(env: JNIEnv, _class: JClass) -> jni::sys::jstring {
+    env.new_string(crate::session::session_id()).map(|s| s.into_raw()).unwrap_or(std::ptr::null_mut())
+}
+
+extern "system" fn present_session_caret(_env: JNIEnv, _class: JClass, widget: i64, start: i64, stop: i64) {
+    crate::capi::kaya_session_caret(widget as u64, start as u64, stop as u64);
+}
+
+extern "system" fn present_session_top_row(_env: JNIEnv, _class: JClass, container: i64, copy: i64) {
+    crate::capi::kaya_session_top_row(container as u64, copy as u64);
 }
 
 /// The stall watchdog's reading, for the Compose interpreter's

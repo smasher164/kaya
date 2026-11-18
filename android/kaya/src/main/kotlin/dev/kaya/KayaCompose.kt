@@ -4842,6 +4842,7 @@ object KayaCompose {
             KayaSceneModel.windowTitle = activity.title?.toString() ?: ""
         }
         ensurePump()
+        KayaSessionHost.attach(activity)
         // THE TITLE IS MATERIALIZED ON THE ACTIVITY (expect_title reads
         // `activity.title`), so a re-created one carries the MANIFEST
         // label until the model is written back onto it.
@@ -13188,6 +13189,13 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             leaving = code
             since = System.nanoTime()
         }
+
+        /** `relaunch resume` (docs/restoration-plan.md SR15): the runner
+         *  backgrounds the app and the system ends it, so nothing here may leave. */
+        fun park() = synchronized(lock) {
+            step = null
+            leaving = null
+        }
     }
 
     private fun runScript(script: String) {
@@ -13214,6 +13222,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
         }
         // Set by the arm: act one is over and the marker is on disk.
         var relaunching = false
+        var parkForPlatform = false
         // THE CEILING THAT COVERS THE HOP: armed at every step below and
         // again over the exit, so this run cannot end in silence.
         val watchdog = StepWatchdog(stepCeilingMs())
@@ -14272,6 +14281,9 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         // opened against a process that is gone
                         // (docs/app-links-plan.md L5), and its argument
                         // is the URL the runner hands the platform.
+                        // `resume` parks this process after its verdict:
+                        // the runner backgrounds it and the system ends it
+                        // (docs/restoration-plan.md SR15).
                         val door = parts.getOrNull(1) ?: "notify_tap"
                         val linkUrl = if (door == "link") quoted(parts.drop(2)) else ""
                         val context = activity.applicationContext
@@ -14280,13 +14292,16 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             else emptyList()
                         val steps = actTwoSteps
                         when {
-                            door != "notify_tap" && door != "launch" && door != "link" ->
+                            door != "notify_tap" && door != "launch" && door != "link" &&
+                                door != "resume" ->
                                 failures.add(
                                     "relaunch $door: no harness opens a door by that name " +
                                         "— `relaunch` is the notification's row in the " +
                                         "shade, `relaunch launch` is the app started the " +
-                                        "way a user starts it, and `relaunch link \"<url>\"` " +
-                                        "is that URL opened against a process that is gone")
+                                        "way a user starts it, `relaunch link \"<url>\"` " +
+                                        "is that URL opened against a process that is gone, " +
+                                        "and `relaunch resume` is the platform ending a " +
+                                        "backgrounded app and restoring it")
                             door == "link" && linkUrl.isEmpty() -> failures.add(
                                 "relaunch link: the door takes the URL to open as its own " +
                                     "argument, and this statement names none")
@@ -14310,6 +14325,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                         "kaya",
                                         when (door) {
                                             "launch" -> "KAYA_RELAUNCH: door launch"
+                                            "resume" -> "KAYA_RELAUNCH: door resume"
                                             "link" -> "KAYA_RELAUNCH: door link url=$linkUrl"
                                             else -> "KAYA_RELAUNCH: door notify_tap " +
                                                 "notification=${live[0].first} " +
@@ -14319,11 +14335,13 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                     observed.add(
                                         when (door) {
                                             "launch" -> "relaunch through a plain launch"
+                                            "resume" -> "relaunch through the platform's continuation"
                                             "link" -> "relaunch through the link $linkUrl"
                                             else -> "relaunch through notification " +
                                                 "${live[0].first}"
                                         })
                                     relaunching = true
+                                    parkForPlatform = door == "resume"
                                 }
                             }
                         }
@@ -18588,6 +18606,11 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
         // may be answering nothing; the grace leaves under the verdict
         // either way.
         watchdog.published(code)
+        if (code == 0 && parkForPlatform) {
+            watchdog.park()
+            Log.i("kaya", "KAYA_RELAUNCH: parked for the platform's continuation")
+            return
+        }
         // READ ONCE, and nullable: a relaunch may be in flight, and the
         // halt is what ends this process either way.
         val leaving = mountedActivity
@@ -27762,6 +27785,7 @@ class KayaNotificationReply : BroadcastReceiver() {
             }
             val start = Class.forName(named).getField("INSTANCE").get(null) as KayaGuestStart
             start.start(context)
+            KayaSessionHost.headless()
         }
         val pending = goAsync()
         val answered = kayaBatches
@@ -27773,6 +27797,96 @@ class KayaNotificationReply : BroadcastReceiver() {
             }
             pending.finish()
         }.start()
+    }
+}
+
+// MARK: - Session restoration (docs/restoration-plan.md SR5, SR6)
+
+/**
+ * The store's host half on Android: the activity's saved state carries the
+ * session id (F6), ON_STOP is the save point, and the main looper's idle
+ * reports each named textarea's selection and each named For's top row
+ * (gtk.rs's geometry rule), at most every [IDLE_MS]; ON_STOP always reports.
+ */
+internal object KayaSessionHost {
+    private const val KEY = "kaya.session"
+    private const val IDLE_MS = 250L
+    private var tokenHanded = false
+    private var idleInstalled = false
+    private var lastIdle = 0L
+    private val carets = HashMap<Long, Long>()
+    private val tops = HashMap<Long, Long>()
+
+    fun attach(activity: ComponentActivity) {
+        val registry = activity.savedStateRegistry
+        if (!tokenHanded) {
+            tokenHanded = true
+            val id = registry.consumeRestoredStateForKey(KEY)?.getString("id")
+            KayaPresent.sessionPlatformToken(if (id != null) 1 else 0, id)
+        }
+        if (registry.getSavedStateProvider(KEY) == null) {
+            registry.registerSavedStateProvider(KEY) {
+                android.os.Bundle().apply { putString("id", KayaPresent.sessionId()) }
+            }
+        }
+        activity.lifecycle.addObserver(
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_STOP) {
+                    report()
+                    KayaPresent.sessionSavePoint()
+                    Log.i("kaya", "KAYA_SESSION: background save point")
+                }
+            },
+        )
+        if (!idleInstalled) {
+            idleInstalled = true
+            Looper.getMainLooper().queue.addIdleHandler {
+                val now = android.os.SystemClock.uptimeMillis()
+                if (now - lastIdle >= IDLE_MS) {
+                    lastIdle = now
+                    report()
+                    KayaPresent.sessionIdle()
+                }
+                true
+            }
+        }
+    }
+
+    /** A process started with no activity (the reply receiver): no Bundle will come. */
+    fun headless() {
+        if (tokenHanded) return
+        tokenHanded = true
+        KayaPresent.sessionPlatformToken(2, null)
+    }
+
+    private fun report() {
+        for (node in KayaSceneModel.nodes.values) {
+            if (node.a11yId.isEmpty()) continue
+            if (node.kind == KayaCompose.KIND_TEXTAREA) {
+                val text = node.textState.text.toString()
+                val selection = node.textState.selection
+                val start = kayaByteOffset(text, selection.min).toLong()
+                val stop = kayaByteOffset(text, selection.max).toLong()
+                if (start < 0 || stop < 0) continue
+                val packed = (start shl 32) or stop
+                if (carets.put(node.id, packed) != packed) KayaPresent.sessionCaret(node.id, start, stop)
+                continue
+            }
+            if (node.children.isEmpty()) continue
+            val scroll = kayaScrollAncestor(node) ?: continue
+            if (kayaScrollHorizontal(scroll)) continue
+            val boxTop = kayaNodeTops[scroll.id] ?: continue
+            var top: Pair<Float, Long>? = null
+            for (copy in node.children) {
+                val rowTop = kayaNodeTops[copy.id] ?: continue
+                val height = kayaNodeHeights[copy.id] ?: continue
+                if (rowTop - boxTop + height > 2f && (top == null || rowTop < top.first)) {
+                    top = Pair(rowTop, copy.id)
+                }
+            }
+            val copy = top?.second ?: continue
+            if (tops.put(node.id, copy) != copy) KayaPresent.sessionTopRow(node.id, copy)
+        }
     }
 }
 

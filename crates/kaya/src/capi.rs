@@ -4462,27 +4462,12 @@ pub(crate) fn picked_locator(handle: crate::protocol::PickedId) -> String {
     }
 }
 
-/// The phones' reference arms are the fan-out's (docs/restoration-plan.md §5
-/// step 4); no lane wires the references scene there yet.
-#[cfg(target_os = "android")]
-fn references_unbuilt() -> ! {
-    panic!("kaya: durable references are not built on this platform yet (docs/restoration-plan.md §5 step 4)")
-}
-
 /// SR11: a durable reference for a picked file.
 pub(crate) fn picked_reference(handle: crate::protocol::PickedId) -> Result<String, crate::reference::ReferenceError> {
     let source = picked_source(handle).unwrap_or_else(|| {
         panic!("kaya: reference() names picked file {}, which was never minted — a file handle comes from a picker result", handle.0)
     });
-    #[cfg(not(target_os = "android"))]
-    {
-        crate::reference::mint(crate::protocol::PickedSource::locator(&*source))
-    }
-    #[cfg(target_os = "android")]
-    {
-        let _ = source;
-        references_unbuilt()
-    }
+    crate::reference::mint(crate::protocol::PickedSource::locator(&*source))
 }
 
 /// SR11: a token redeemed for a fresh picked handle, and the token to keep.
@@ -4510,8 +4495,10 @@ pub(crate) fn redeem_reference(token: &str) -> Result<(crate::protocol::PickedFi
     }
     #[cfg(target_os = "android")]
     {
-        let _ = token;
-        references_unbuilt()
+        let (uri, name, token) = crate::reference::redeem_named(token)?;
+        let source = std::sync::Arc::new(crate::android::UriSource { name: name.clone(), uri });
+        let handle = picked_register(source);
+        Ok((crate::protocol::PickedFile { handle, name, local_path: String::new() }, token))
     }
 }
 
@@ -4538,13 +4525,7 @@ fn url_file_name(url: &str) -> String {
 
 /// SR11, SR13: the token leaves the durable count.
 pub(crate) fn forget_reference(token: &str) {
-    #[cfg(not(target_os = "android"))]
     crate::reference::forget(token);
-    #[cfg(target_os = "android")]
-    {
-        let _ = token;
-        references_unbuilt()
-    }
 }
 
 /// The picked file a handle names, None for one never minted: a player's

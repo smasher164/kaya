@@ -2261,11 +2261,12 @@ perturbed in memory with their counts printed, red on every run)
 §4 and SR1. spec.rs's RESTORE_FACETS names, per kind, the presentation facets
 kaya restores on its own; every row has its arm in scene.rs's restore, every
 variant of session::Facet has its row, a secure_field has none, and each
-backend either reports the facet (the SwiftUI interpreter's sessionCaret and
-sessionTopRow) or is listed in the gate's DEFERRED table with its reason, so a
-new facet is wanted on every backend the day it is added. Four negatives,
-perturbed in memory with their counts printed: a facet row cut, SwiftUI's row
-report cut, a secure_field given a facet, the scene's caret arm cut)
+backend either reports the facet (SwiftUI's and Compose's sessionCaret and
+sessionTopRow, GTK's and WinUI's report_caret and report_top_row) or is listed
+in the gate's DEFERRED table with its reason, so a new facet is wanted on every
+backend the day it is added. Five negatives, perturbed in memory with their
+counts printed: a facet row cut, SwiftUI's row report cut, a secure_field given
+a facet, the scene's caret arm cut, Compose's caret report cut)
 
 ## tools/check-keyed.py
 

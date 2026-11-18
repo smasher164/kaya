@@ -37,6 +37,11 @@ public final class References {
         if (tmp == null || tmp.isEmpty()) {
             tmp = System.getProperty("java.io.tmpdir");
         }
+        // The phone's shared collection, FileDialog.java's reason.
+        if (System.getProperty("java.specification.vendor", "").contains("Android")) {
+            String ext = KayaApp.env("EXTERNAL_STORAGE");
+            tmp = (ext == null || ext.isEmpty() ? "/sdcard" : ext) + "/Documents";
+        }
         Path dir = Paths.get(tmp, "kaya-refs-" + FileDialog.pid());
         try {
             Files.createDirectories(dir);

@@ -580,8 +580,14 @@ def link_census(hosts, gradle):
             errs.append(f"{module}'s MainActivity has no readable onCreate "
                         f"and onNewIntent pair")
             continue
+        if "KayaEnv.fromIntent(intent, savedInstanceState)" not in create:
+            errs.append(f"{module}'s MainActivity.onCreate does not hand "
+                        f"KayaEnv.fromIntent its savedInstanceState — a "
+                        f"restored activity carries its LAUNCH's extras, and "
+                        f"re-applied they make a resumed act two a second act "
+                        f"one (docs/restoration-plan.md SR15)")
         for door, body in (("onCreate", create), ("onNewIntent", new_intent)):
-            if "KayaEnv.fromIntent(intent)" not in body:
+            if "KayaEnv.fromIntent(intent" not in body:
                 errs.append(f"{module}'s MainActivity.{door} does not map the "
                             f"KAYA_* extras (KayaEnv.fromIntent) — under "
                             f"singleTask a warm start arrives at onNewIntent "
@@ -648,6 +654,10 @@ for _label, _hosts_d, _gradle_d, _needle in (
         KayaCompose.notificationIntent(intent)""",
               "        KayaCompose.notificationIntent(intent)", 1), _gradle,
      "onNewIntent does not map"),
+    ("the restored Bundle dropped",
+     _without(_hosts, "pyhost", "KayaEnv.fromIntent(intent, savedInstanceState)",
+              "KayaEnv.fromIntent(intent)", 1), _gradle,
+     "does not hand KayaEnv.fromIntent its savedInstanceState"),
     ("the link arm gone",
      _without(_hosts, "gohost", "        KayaCompose.linkIntent(intent)\n",
               "", 1), _gradle, "linkIntent"),

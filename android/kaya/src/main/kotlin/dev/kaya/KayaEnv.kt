@@ -1,6 +1,7 @@
 package dev.kaya
 
 import android.content.Intent
+import android.os.Bundle
 import android.system.Os
 
 /**
@@ -22,10 +23,17 @@ import android.system.Os
  * after the app thread exists moves nothing already read, so it is honest
  * only for switches read per-scene. tools/check-jni.py's manifest census
  * holds every MainActivity to calling this from both.
+ *
+ * NOT FOR A RESTORED ACTIVITY ([restored] non-null): the platform re-creates
+ * it with its LAUNCH's intent, whose extras belong to the process that read
+ * them, so a resumed act two would otherwise start as act one again
+ * (docs/restoration-plan.md SR15; check-jni's census).
  */
 object KayaEnv {
     @JvmStatic
-    fun fromIntent(intent: Intent?) {
+    @JvmOverloads
+    fun fromIntent(intent: Intent?, restored: Bundle? = null) {
+        if (restored != null) return
         val extras = intent?.extras ?: return
         for (key in extras.keySet()) {
             if (key.startsWith("KAYA_")) {

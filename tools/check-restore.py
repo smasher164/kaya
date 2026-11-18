@@ -29,6 +29,8 @@ CORE = {
 REPORTS = {
     (SWIFTUI, "caret"): "KayaHost.sessionCaret(",
     (SWIFTUI, "row"): "KayaHost.sessionTopRow(",
+    (COMPOSE, "caret"): "KayaPresent.sessionCaret(",
+    (COMPOSE, "row"): "KayaPresent.sessionTopRow(",
     (GTK, "caret"): "core.scene.report_caret(",
     (GTK, "row"): "core.scene.report_top_row(",
     (WINUI, "caret"): "core.scene.report_caret(",
@@ -36,10 +38,7 @@ REPORTS = {
 }
 
 # (backend, facet) -> why it does not report yet. Each row is open work.
-DEFERRED = {
-    (COMPOSE, "caret"): "the fan-out (docs/restoration-plan.md §5 step 4)",
-    (COMPOSE, "row"): "the fan-out (docs/restoration-plan.md §5 step 4)",
-}
+DEFERRED: dict[tuple[str, str], str] = {}
 
 BACKENDS = (SWIFTUI, COMPOSE, GTK, WINUI)
 
@@ -84,7 +83,7 @@ def census(files):
 files = {p: g.read(p) for p in (SPEC, SESSION, SCENE, *BACKENDS)}
 rows = table(files[SPEC]) or []
 g.counted("facet rows", rows, 2)
-g.counted("reporting arms", [k for k in REPORTS if REPORTS[k] in files[k[0]]], 6)
+g.counted("reporting arms", [k for k in REPORTS if REPORTS[k] in files[k[0]]], 8)
 for line in census(files):
     g.finding(line)
 
@@ -103,7 +102,9 @@ cut("secure_field given a facet", SPEC, r'\("textarea", "caret"\)', '("secure_fi
     "a secure field saves nothing")
 cut("the scene's caret arm cut", SCENE, r"crate::session::Facet::Caret \{ start, stop \} =>", "_ =>",
     "no restore arm for the 'caret' facet")
-g.negatives_ran(4)
+cut("Compose's caret report cut", COMPOSE, r"KayaPresent\.sessionCaret\(node\.id", "carets.size + (node.id",
+    "does not report the 'caret' facet")
+g.negatives_ran(5)
 for (backend, facet), why in sorted(DEFERRED.items()):
     print(f"check-restore: deferred: {backend} {facet}: {why}")
 g.verdict(f"{len(rows)} facet(s) across {len(BACKENDS)} backends")

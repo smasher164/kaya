@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
 
         // The KAYA_* extras into the live environment (KayaEnv, which
         // says why it is called from BOTH doors).
-        KayaEnv.fromIntent(intent)
+        KayaEnv.fromIntent(intent, savedInstanceState)
 
         GuestStart.start(this)
         KayaCompose.mount(this)

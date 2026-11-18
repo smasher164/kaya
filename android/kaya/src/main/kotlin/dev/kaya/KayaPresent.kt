@@ -27,6 +27,17 @@ object KayaPresent {
      * (docs/restoration-plan.md SR6). */
     @JvmStatic external fun sessionRestored(): Int
 
+    /** The session store's host half (docs/restoration-plan.md SR5, SR6):
+     *  kaya_session_idle, kaya_session_save_point, kaya_session_platform_token
+     *  (0 a null Bundle, 1 the id [token] names, 2 no activity will come),
+     *  kaya_session_id, kaya_session_caret and kaya_session_top_row. */
+    @JvmStatic external fun sessionIdle()
+    @JvmStatic external fun sessionSavePoint()
+    @JvmStatic external fun sessionPlatformToken(present: Int, token: String?)
+    @JvmStatic external fun sessionId(): String
+    @JvmStatic external fun sessionCaret(widget: Long, start: Long, stop: Long)
+    @JvmStatic external fun sessionTopRow(container: Long, copy: Long)
+
     /**
      * The core's latched fault as UTF-8, or null for none
      * (crates/kaya/src/fault.rs). A PEEK, never a take: the run asks

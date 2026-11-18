@@ -675,12 +675,37 @@ pub(crate) fn claim(dir: &Path) -> Result<std::fs::File, String> {
         .write(true)
         .open(dir.join(LOCK))
         .map_err(|e| format!("kaya: the session lock {} could not be opened ({e}): this launch writes no session", dir.join(LOCK).display()))?;
-    match lock.try_lock() {
+    match try_lock(&lock) {
         Ok(()) => Ok(lock),
-        Err(_) => Err("kaya: another live process of this app holds the session file: \
-                       this launch starts fresh and writes nothing"
+        Err(std::fs::TryLockError::WouldBlock) => Err("kaya: another live process of this app holds the session file: \
+                                                       this launch starts fresh and writes nothing"
             .to_owned()),
+        Err(std::fs::TryLockError::Error(e)) => Err(format!(
+            "kaya: the session lock {} could not be taken ({e}): this launch starts fresh and writes nothing",
+            dir.join(LOCK).display()
+        )),
     }
+}
+
+/// std's File::try_lock answers Unsupported on Android (measured 2026-11-18,
+/// docs/traps.md), so the lock there is flock(2) itself.
+#[cfg(target_os = "android")]
+fn try_lock(file: &std::fs::File) -> Result<(), std::fs::TryLockError> {
+    use std::os::fd::AsRawFd as _;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        return Ok(());
+    }
+    let e = std::io::Error::last_os_error();
+    if e.kind() == std::io::ErrorKind::WouldBlock {
+        Err(std::fs::TryLockError::WouldBlock)
+    } else {
+        Err(std::fs::TryLockError::Error(e))
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn try_lock(file: &std::fs::File) -> Result<(), std::fs::TryLockError> {
+    file.try_lock()
 }
 
 fn with<R>(f: impl FnOnce(&mut Store) -> R) -> R {

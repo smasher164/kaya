@@ -3638,6 +3638,68 @@ ACT2_REL = f"files/act2/{DECLARED.id}"
 # exit grace is 3s), and how long the relaunched process has to answer.
 ACT2_GONE_S = 20.0
 ACT2_VERDICT_S = 120.0
+# THE RESUME DOOR (docs/restoration-plan.md SR15): act one parks, HOME
+# backgrounds it, its ON_STOP save point prints this line, and the task's
+# saved state is written after onStop, so the door settles before the kill.
+BACKGROUND_SAVED = "KAYA_SESSION: background save point"
+RESUME_SAVE_S = 20.0
+RESUME_SETTLE_S = 2.0
+RESUME_KILL_S = 5.0
+
+
+def resume_door(serial, name, package, component, log):
+    """Background the parked act one, wait for its save point, end the
+    process the way the system ends a cached app (`am kill`, which keeps
+    the task and its saved state), and start the component again, which
+    brings the task back and re-creates the activity from that state.
+    True when the start was made; every step that does not arrive says so."""
+    adb(serial, "shell", "input", "keyevent", "KEYCODE_HOME", stdout=log, stderr=log)
+    started = time.monotonic()
+    saved = False
+    while time.monotonic() - started < RESUME_SAVE_S:
+        if BACKGROUND_SAVED in kaya_logcat(serial):
+            saved = True
+            break
+        time.sleep(0.25)
+    if not saved:
+        print(f"{name}: HOME was pressed and the app printed no {BACKGROUND_SAVED!r} "
+              f"within {RESUME_SAVE_S:.0f}s, so its activity never stopped; the "
+              f"door was not pushed", file=log)
+        return False
+    print(f"{name}: backgrounded by HOME; the save point printed "
+          f"{time.monotonic() - started:.1f}s later; settling {RESUME_SETTLE_S}s "
+          f"for the saved state", file=log)
+    time.sleep(RESUME_SETTLE_S)
+    adb(serial, "shell", "am", "kill", package, stdout=log, stderr=log)
+    ended = "`am kill`"
+    deadline = time.monotonic() + RESUME_KILL_S
+    pid = app_pid(serial, package)
+    while pid and time.monotonic() < deadline:
+        time.sleep(0.5)
+        pid = app_pid(serial, package)
+    if pid:
+        # The low-memory killer's own shape: SIGKILL to a stopped app.
+        adj = adb_out(serial, "shell", "cat", f"/proc/{pid.split()[0]}/oom_score_adj").strip()
+        print(f"{name}: `am kill` left pid {pid} alive {RESUME_KILL_S:.0f}s later "
+              f"(oom_score_adj {adj or 'unreadable'}; am kill ends only a process "
+              f"at or past the service level); sending it SIGKILL as the "
+              f"low-memory killer does", file=log)
+        run_as(serial, package, "kill", "-9", pid.split()[0])
+        ended = "SIGKILL"
+        deadline = time.monotonic() + ACT2_GONE_S
+        pid = app_pid(serial, package)
+        while pid and time.monotonic() < deadline:
+            time.sleep(0.5)
+            pid = app_pid(serial, package)
+    if pid:
+        print(f"{name}: pid {pid} survived `am kill` and SIGKILL; the door was "
+              f"not pushed", file=log)
+        return False
+    started = adb(serial, "shell", "am", "start", "-W", "-n", component,
+                  stdout=subprocess.DEVNULL, stderr=log).returncode
+    print(f"{name}: act one's process ended by {ended} with its task kept; "
+          f"door resume -> am start exit {started}", file=log)
+    return started == 0
 
 
 def run_as(serial, package, *args):
@@ -3708,12 +3770,17 @@ def act_two(serial, name, package, component, dump, log):
                     r"title=(.*)", dump)
     plain = "KAYA_RELAUNCH: door launch" in dump
     link = re.search(r"KAYA_RELAUNCH: door link url=(\S+)", dump)
-    if tap is None and not plain and link is None:
+    resume = "KAYA_RELAUNCH: door resume" in dump
+    if tap is None and not plain and link is None and not resume:
         print(f"{name}: act one published ACT 1 OK and named no door — "
               f"its log carries no KAYA_RELAUNCH line, so there is nothing "
               f"to open", file=log)
         return ""
     nid, title = (tap.group(1), tap.group(2).rstrip("\r")) if tap else ("", "")
+    if resume:
+        if not resume_door(serial, name, package, component, log):
+            return ""
+        return act_two_verdict(serial, name, package, log)
     # THE PROCESS MUST BE GONE FIRST: a tap into a live app is an
     # onNewIntent, which is S3's warm activation and not S9's. AND
     # `am force-stop` IS NOT THE FALLBACK ON THE TAP DOOR — it takes the
@@ -3782,6 +3849,12 @@ def act_two(serial, name, package, component, dump, log):
             # would spend its whole budget proving what this sentence
             # already says.
             return ""
+    return act_two_verdict(serial, name, package, log)
+
+
+def act_two_verdict(serial, name, package, log):
+    """Act two's verdict out of the file beside its marker, or "" with what
+    was measured."""
     deadline = time.monotonic() + ACT2_VERDICT_S
     while time.monotonic() < deadline:
         # THE ANSWER IS A VERDICT LINE, never merely output: `adb
@@ -4860,11 +4933,11 @@ def run_suite_legs(suite):
         # a leg that would wait out its ceiling for a tap nobody makes.
         two_act = relaunch_count(script_text) > 0
         door = lane.RELAUNCH_DOOR.get(scene)
-        if two_act and door not in ("notify_tap", "launch", "link"):
+        if two_act and door not in ("notify_tap", "launch", "link", "resume"):
             die(f"run-emulator: {scene}.steps carries a `relaunch` and "
                 f"lanes/android.py names its door {door!r}; this runner "
-                f"opens \"notify_tap\", \"launch\" and \"link\" and nothing "
-                f"else")
+                f"opens \"notify_tap\", \"launch\", \"link\" and \"resume\" "
+                f"and nothing else")
         if door and not two_act:
             die(f"run-emulator: lanes/android.py names a relaunch door "
                 f"for {scene}, whose scene script has no `relaunch`")

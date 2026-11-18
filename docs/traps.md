@@ -4,6 +4,39 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## Android's continuation: no std file lock, launch extras on a restored activity, `am kill` after a pick (measured 2026-11-18)
+
+Three things the restoration scenes' first Android runs met, each read from
+the leg's bundle:
+
+- **std's `File::try_lock` answers "try_lock() not supported" on Android.**
+  Every session load, act one too, took the live-writer branch ("another live
+  process of this app holds the session file"), because that sentence printed
+  for EVERY try_lock error; restore-compose read `restored fresh, wanted
+  resumed` with nothing else alive. The branch now prints the error it got
+  (only WouldBlock is the live-writer sentence), which is how the
+  "not supported" was read (android2), and session.rs takes the lock through
+  flock(2) on Android.
+- **A restored activity carries its LAUNCH's intent.** The platform
+  re-creates the activity from the task's record, extras and all, so act
+  one's `KAYA_SELFTEST` extra made the resumed process a second act one (the
+  core reads env + marker as act one by design, act2.rs). Every host's
+  onCreate hands `savedInstanceState` to `KayaEnv.fromIntent`, which maps
+  nothing for a restored activity; check-jni's census holds the call and its
+  negative "the restored Bundle dropped". Watched red: the skip cut, act two
+  never published a verdict.
+- **`am kill` after a file pick leaves the app alive.** HOME stopped the
+  activity (the save point printed) and the process read `oom_score_adj 100`
+  5 s later, which `am kill` does not end; the restore scenes (no pick) were
+  ended at once. The resume door (tools/android/run-emulator.py,
+  resume_door) sends SIGKILL through run-as after 5 s, the low-memory
+  killer's own shape, and says which ended the process.
+
+Guards watched red on restore-compose: the token handed as absent (`restored
+fresh, wanted resumed`), KayaSessionHost.attach cut (no save point, so the
+door was not pushed), and the top-row report cut (`not scrolled to m30`);
+each file restored from its copy with sha equal.
+
 ## iOS's restoration token, and a Go guest's first build on the main thread (measured 2026-11-18)
 
 The iOS vehicle is SwiftUI's `@SceneStorage("kaya.session")` on the root

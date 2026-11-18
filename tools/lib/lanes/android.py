@@ -230,6 +230,8 @@ LEGS = {
         # The far end (docs/capture-plan.md §5): a voice output on the
         # emulator's voice path.
         "farend-compose",
+        # Session restoration (docs/restoration-plan.md SR15).
+        "restore-compose", "restoredocs-compose", "references-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",
@@ -259,6 +261,7 @@ LEGS = {
         "capture-jvm", "capture_denied-jvm",
         "farend-jvm",
         "codesurface-jvm", "fontpick-jvm",
+        "restore-jvm", "restoredocs-jvm", "references-jvm",
     ],
     "go": [
         "go", "a11y-go", "a11yrows-go",
@@ -293,12 +296,14 @@ LEGS = {
         "capture-go", "capture_denied-go",
         "farend-go",
         "codesurface-go", "fontpick-go",
+        "restore-go", "restoredocs-go", "references-go",
     ],
     "python": [
         "varied-python", "portfolio-python", "music_home-python", "music_playlist-python",
         "music_header-python", "music_headerdark-python", "music_dock-python",
         "music_artist-python", "music_artistdark-python", "music_search-python",
         "music_dockdark-python", "music_context-python",
+        "restore-python", "restoredocs-python", "references-python",
     ],
 }
 
@@ -306,7 +311,8 @@ LEGS = {
 # name, the one the host's main.py runs (tools/pyhost-main.py).
 PYTHON_GUESTS = {"portfolio": "portfolio", "varied": "varied", "music_home": "music",
                  "music_playlist": "music", "music_header": "music", "music_dock": "music",
-                 "music_artist": "music", "music_search": "music", "music_context": "music"}
+                 "music_artist": "music", "music_search": "music", "music_context": "music",
+                 "restore": "restore", "restoredocs": "restoredocs", "references": "references"}
 
 # The locale a scene runs under, the knob the leg carries as an intent
 # extra (docs/compliance-plan.md §4); the reads ask the platform, never
@@ -337,7 +343,10 @@ RELAUNCH_DOOR = {"tasks": "notify_tap", "taskspersist": "launch",
                  # The cold link door: `am start -a VIEW -d <url>`,
                  # narrowed to this package (docs/app-links-plan.md
                  # §4; docs/traps.md on the chooser).
-                 "links": "link"}
+                 "links": "link",
+                 # THE CONTINUATION (docs/restoration-plan.md SR15): act one
+                 # parks, HOME stops it, `am kill` ends it with its task kept.
+                 "restore": "resume", "restoredocs": "resume", "references": "resume"}
 
 # THE RECREATION LEGS' SCENE and the statement they cut in half:
 # `todos` because the model it re-projects is EARNED, and the cut is
@@ -579,8 +588,7 @@ IME_SCENES = ["ranges", "richtext"]
 # phone has; split/panes drive resize_window, which this host rejects
 # by design (the system owns surfaces; DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem", "auxquit"]
-# docs/restoration-plan.md §5: the Mac first, then the fan-out wires it here.
-UNWIRED_SCENES = ["restore", "references", "restoredocs"]
+UNWIRED_SCENES: list[str] = []
 
 
 def scene_of(leg):
