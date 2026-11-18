@@ -7,6 +7,7 @@ import time
 
 WALL_S = 30.0
 REPAIR_AFTER_S = 3.0
+RESEND_S = 2.0
 
 
 def _out(argv):
@@ -46,24 +47,35 @@ def default_network(serial):
     seen = (f"wifi_on={wifi_on!r}, active default {m.group(1) if m else '<none>'}: "
             f"{agent[:80] if agent else '<no agent line>'}")
     return (wifi_on == "0" and "Transports: CELLULAR" in agent
-            and re.search(r"ni\{MOBILE\[\w*\] CONNECTED", agent) is not None), seen
+            and re.search(r"ni\{MOBILE\[\w*\] CONNECTED", agent) is not None), seen, wifi_on
+
+
+def wifi_off(serial):
+    subprocess.run(["adb", "-s", serial, "shell", "svc", "wifi", "disable"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
 
 
 def modem_network(serial, label, wall=WALL_S, repair_after=REPAIR_AFTER_S):
-    """(True, sentence) once the default network is cellular, else (False, sentence)."""
-    subprocess.run(["adb", "-s", serial, "shell", "svc", "wifi", "disable"],
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    """(True, sentence) once the default network is cellular, else (False, sentence).
+    The WiFi off is sent again while wifi_on reads on: one sent just after a cold
+    boot from snapshot was lost (docs/traps.md, the WiFi off a cold boot lost)."""
+    wifi_off(serial)
     t0 = time.time()
+    sent, last_sent = 1, t0
     repaired = None
     while True:
-        ok, seen = default_network(serial)
+        ok, seen, wifi_on = default_network(serial)
         took = time.time() - t0
+        resent = f"; the WiFi off was sent {sent} times" if sent > 1 else ""
         if ok:
             return True, (f"{label} ({serial}): network is the modem's ({seen})"
                           + (f"; the modem was repaired at {repaired[0]:.0f}s, when it read "
-                             f"{repaired[1]}" if repaired else ""))
+                             f"{repaired[1]}" if repaired else "") + resent)
         if took > wall:
             break
+        if wifi_on != "0" and time.time() - last_sent >= RESEND_S:
+            wifi_off(serial)
+            sent, last_sent = sent + 1, time.time()
         if repaired is None and took >= repair_after:
             down, said = modem_state(serial)
             if down:
@@ -77,7 +89,7 @@ def modem_network(serial, label, wall=WALL_S, repair_after=REPAIR_AFTER_S):
         time.sleep(0.2)
     _down, now = modem_state(serial)
     return False, (f"{label} ({serial}): the default network is not the modem's after "
-                   f"{took:.0f}s ({seen}); the modem reads {now} now, and "
+                   f"{took:.0f}s ({seen}){resent}; the modem reads {now} now, and "
                    + (f"was set home at {repaired[0]:.0f}s when it read {repaired[1]}"
                       if repaired else "read home and in service when checked, so it was not "
                       "repaired")

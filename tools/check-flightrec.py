@@ -328,6 +328,9 @@ def census_android_modem_network(src):
     found = []
     if '"svc", "wifi", "disable"]' not in modem:
         found.append("android: the runner no longer turns the virtual WiFi off")
+    # docs/traps.md, the WiFi off a cold boot lost.
+    if 'if wifi_on != "0" and time.time() - last_sent >= RESEND_S:' not in modem:
+        found.append("android: the WiFi off is sent once and never again while WiFi reads on")
     if ('"Transports: CELLULAR" in agent' not in modem
             or r'ni\{MOBILE\[\w*\] CONNECTED' not in modem):
         found.append("android: the runner no longer reads back that the default network "
@@ -3235,6 +3238,10 @@ gate.negative("NWF3 a system timeline without the link's events",
 nwf4 = doctored(MODEM, r"if down:", "if False:", "NWF4 the modem repair cut")
 gate.negative("NWF4 a modem out of service left as it is",
               lambda: census_android_modem_network(nwf4), want="no longer set home")
+nwf6 = doctored(MODEM, r'if wifi_on != "0" and time\.time\(\) - last_sent >= RESEND_S:',
+                "if False:", "NWF6 the WiFi off sent once")
+gate.negative("NWF6 a WiFi off lost after a cold boot never sent again",
+              lambda: census_android_modem_network(nwf6), want="sent once and never again")
 nwf5 = doctored(MODEM, r" CONNECTED\"", ' SUSPENDED"', "NWF5 a suspended network accepted")
 gate.negative("NWF5 a suspended cellular network read as the modem's",
               lambda: census_android_modem_network(nwf5), want="connected")
@@ -4307,6 +4314,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(313 + (5 if DRIVES else 0))
+gate.negatives_ran(314 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

@@ -4,6 +4,20 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The WiFi off a cold boot lost (measured 2026-11-18)
+
+The f6019c50 matrix's Android lane failed at admission in 59 s, no leg run:
+lane-health restarted emulator-5556 from its snapshot (4.4 GB, past its bound),
+and 31 s later the modem check read `wifi_on='1'` with WIFI the default
+network; the modem itself read home and in service. android_modem sent
+`svc wifi disable` once, before the wait, and never again. The same device
+read `wifi_on` 0 when asked by hand after the lane, and the android-quiet row
+25 minutes later turned it off on the first send, so the one send right after
+the cold boot was lost. The wait now sends it again every 2 s while
+`wifi_on` reads anything but 0, and both sentences count the sends. GUARD:
+check-flightrec's census_android_modem_network holds the resend, NWF6 cuts it
+and was watched red.
+
 ## The iOS export picked during a Spotlight purge that read `indexing: no` (measured 2026-11-18)
 
 The second sighting of docs/deferred.md's iOS editor-go DEFECT (run
