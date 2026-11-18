@@ -4,6 +4,38 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The iOS export picked during a Spotlight purge that read `indexing: no` (measured 2026-11-18)
+
+The second sighting of docs/deferred.md's iOS editor-go DEFECT (run
+20261118T080512Z-032354): the press fired, the picker's DOCCopyOperation ran
+00:18:59.924 to 00:19:00.032 and wrote `draft` (0 bytes is the export's
+expected result: the iOS save exports a zero-byte staged file, and the copy
+keeps the staged file's mtime, which is why the cancel note read it as
+"modified 9.8 s ago", older than the typed name). Then the service logged
+`[FileProvider] Failed opening URL: 2` four times and bookmarked the
+DIRECTORY, and the app logged `Calling delegate
+-documentBrowser:didPickDocumentURLs: with an empty array of items. This
+indicates the items failed to be prepared and materialized on disk` and
+UIKit's `didPickDocumentURLs called with nil or 0 URLS`, which it delivers as
+documentPickerWasCancelled. The mechanism of the 2026-10-14 sighting in "The
+iOS save press" below, but run-sim's provider wait had passed: a LocalStorage
+purge ("Sync anchor expired") ran 00:18:58.270 to 58.542, the wait read the
+indexer idle 0.25 s after it ended, and the press followed 1.4 s later.
+
+Polling `fileproviderctl dump -l com.apple.FileProvider.LocalStorage` on the
+four pool devices every 0.7 s through the next matrix's iOS lane: a purge in
+flight shows as `deleteSearchableItemsWithSpotlightDomainIdentifiers:...` under
+"alive due to XPC calls", and it read `indexing: no` while it ran 17 times in
+six minutes (one device held two purge calls at `indexing: no` for 12 s);
+after a purge the indexer often read `yes` again within 1 to 3 s. One idle
+read was never a settled provider. The wait now needs `indexing: no` AND no
+purge call on every read for PROVIDER_SETTLE (3 s), and its refusal names the
+purge count and how long it had been idle. Prior art: Apple's forums carry the
+same empty-array line (threads 711714, 772053) from failed materialization,
+with no fix. GUARD: check-steps' ios_provider (the purge count and the settle,
+each cut and watched red) and its self-test, which drives every branch of the
+wait with a fake clock.
+
 ## SwiftUI reopens an aux window after a quit (measured 2026-11-17)
 
 On macOS 26.6 a kaya app whose user keeps windows at a quit

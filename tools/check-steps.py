@@ -5425,6 +5425,14 @@ def ios_provider(driver, runsim, flightrec):
     if gate < 0 or launch < 0 or gate > launch:
         bad.append("tools/ios/run-sim.py: run_swiftui_on launches a picker leg without "
                    "provider_quiet(udid, PROVIDER_LAUNCH_WAIT) first")
+    reading = body_of(runsim, "def provider_reading(", "\n\n_PURGING")
+    if 'str(len(re.findall(r"deleteSearchableItemsWith"' not in reading:
+        bad.append("tools/ios/run-sim.py: provider_reading no longer counts the Spotlight "
+                   "purges in flight, which read `indexing: no` while they run")
+    quiet = body_of(runsim, "def provider_quiet(", "\n\ndef ")
+    if 'fields["purges"] == "0"' not in quiet or "PROVIDER_SETTLE" not in quiet:
+        bad.append("tools/ios/run-sim.py: provider_quiet takes one idle read on trust; "
+                   "the press needs no purge in flight for PROVIDER_SETTLE seconds")
     if "_got = provider_reading(_text)" not in runsim:
         bad.append("tools/ios/run-sim.py: provider_reading is no longer read over its "
                    "canned dumps before any leg trusts it")
@@ -5461,6 +5469,10 @@ for label, pattern, repl, which, want in (
          "quiet, provider = True, ''", "runsim", "PROVIDER_COMMIT_WAIT) first"),
         ("the launch gate", r"_, provider = provider_quiet\(udid, PROVIDER_LAUNCH_WAIT\)",
          "provider = ''", "runsim", "PROVIDER_LAUNCH_WAIT) first"),
+        ("the purge count", r'str\(len\(re\.findall\(r"deleteSearchableItemsWith"', 'str((',
+         "runsim", "purges in flight, which read"),
+        ("the settle", r'and fields\["purges"\] == "0"', "", "runsim",
+         "takes one idle read on trust"),
         ("the reading's self-test", r"_got = provider_reading\(_text\)", "_got = None",
          "runsim", "canned dumps"),
         ("the blind refusal", r"if _unread:\n", "if False:\n", "runsim", "wait blind"),
@@ -5479,18 +5491,30 @@ for label, pattern, repl, which, want in (
             srcs["driver"], srcs["runsim"], srcs["flightrec"])):
         selftest_fail(f"the iOS provider negative ({label}) did not fire")
 
-_ns = {"re": re, "time": types.SimpleNamespace(monotonic=time.monotonic, sleep=lambda _s: None)}
-exec(body_of(RUNSIM_SRC, "def provider_reading(", "\n\nfor ")
+_clock = [0.0]
+_ns = {"re": re, "PROVIDER_SETTLE": 3.0, "time": types.SimpleNamespace(
+    monotonic=lambda: _clock[0], sleep=lambda s: _clock.__setitem__(0, _clock[0] + s))}
+exec(body_of(RUNSIM_SRC, "def provider_reading(", "\n\n_PURGING")
      + body_of(RUNSIM_SRC, "def provider_quiet(", "\n\ndef "), _ns)
-for _fields, _bound, _want in (
-        ({"indexing": "no", "errors": "75"}, 0, "read idle after"),
-        ({"indexing": "yes", "needs-indexing": "yes", "errors": "75",
-          "last error": "-1002"}, 0, "still indexing after 0s (indexing yes"),
-        (None, 0, "no indexer in fileproviderctl's dump, exit 1")):
-    _ns["provider_indexer"] = lambda _u, _f=_fields: (_f, "exit 1: 'Invalid device'")
+_IDLE = {"indexing": "no", "purges": "0", "errors": "75"}
+_PURGE = {"indexing": "no", "purges": "1", "errors": "75"}
+for _reads, _bound, _want in (
+        ([_IDLE], 10, "read idle with no purge in flight for 3.0s, after 3.0s"),
+        ([_PURGE] * 4 + [_IDLE], 10, "for 3.0s, after 5.0s"),
+        ([_IDLE, _PURGE] + [_IDLE] * 3, 2,
+         "Spotlight purges in flight 0, needs-indexing ?, errors 75, last error none; "
+         "idle only for the last 1.0s"),
+        ([_PURGE], 1, "not settled after 1s (indexing no, Spotlight purges in flight 1"),
+        ([{"indexing": "yes", "purges": "0", "needs-indexing": "yes", "errors": "75",
+           "last error": "-1002"}], 0, "not settled after 0s (indexing yes"),
+        ([None], 0, "no indexer in fileproviderctl's dump, exit 1")):
+    _clock[0] = 0.0
+    _seq = list(_reads)
+    _ns["provider_indexer"] = lambda _u, _s=_seq: (
+        _s.pop(0) if len(_s) > 1 else _s[0], "exit 1: 'Invalid device'")
     _quiet, _said = _ns["provider_quiet"]("udid", _bound)
-    print(f"check-steps: provider wait over {_fields}: idle={_quiet} {_said}")
-    if _want not in _said or _quiet != (_want == "read idle after"):
+    print(f"check-steps: provider wait over {len(_reads)} read(s): idle={_quiet} {_said}")
+    if _want not in _said or _quiet != ("read idle" in _want or "for 3.0s" in _want):
         selftest_fail(f"the provider wait's sentence missed {_want!r}")
 
 _purge = flightrec_lane.ios_provider_purges

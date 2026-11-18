@@ -1583,7 +1583,7 @@ android_system_events selects the link's events. check-flightrec "android modem
 network", NWF1 to NWF3 watched red.
 
 ## DEFECT — iOS editor-go: the export sheet's Save wrote the file and the picker reported cancel (seen 2026-11-03, the 77eac884 matrix, and 2026-11-18, the d68e975e matrix)
-KEY: documentPickerWasCancelled, forExporting, save cancelled, file_save, DOCCopyOperation, Failed opening URL: 2, LocalStorage purge, kaya-save-export
+KEY: documentPickerWasCancelled, forExporting, save cancelled, file_save, DOCCopyOperation, Failed opening URL: 2, LocalStorage purge, kaya-save-export, PROVIDER_SETTLE, deleteSearchableItemsWith
 
 Run 20261103T175930Z-051771: `file_save` pressed the sheet's Save ("Save
 offered enabled=true hittable=true at 323,92 keyboards 1->0 sheet gone") and
@@ -1614,9 +1614,18 @@ matrix, host load 60 to 98 on 18 cores while the Windows VM and the
 emulators ran): the same press ("Save offered enabled=true hittable=true at
 323,92 keyboards 1->0 sheet gone", 3.07 s) and the bundle's sentence "<dir>
 holds draft (0 bytes, modified 9.8 s ago): the platform cancelled a save it
-had written". The file was 0 bytes this time, so the provider created it and
-the copy did not finish before the picker fell back to cancel. Not rerun; the
-matrix's other 3,600 legs were green.
+had written". Not rerun; the matrix's other 3,600 legs were green.
+
+CAUSE READ 2026-11-18 (docs/traps.md, the iOS export picked during a
+Spotlight purge that read `indexing: no`): 0 bytes is the export's expected
+result, the copy finished, and the app's materialization of the picked item
+failed into an empty pick, inside the 1.4 s after a LocalStorage purge that
+run-sim's single idle read had let through. A purge in flight reads
+`indexing: no`, measured 17 times in six minutes of a matrix's iOS lane. The
+provider wait now needs no purge in flight and 3 s of idle reads. Kept open
+because no purge could be made on demand, so the fix is not proven by a
+reproduction: a third sighting with the wait's 3 s sentence in the leg log
+says the premise is wrong.
 
 ## ~~WATCH — iOS numberfield-swiftui and numberfieldde-swiftui: `press return` found kaya's focus nowhere and no first responder (seen once, both legs of the 0b8e8e42 matrix, 2026-11-03)~~ FIXED 2026-11-16: not the focus. Both bundles (red/20261103T222534Z-016040) read XCTest IN PROGRESS 15 s into the `type_b64`: the driver sat in XCTest's 60 s animations-idle wait on a `CASpringAnimation position 0.3833` added through `_UIViewAdditiveAnimationAction` to the keyboard's InputAccessoryHost layer, which was deallocated before its stop came, and the focus reading came after the wait. The iOS harness now delivers a stop UIKit never sent for a deallocated layer (the INVESTIGATE "XCTest waits 60 s for animations idle" entry below; docs/traps.md, the stop UIKit loses with its layer). GUARD: check-flightrec NH24 to NH27.
 KEY: numberfield-swiftui, numberfieldde-swiftui, press return, the simdrive watcher did not answer, focus is node nowhere, the first responder is nothing, keyboard_done

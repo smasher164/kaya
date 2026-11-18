@@ -1575,11 +1575,14 @@ if not needs_driver('expect label#0 "x"\ntype "an"') \
 
 # docs/traps.md, the iOS save press: the picker's commits stall while the
 # device's LocalStorage file provider indexes (a Spotlight purge after an
-# expired sync anchor ran 0.3-127 s), so they wait for its indexer to idle.
+# expired sync anchor ran 0.3-127 s), so they wait for its indexer to idle,
+# with no purge in flight, for PROVIDER_SETTLE seconds of reads (docs/traps.md,
+# the export picked after a purge).
 PROVIDER_VERBS = frozenset(("savepress", "choose"))
 PROVIDER_STEPS = frozenset(("file_save", "file_choose"))
 PROVIDER_COMMIT_WAIT = 40
 PROVIDER_LAUNCH_WAIT = 150
+PROVIDER_SETTLE = 3.0
 
 
 def provider_reading(text):
@@ -1589,14 +1592,21 @@ def provider_reading(text):
         m = re.search(rf"^\s*{key}:\s*(.+?)\s*$", text or "", re.M)
         if m:
             fields[key] = m.group(1)
+    fields["purges"] = str(len(re.findall(r"deleteSearchableItemsWith", text or "")))
     return fields if fields.get("indexing") in ("yes", "no") else None
 
 
-for _text, _want in (("  + indexer:\n      indexing:       no\n      errors:         75\n", "no"),
-                     ("      indexing:       yes\n      needs-indexing: yes\n", "yes"),
+_PURGING = ("     deleteSearchableItemsWithSpotlightDomainIdentifiers:domainIdentifier:"
+            "indexReason:completionHandler: (2026-11-18 08:51:33 +0000 - not expired), "
+            "no progress\n  + indexer:\n      indexing:       no\n")
+for _text, _want in (("  + indexer:\n      indexing:       no\n      errors:         75\n",
+                      ("no", "0")),
+                     ("      indexing:       yes\n      needs-indexing: yes\n", ("yes", "0")),
+                     (_PURGING, ("no", "1")),
                      ("Import Cookie: The operation couldn't be completed.\n", None)):
     _got = provider_reading(_text)
-    if (_got or {}).get("indexing") != _want:
+    if (((_got or {}).get("indexing"), (_got or {}).get("purges"))
+            != (_want or (None, None))):
         die(f"run-sim: provider_reading read {_got} out of a dump whose indexer is "
             f"{_want} — the picker's commits would wait on a misread")
 
@@ -1612,22 +1622,33 @@ def provider_indexer(udid):
 
 
 def provider_quiet(udid, bound):
-    """(idle, sentence): waits until the device's LocalStorage indexer reads idle,
+    """(idle, sentence): waits until the device's LocalStorage indexer reads idle
+    with no Spotlight purge in flight on every read for PROVIDER_SETTLE seconds,
     or `bound` seconds pass."""
     started = time.monotonic()
+    idle_since = None
     while True:
         fields, raw = provider_indexer(udid)
-        waited = time.monotonic() - started
-        if fields is not None and fields["indexing"] == "no":
-            return True, (f"the LocalStorage indexer read idle after {waited:.1f}s "
-                          f"(errors {fields.get('errors', '?')})")
+        now = time.monotonic()
+        waited = now - started
+        if fields is not None and fields["indexing"] == "no" and fields["purges"] == "0":
+            idle_since = now if idle_since is None else idle_since
+            if now - idle_since >= PROVIDER_SETTLE:
+                return True, (f"the LocalStorage indexer read idle with no purge in flight "
+                              f"for {now - idle_since:.1f}s, after {waited:.1f}s "
+                              f"(errors {fields.get('errors', '?')})")
+        else:
+            idle_since = None
         if waited >= bound:
-            said = (f"indexing {fields['indexing']}, needs-indexing "
+            said = (f"indexing {fields['indexing']}, Spotlight purges in flight "
+                    f"{fields['purges']}, needs-indexing "
                     f"{fields.get('needs-indexing', '?')}, errors {fields.get('errors', '?')}, "
                     f"last error {fields.get('last error', 'none')}"
                     if fields is not None else f"no indexer in fileproviderctl's dump, {raw}")
-            return False, (f"the device's LocalStorage file provider was still indexing "
-                           f"after {waited:.0f}s ({said})")
+            held = (f"; idle only for the last {now - idle_since:.1f}s"
+                    if idle_since is not None else "")
+            return False, (f"the device's LocalStorage file provider was not settled "
+                           f"after {waited:.0f}s ({said}{held})")
         time.sleep(0.5)
 
 
