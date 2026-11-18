@@ -46,6 +46,61 @@ pub type PickedSaver = unsafe extern "C" fn(
 
 pub(crate) static PICKED_SAVER: std::sync::OnceLock<PickedSaver> = std::sync::OnceLock::new();
 
+/// A plain bookmark of a picked URL, made while its scope is held
+/// (docs/restoration-plan.md SR11, iOS's row): the bytes, or null with
+/// `out_error` filled. The bytes live until the next call.
+pub type Bookmarker = unsafe extern "C" fn(locator: *const c_char, out_len: *mut usize, out_error: *mut *const c_char) -> *const u8;
+
+/// A bookmark resolved: 0 with `out_text` the locator it registered, 1 with
+/// a sentence for a file that is gone, 2 with a sentence for any other answer.
+pub type BookmarkResolver =
+    unsafe extern "C" fn(bytes: *const u8, len: usize, out_stale: *mut u32, out_text: *mut *const c_char) -> u32;
+
+pub(crate) static BOOKMARKER: std::sync::OnceLock<Bookmarker> = std::sync::OnceLock::new();
+pub(crate) static BOOKMARK_RESOLVER: std::sync::OnceLock<BookmarkResolver> = std::sync::OnceLock::new();
+
+fn borrowed_text(text: *const c_char) -> String {
+    if text.is_null() {
+        return String::new();
+    }
+    unsafe { std::ffi::CStr::from_ptr(text) }.to_string_lossy().into_owned()
+}
+
+/// The backend's bookmark of a picked locator.
+pub(crate) fn bookmark(locator: &str) -> Result<Vec<u8>, String> {
+    let make = BOOKMARKER.get().ok_or("this SwiftUI backend exports no bookmark maker; rebuild it")?;
+    let locator = CString::new(locator).map_err(|e| format!("the locator would not cross: {e}"))?;
+    let mut len = 0usize;
+    let mut error: *const c_char = std::ptr::null();
+    let bytes = unsafe { make(locator.as_ptr(), &mut len, &mut error) };
+    if bytes.is_null() {
+        return Err(borrowed_text(error));
+    }
+    Ok(unsafe { std::slice::from_raw_parts(bytes, len) }.to_vec())
+}
+
+pub(crate) enum Resolved {
+    Found { locator: String, stale: bool },
+    Gone(String),
+    Unknown(String),
+}
+
+/// The backend's resolution of a bookmark; a found URL is registered there.
+pub(crate) fn resolve_bookmark(bytes: &[u8]) -> Resolved {
+    let Some(resolve) = BOOKMARK_RESOLVER.get() else {
+        return Resolved::Unknown("this SwiftUI backend exports no bookmark resolver; rebuild it".to_owned());
+    };
+    let mut stale = 0u32;
+    let mut text: *const c_char = std::ptr::null();
+    let code = unsafe { resolve(bytes.as_ptr(), bytes.len(), &mut stale, &mut text) };
+    let text = borrowed_text(text);
+    match code {
+        0 => Resolved::Found { locator: text, stale: stale != 0 },
+        1 => Resolved::Gone(text),
+        _ => Resolved::Unknown(text),
+    }
+}
+
 /// The capability query's platform half (docs/media-plan.md §8 ruling 1):
 /// AVFoundation's own answer for a MIME type with its codecs, NUL-terminated.
 pub type CanPlay = unsafe extern "C" fn(mime: *const c_char, codecs: *const c_char) -> u8;
@@ -502,6 +557,8 @@ pub struct KayaHostApi {
     pub session_restored: extern "C" fn() -> u32,
     pub session_caret: extern "C" fn(u64, u64, u64),
     pub session_top_row: extern "C" fn(u64, u64),
+    pub session_platform_token: unsafe extern "C" fn(u8, *const u8, usize),
+    pub session_id: unsafe extern "C" fn(*mut u8, usize) -> usize,
 }
 
 /// # Safety
@@ -686,6 +743,16 @@ pub(crate) fn run() -> i32 {
         let saver: PickedSaver = unsafe { std::mem::transmute(saver) };
         let _ = PICKED_SAVER.set(saver);
     }
+    let bookmarker = unsafe { dlsym(handle, c"kaya_swiftui_bookmark".as_ptr()) };
+    if !bookmarker.is_null() {
+        let bookmarker: Bookmarker = unsafe { std::mem::transmute(bookmarker) };
+        let _ = BOOKMARKER.set(bookmarker);
+    }
+    let resolver = unsafe { dlsym(handle, c"kaya_swiftui_resolve_bookmark".as_ptr()) };
+    if !resolver.is_null() {
+        let resolver: BookmarkResolver = unsafe { std::mem::transmute(resolver) };
+        let _ = BOOKMARK_RESOLVER.set(resolver);
+    }
     let can_play = unsafe { dlsym(handle, c"kaya_swiftui_can_play".as_ptr()) };
     if !can_play.is_null() {
         let can_play: CanPlay = unsafe { std::mem::transmute(can_play) };
@@ -843,6 +910,8 @@ pub(crate) fn run() -> i32 {
         session_restored: crate::capi::kaya_session_restored,
         session_caret: crate::capi::kaya_session_caret,
         session_top_row: crate::capi::kaya_session_top_row,
+        session_platform_token: crate::capi::kaya_session_platform_token,
+        session_id: crate::capi::kaya_session_id,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

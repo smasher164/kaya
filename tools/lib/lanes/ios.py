@@ -56,6 +56,8 @@ SWIFT_ENTRIES = [
     "codesurface",
     # The font picker (docs/font-picker-plan.md §7).
     "fontpick",
+    # Session restoration (docs/restoration-plan.md SR15).
+    "restore", "restoredocs",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -83,12 +85,14 @@ GO_SCENES = [
     "netimage", "netimage_http",
     "grounds", "shapes", "cards", "tracks", "dock", "layers",
     "codesurface", "fontpick",
+    "restore", "restoredocs",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
 # (docs/python-mobile-plan.md).
 PYTHON_SCENES = ["portfolio", "varied", "music_home", "music_playlist", "music_header",
-                 "music_dock", "music_artist", "music_search", "music_context"]
+                 "music_dock", "music_artist", "music_search", "music_context",
+                 "restore", "restoredocs"]
 # A scene whose guest file is another's: staged under the scene's name, the
 # one the host's main.py runs (tools/pyhost-main.py).
 PYTHON_GUEST = {"music_home": "music", "music_playlist": "music", "music_header": "music",
@@ -131,6 +135,9 @@ RUST_SCENES = [
     "dirty", "dnd", "pickers", "sliders", "tooltips", "sheet",
     # docs/doctabs-plan.md §1.6: the list of open documents.
     "doctabs",
+    # docs/restoration-plan.md SR15: the draft, scroll and caret after the
+    # platform's continuation; the restored documents; a durable reference.
+    "restore", "restoredocs",
     # docs/font-picker-plan.md §7: UIFontPickerViewController through the
     # resident XCUITest driver.
     "fontpick",
@@ -275,7 +282,11 @@ PAD_EXTRAS = {
 # host rejects by design (DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem", "auxquit"]
 # docs/restoration-plan.md §5: the Mac first, then the fan-out wires it here.
-UNWIRED_SCENES = ["restore", "references", "restoredocs"]
+# The scene's `delete` removes the picked file by its local path, which iOS
+# publishes empty by design (swiftui_host.rs's UrlSource); the bookmark's
+# mint and its redeem across the continuation are green (the restoration
+# notes, 2026-11-18).
+UNWIRED_SCENES = ["references"]
 # Off with a reason: the safe save's leftover backup is Android's alone.
 OFF_SCENES = {"saferestore": "a rename cannot leave a backup, so there is no second act to run (docs/rich-document-plan.md §4.1)"}
 
@@ -513,7 +524,10 @@ RELAUNCH_DOOR = {"tasks": "launch-notification",
                  # first time on a device and delivers nothing until it is
                  # answered (docs/traps.md) — run-sim answers it through
                  # the lane's own driver.
-                 "links": "link"}
+                 "links": "link",
+                 # THE CONTINUATION (docs/restoration-plan.md SR15): act one
+                 # parks, another app takes the front, the system ends it.
+                 "restore": "resume", "restoredocs": "resume"}
 # Which notification the door hands back: the scene's act one sets t1's
 # reminder, and a task's key IS its notification id (R2).
 RELAUNCH_NOTIFICATION = {"tasks": 1}

@@ -388,6 +388,7 @@ pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
 /// destructors: docs/traps.md, "exit() is not final on Windows" and "A Node
 /// host's exit tears the worker down under a native thread still inside
 /// Node-API". What is flushed is this crate's own stdio.
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub(crate) fn exit_hard(code: i32) -> ! {
     use std::io::Write;
     session::exit_flush();

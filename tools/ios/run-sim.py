@@ -2007,6 +2007,74 @@ def app_running(udid, bundle_id):
                for line in got.splitlines())
 
 
+# `relaunch resume` (docs/restoration-plan.md SR15): the platform's
+# continuation is a backgrounded app the system ended, so act one parks after
+# its verdict, another app comes to the front, the scene's background save
+# point is awaited, and the process is terminated.
+BACKGROUND_APP = "com.apple.Preferences"
+PARKED = "KAYA_RELAUNCH: parked for the platform's continuation"
+BACKGROUND_SAVED = "KAYA_SESSION: background save point"
+RESUME_WAIT_S = 100
+# The scene's restoration archive is written after the background
+# notification, not inside it (docs/traps.md, the iOS resume door).
+ARCHIVE_SETTLE_S = 2.0
+
+
+def act_one_resume(udid, bundle_id, name, env, log):
+    """Act one under the resume door: its output, with every step of the
+    door logged; a step that does not arrive says which."""
+    act_one = subprocess.Popen(
+        ["xcrun", "simctl", "launch", "--console-pty", udid, bundle_id],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, **TEXT)
+    lines = []
+    reader = threading.Thread(target=lambda: lines.extend(act_one.stdout), daemon=True)
+    reader.start()
+
+    def wait_for(text, seconds):
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if any(text in line for line in list(lines)):
+                return True
+            if act_one.poll() is not None:
+                reader.join(2)
+                return any(text in line for line in list(lines))
+            time.sleep(0.1)
+        return False
+
+    door = []
+    if not wait_for(PARKED, RESUME_WAIT_S):
+        door.append(f"run-sim: {name}: act one never printed {PARKED!r}, so the "
+                    f"resume door was not pushed")
+    else:
+        started = time.monotonic()
+        run(["timeout", "60", "xcrun", "simctl", "launch", udid, BACKGROUND_APP],
+            stdout=log, stderr=log)
+        if wait_for(BACKGROUND_SAVED, 20):
+            door.append(f"run-sim: {name}: backgrounded by {BACKGROUND_APP}; the "
+                        f"scene's save point printed {time.monotonic() - started:.1f}s "
+                        f"later; settling {ARCHIVE_SETTLE_S}s for the archive")
+            time.sleep(ARCHIVE_SETTLE_S)
+        else:
+            door.append(f"run-sim: {name}: {BACKGROUND_APP} came to the front and the "
+                        f"scene printed no {BACKGROUND_SAVED!r} within 20s; "
+                        f"terminating anyway")
+        run(["timeout", "60", "xcrun", "simctl", "terminate", udid, bundle_id],
+            stdout=log, stderr=log)
+        run(["timeout", "60", "xcrun", "simctl", "terminate", udid, BACKGROUND_APP],
+            stdout=log, stderr=log)
+    try:
+        act_one.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        act_one.kill()
+        act_one.wait()
+        door.append(f"run-sim: {name}: act one's console did not close 30s after the "
+                    f"terminate; killed")
+    reader.join(5)
+    for line in door:
+        print(line, file=log)
+    return "".join(lines) + "\n".join(door) + "\n"
+
+
 def second_act(udid, bundle_id, name, scene, env, act_one_out, log):
     """R6a: act one ended at `relaunch` and left the marker. Push this
     lane's door and join act two's verdict — the notification carve-out
@@ -2031,6 +2099,9 @@ def second_act(udid, bundle_id, name, scene, env, act_one_out, log):
     # the only source, exactly as a real tap would leave it.
     act2_env.pop("SIMCTL_CHILD_KAYA_SELFTEST", None)
     act2_env.pop("SIMCTL_CHILD_KAYA_SELFTEST_SCRIPT", None)
+    # The simdrive watcher stopped with act one, so an attach would wait out
+    # its 40 s for nobody (the references scene's act two drives no picker).
+    act2_env.pop("SIMCTL_CHILD_KAYA_DRIVER_ATTACH", None)
     if door == "link":
         # THE LINK DOOR (docs/app-links-plan.md L5): the platform opens
         # the URL and STARTS the app with it, which is the door a tap
@@ -2045,7 +2116,7 @@ def second_act(udid, bundle_id, name, scene, env, act_one_out, log):
             return False
         print(f"== act two: {door} {url} ==", file=log)
         return link_door(udid, bundle_id, name, url, verdict, log)
-    if door == "launch":
+    if door in ("launch", "resume"):
         # THE PLAIN DOOR (docs/tasks-s4-plan.md P5): the bundle again,
         # nothing pending, nothing added.
         print(f"== act two: {door} ==", file=log)
@@ -2203,12 +2274,15 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         (drive_dir / "deadline").write_text(f"{time.time() + 100:.3f}\n",
                                             encoding="utf-8")
     launched_at = time.time()
-    got = subprocess.run(
-        ["timeout", "120", "xcrun", "simctl", "launch", "--console-pty",
-         udid, bundle_id],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
-        check=False, **TEXT)
-    out = got.stdout
+    if lane.RELAUNCH_DOOR.get(scene) == "resume":
+        out = act_one_resume(udid, bundle_id, name, env, log)
+    else:
+        got = subprocess.run(
+            ["timeout", "120", "xcrun", "simctl", "launch", "--console-pty",
+             udid, bundle_id],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
+            check=False, **TEXT)
+        out = got.stdout
     stacks_stop.set()
     stacks.join()
     if watcher is not None:

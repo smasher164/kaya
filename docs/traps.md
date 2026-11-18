@@ -4,6 +4,28 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## iOS's restoration token, and a Go guest's first build on the main thread (measured 2026-11-18)
+
+The iOS vehicle is SwiftUI's `@SceneStorage("kaya.session")` on the root
+(swift/KayaSwiftUIEntry.swift, KayaSessionVehicle), which is the scene's
+restoration activity. Measured on the pool (docs/restoration-plan.md §5 step 0
+(c)): a backgrounded app ended by `simctl terminate` and launched again gets
+the stored session id back; the core's first read waited 380-490 ms for the
+scene's first body evaluation to hand it. The archive is written after the
+background notification, so run-sim settles 2 s after the scene's save point
+before it terminates.
+
+A Go guest's first `Build` runs on the calling goroutine, which on iOS is the
+process main thread BEFORE `kaya_run`: its session read came before any scene
+existed and could not wait for one (the main thread is where the token
+arrives). The core refuses that read with a sentence and starts the launch
+headless (fresh, writing nothing), so the file survives; the Go binding now
+queues a build made before Serve on iOS and runs it on the app thread. Any
+binding whose first build runs on the main thread before `kaya_run` meets the
+same wall on a phone. Watched: restore-go red before the fix ("restored fresh,
+wanted resumed"), and restore-swiftui red with the vehicle cut (the 5 s
+no-token sentence printed).
+
 ## A relaunch leg's second act met its first still exiting (measured 2026-11-18)
 
 Two ways a `relaunch resume` leg read act one green and act two wrong,

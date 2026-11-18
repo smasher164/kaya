@@ -36,6 +36,9 @@ pub(crate) enum Token {
     NoRule,
     Absent,
     Session(String),
+    /// No platform word will come (a process with no scene or activity, or
+    /// one that never handed it): fresh, and this process writes nothing.
+    Headless,
 }
 
 /// A value's scope (SR3, SR9), spelled in the file as `app`, `window.<id>`,
@@ -154,7 +157,7 @@ pub(crate) fn sweep(text: Option<&str>, app_id: &str, restore_version: i64, toke
     }
     match token {
         Token::NoRule => {}
-        Token::Absent => return fresh(None),
+        Token::Absent | Token::Headless => return fresh(None),
         Token::Session(id) if *id == file_session => {}
         Token::Session(id) => {
             return Swept {
@@ -406,11 +409,84 @@ pub(crate) fn parse_declared(value: impl Fn(&str) -> Option<String>) -> (Declare
 
 /// The platform's word, handed in before the first touch by the phone hosts
 /// (Android's Bundle, iOS's activity); the desktops leave it at NoRule.
-static TOKEN: Mutex<Token> = Mutex::new(Token::NoRule);
+/// None until a phone host has answered (F9); the desktops read NoRule.
+static TOKEN: Mutex<Option<Token>> = Mutex::new(None);
+static TOKEN_SET: std::sync::Condvar = std::sync::Condvar::new();
+/// How long a first read on a phone waits for the platform's word (F9).
+const TOKEN_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 pub(crate) fn set_platform_token(token: Token) {
-    if let Ok(mut t) = TOKEN.lock() {
-        *t = token;
+    let mut t = TOKEN.lock().unwrap_or_else(|e| e.into_inner());
+    *t = Some(token);
+    TOKEN_SET.notify_all();
+}
+
+const PHONE: bool = cfg!(any(target_os = "ios", target_os = "android"));
+
+/// Whether a read may load the store now: always on the desktops; on a
+/// phone once the platform has handed its token.
+fn token_decided() -> bool {
+    !PHONE || TOKEN.lock().map(|t| t.is_some()).unwrap_or(true)
+}
+
+#[cfg(target_os = "ios")]
+fn on_main_thread() -> bool {
+    unsafe extern "C" {
+        fn pthread_main_np() -> i32;
+    }
+    unsafe { pthread_main_np() != 0 }
+}
+
+#[cfg(target_os = "android")]
+fn on_main_thread() -> bool {
+    unsafe extern "C" {
+        fn gettid() -> i32;
+        fn getpid() -> i32;
+    }
+    unsafe { gettid() == getpid() }
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn on_main_thread() -> bool {
+    false
+}
+
+/// The platform's word for this launch (F9): the first build waits for it on
+/// a phone, bounded, and never on the main thread, where the platform
+/// delivers it.
+fn platform_token() -> Token {
+    let guard = TOKEN.lock().unwrap_or_else(|e| e.into_inner());
+    if !PHONE {
+        return guard.clone().unwrap_or(Token::NoRule);
+    }
+    if let Some(t) = guard.clone() {
+        return t;
+    }
+    if on_main_thread() {
+        say("kaya: the session store was first read on the main thread before the platform handed \
+             its restoration token, which arrives on that thread: this launch starts fresh and writes no session");
+        return Token::Headless;
+    }
+    let started = std::time::Instant::now();
+    let (guard, _) = TOKEN_SET
+        .wait_timeout_while(guard, TOKEN_WAIT, |t| t.is_none())
+        .unwrap_or_else(|e| e.into_inner());
+    match guard.clone() {
+        Some(t) => {
+            if crate::prefs::selftest() {
+                say(&format!("KAYA_SESSION: the first read waited {} ms for the platform's token", started.elapsed().as_millis()));
+            }
+            t
+        }
+        None => {
+            say(&format!(
+                "kaya: the platform handed no restoration token within {} s of the first read \
+                 (iOS: the scene never connected; Android: onCreate never reached Kaya.attach): \
+                 this launch starts fresh and writes no session",
+                TOKEN_WAIT.as_secs()
+            ));
+            Token::Headless
+        }
     }
 }
 
@@ -509,10 +585,17 @@ fn load() -> Store {
     for line in &why {
         say(line);
     }
-    let token = TOKEN.lock().map(|t| t.clone()).unwrap_or(Token::NoRule);
+    let token = platform_token();
     let token = mac_rule(token);
-    let token = if declared.always && token == Token::Absent { Token::NoRule } else { token };
+    let (declared, token) = effective(declared, token);
     load_with(declared, token, crate::scene::declared_id().unwrap_or_default(), session_dir())
+}
+
+/// `restore_always()` overrides the platform's no; a headless process writes nothing.
+fn effective(declared: Declared, token: Token) -> (Declared, Token) {
+    let token = if declared.always && token == Token::Absent { Token::NoRule } else { token };
+    let declared = if token == Token::Headless { Declared { enabled: false, ..declared } } else { declared };
+    (declared, token)
 }
 
 fn load_with(declared: Declared, token: Token, app_id: String, dir: Option<PathBuf>) -> Store {
@@ -601,11 +684,31 @@ pub(crate) fn claim(dir: &Path) -> Result<std::fs::File, String> {
 }
 
 fn with<R>(f: impl FnOnce(&mut Store) -> R) -> R {
+    // The token is awaited before the store's lock is taken, so a main-thread
+    // idle that finds the lock free never blocks the thread the token needs.
+    if !LOADED.load(std::sync::atomic::Ordering::Acquire) && !token_decided() {
+        let token = platform_token();
+        let mut t = TOKEN.lock().unwrap_or_else(|e| e.into_inner());
+        if t.is_none() {
+            *t = Some(token);
+        }
+    }
     let mut guard = STORE.lock().unwrap_or_else(|e| e.into_inner());
     if guard.is_none() {
         *guard = Some(load());
+        LOADED.store(true, std::sync::atomic::Ordering::Release);
     }
     f(guard.as_mut().expect("filled just above"))
+}
+
+static LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The toolkit's own calls (idle, save points, reports) never force the first
+/// load on a phone before the platform's token: they have nothing to write yet.
+fn with_loaded(f: impl FnOnce(&mut Store)) {
+    if LOADED.load(std::sync::atomic::Ordering::Acquire) || token_decided() {
+        with(f);
+    }
 }
 
 fn flush_locked(store: &mut Store) {
@@ -830,7 +933,7 @@ pub(crate) fn note_first_build() {
 /// crash-at-launch mark, and each writes what changed.
 pub(crate) fn idle() {
     let built = FIRST_BUILD.load(std::sync::atomic::Ordering::Acquire);
-    with(|s| {
+    with_loaded(|s| {
         if built && !s.first_idle {
             s.first_idle = true;
             s.dirty = true;
@@ -848,7 +951,9 @@ pub(crate) fn save_point() {
 }
 
 /// The `_exit` save point (SR5): writes what changed, and neither marks the
-/// first idle nor loads a store this process never touched.
+/// first idle nor loads a store this process never touched. Desktop only, as
+/// is lib.rs's exit_hard, its one caller: the phones never leave by `_exit`.
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub(crate) fn exit_flush() {
     let mut guard = match STORE.try_lock() {
         Ok(g) => g,
@@ -926,6 +1031,21 @@ mod tests {
             assert!(swept.values.is_empty(), "{sentence}: values must be discarded");
             println!("{why}");
         }
+    }
+
+    #[test]
+    fn a_headless_process_starts_fresh_and_writes_nothing() {
+        let dir = std::env::temp_dir().join(format!("kaya-session-headless-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(FILE), file(true, "s1", 0)).unwrap();
+        let (declared, token) = effective(Declared { enabled: true, restore_version: 0, always: true }, Token::Headless);
+        let mut store = load_with(declared, token, APP.into(), Some(dir.clone()));
+        assert_eq!(store.restored, Restored::Fresh);
+        store.dirty = true;
+        flush_locked(&mut store);
+        assert_eq!(std::fs::read_to_string(dir.join(FILE)).unwrap(), file(true, "s1", 0));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

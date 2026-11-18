@@ -3246,6 +3246,8 @@ typedef struct KayaHostApi {
   uint32_t (*session_restored)(void);
   void (*session_caret)(uint64_t, uint64_t, uint64_t);
   void (*session_top_row)(uint64_t, uint64_t);
+  void (*session_platform_token)(uint8_t, const uint8_t*, uintptr_t);
+  uintptr_t (*session_id)(uint8_t*, uintptr_t);
 } KayaHostApi;
 
 
@@ -3843,7 +3845,8 @@ void kaya_session_save_point(void);
 /**
  * A phone host's word before the first touch (SR6): `present` 0 = the
  * platform says this launch does not continue the last (a null Bundle),
- * 1 = it continues the session `token` names.
+ * 1 = it continues the session `token` names, 2 = no platform word will come
+ * (a process started with no activity or scene): fresh, writing nothing.
  *
  * # Safety
  * `token` must be valid for `token_len` bytes when `present` is 1.

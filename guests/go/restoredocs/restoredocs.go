@@ -11,21 +11,20 @@ import (
 func App() *kaya.App {
 	app := kaya.NewApp()
 
-	documents := []uint64{10, 11, 12}
-	active := uint64(0)
-	restored := false
-	for _, w := range kaya.RestoredWindows() {
-		if w.ID == 0 {
-			documents, active, restored = w.Documents, w.ActiveDocument, true
-		}
-	}
-	if !restored {
-		for i, title := range []string{"a", "b", "c"} {
-			kaya.DocumentSession(documents[i]).SetString("title", title)
-		}
-	}
-
 	app.Build(func(tx *kaya.Tx) {
+		documents := []uint64{10, 11, 12}
+		active := uint64(0)
+		restored := false
+		for _, w := range kaya.RestoredWindows() {
+			if w.ID == 0 {
+				documents, active, restored = w.Documents, w.ActiveDocument, true
+			}
+		}
+		if !restored {
+			for i, title := range []string{"a", "b", "c"} {
+				kaya.DocumentSession(documents[i]).SetString("title", title)
+			}
+		}
 		tx.Window(0).Title("restoredocs").Size(640, 420)
 		for _, id := range documents {
 			scope := kaya.DocumentSession(id)

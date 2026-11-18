@@ -5649,6 +5649,73 @@ func kayaPresentSaveDialog(
     /// that reports it — the core copies the string inside that call.
     var kayaPickedOpenError: [CChar] = []
 
+    /// A durable reference's two halves on iOS (docs/restoration-plan.md
+    /// SR11): a plain bookmark made while the scope is held, and its
+    /// resolution registered as a picked URL. The buffers live until the
+    /// next call; the core copies inside it.
+    var kayaBookmarkBytes: [UInt8] = []
+    var kayaBookmarkText: [CChar] = []
+
+    @_cdecl("kaya_swiftui_bookmark")
+    public func kayaSwiftUIBookmark(
+        _ locator: UnsafePointer<CChar>,
+        _ outLen: UnsafeMutablePointer<UInt>,
+        _ outError: UnsafeMutablePointer<UnsafePointer<CChar>?>
+    ) -> UnsafePointer<UInt8>? {
+        func refuse(_ why: String) -> UnsafePointer<UInt8>? {
+            kayaBookmarkText = Array(why.utf8CString)
+            kayaBookmarkText.withUnsafeBufferPointer { outError.pointee = $0.baseAddress }
+            return nil
+        }
+        let key = String(cString: locator)
+        guard let url = kayaPickedURLs[key] ?? URL(string: key) else {
+            return refuse("no picked file named \(key)")
+        }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+            kayaBookmarkBytes = [UInt8](data)
+            outLen.pointee = UInt(kayaBookmarkBytes.count)
+            return kayaBookmarkBytes.withUnsafeBufferPointer { $0.baseAddress }
+        } catch {
+            let ns = error as NSError
+            return refuse("\(ns.domain) \(ns.code): \(ns.localizedDescription)")
+        }
+    }
+
+    @_cdecl("kaya_swiftui_resolve_bookmark")
+    public func kayaSwiftUIResolveBookmark(
+        _ bytes: UnsafePointer<UInt8>,
+        _ len: UInt,
+        _ outStale: UnsafeMutablePointer<UInt32>,
+        _ outText: UnsafeMutablePointer<UnsafePointer<CChar>?>
+    ) -> UInt32 {
+        func answer(_ code: UInt32, _ text: String) -> UInt32 {
+            kayaBookmarkText = Array(text.utf8CString)
+            kayaBookmarkText.withUnsafeBufferPointer { outText.pointee = $0.baseAddress }
+            return code
+        }
+        let data = Data(bytes: bytes, count: Int(len))
+        var stale = false
+        let url: URL
+        do {
+            url = try URL(resolvingBookmarkData: data, options: [.withoutUI], relativeTo: nil, bookmarkDataIsStale: &stale)
+        } catch {
+            let ns = error as NSError
+            let gone = ns.domain == NSCocoaErrorDomain && (ns.code == NSFileNoSuchFileError || ns.code == NSFileReadNoSuchFileError)
+            return answer(gone ? 1 : 2, "iOS resolved no file from its bookmark (\(ns.domain) \(ns.code): \(ns.localizedDescription))")
+        }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        if !FileManager.default.fileExists(atPath: url.path) {
+            return answer(1, "its bookmark resolved to \(url.lastPathComponent), which is gone")
+        }
+        kayaPickedURLs[url.absoluteString] = url
+        outStale.pointee = stale ? 1 : 0
+        return answer(0, url.absoluteString)
+    }
+
     final class KayaPickerDelegate: NSObject, UIDocumentPickerDelegate {
         let dialog: UInt64
         /// WHICH DIALOG THIS IS, carried rather than asked: iOS presents both
@@ -12786,6 +12853,15 @@ final class KayaStepWatchdog {
         since = Date()
         lock.unlock()
     }
+
+    /// `relaunch resume` on a phone: the runner backgrounds and ends the
+    /// process (docs/restoration-plan.md SR15), so nothing here may leave.
+    func park() {
+        lock.lock()
+        step = nil
+        leaving = nil
+        lock.unlock()
+    }
 }
 
 /// How many apply batches this interpreter has finished — the signal an
@@ -12947,6 +13023,8 @@ private func kayaRunScript(_ script: String) {
     var actOne = false
     #if os(macOS)
     var leaveByQuit = false
+    #else
+    var parkForPlatform = false
     #endif
     // Whether the run already carried the core's fault into `failures`,
     // so the sweep after the loop cannot report the same one twice.
@@ -16323,6 +16401,8 @@ private func kayaRunScript(_ script: String) {
                 actOne = true
                 #if os(macOS)
                     leaveByQuit = door == "resume"
+                #else
+                    parkForPlatform = door == "resume"
                 #endif
                 break scriptLines
             case "expect_alert":
@@ -19528,6 +19608,14 @@ private func kayaRunScript(_ script: String) {
             // that returns falls through to the ordinary leave.
             if leaveByQuit {
                 DispatchQueue.main.sync { NSApplication.shared.terminate(nil) }
+            }
+        #else
+            // `relaunch resume` (SR15): the runner backgrounds the app and
+            // terminates it, which is the platform's continuation.
+            if parkForPlatform {
+                watchdog.park()
+                print("KAYA_RELAUNCH: parked for the platform's continuation")
+                while true { Thread.sleep(forTimeInterval: 60) }
             }
         #endif
         watchdog.published(0)

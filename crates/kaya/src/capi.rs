@@ -3595,7 +3595,8 @@ pub extern "C" fn kaya_session_save_point() {
 
 /// A phone host's word before the first touch (SR6): `present` 0 = the
 /// platform says this launch does not continue the last (a null Bundle),
-/// 1 = it continues the session `token` names.
+/// 1 = it continues the session `token` names, 2 = no platform word will come
+/// (a process started with no activity or scene): fresh, writing nothing.
 ///
 /// # Safety
 /// `token` must be valid for `token_len` bytes when `present` is 1.
@@ -3603,6 +3604,8 @@ pub extern "C" fn kaya_session_save_point() {
 pub unsafe extern "C" fn kaya_session_platform_token(present: u8, token: *const u8, token_len: usize) {
     let token = if present == 0 {
         crate::session::Token::Absent
+    } else if present == 2 {
+        crate::session::Token::Headless
     } else {
         match unsafe { borrowed_str(token, token_len) } {
             Some(id) => crate::session::Token::Session(id),
@@ -4461,7 +4464,7 @@ pub(crate) fn picked_locator(handle: crate::protocol::PickedId) -> String {
 
 /// The phones' reference arms are the fan-out's (docs/restoration-plan.md §5
 /// step 4); no lane wires the references scene there yet.
-#[cfg(any(target_os = "ios", target_os = "android"))]
+#[cfg(target_os = "android")]
 fn references_unbuilt() -> ! {
     panic!("kaya: durable references are not built on this platform yet (docs/restoration-plan.md §5 step 4)")
 }
@@ -4471,11 +4474,11 @@ pub(crate) fn picked_reference(handle: crate::protocol::PickedId) -> Result<Stri
     let source = picked_source(handle).unwrap_or_else(|| {
         panic!("kaya: reference() names picked file {}, which was never minted — a file handle comes from a picker result", handle.0)
     });
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     {
         crate::reference::mint(crate::protocol::PickedSource::locator(&*source))
     }
-    #[cfg(any(target_os = "ios", target_os = "android"))]
+    #[cfg(target_os = "android")]
     {
         let _ = source;
         references_unbuilt()
@@ -4492,18 +4495,52 @@ pub(crate) fn redeem_reference(token: &str) -> Result<(crate::protocol::PickedFi
         let handle = picked_register(source);
         Ok((crate::protocol::PickedFile { handle, name, local_path: path }, token))
     }
-    #[cfg(any(target_os = "ios", target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        let (locator, token) = crate::reference::redeem(token)?;
+        let name = url_file_name(&locator);
+        let source = std::sync::Arc::new(crate::swiftui_host::UrlSource { name, locator });
+        let handle = picked_register(source.clone());
+        let file = crate::protocol::PickedFile {
+            handle,
+            name: crate::protocol::PickedSource::name(&*source).to_owned(),
+            local_path: crate::protocol::PickedSource::local_path(&*source).to_owned(),
+        };
+        Ok((file, token))
+    }
+    #[cfg(target_os = "android")]
     {
         let _ = token;
         references_unbuilt()
     }
 }
 
+/// The last path component of a file URL, percent-decoded.
+#[cfg(target_os = "ios")]
+fn url_file_name(url: &str) -> String {
+    let last = url.trim_end_matches('/').rsplit('/').next().unwrap_or_default();
+    let bytes = last.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&last[i + 1..i + 3], 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// SR11, SR13: the token leaves the durable count.
 pub(crate) fn forget_reference(token: &str) {
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     crate::reference::forget(token);
-    #[cfg(any(target_os = "ios", target_os = "android"))]
+    #[cfg(target_os = "android")]
     {
         let _ = token;
         references_unbuilt()

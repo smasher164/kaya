@@ -27,6 +27,7 @@ struct KayaApp: App {
                 // `application(_:open:options:)` never runs — and a link
                 // reuses the one scene rather than building a second.
                 KayaRoot().onOpenURL { KayaHost.linkOpened($0.absoluteString) }
+                    .modifier(KayaSessionVehicle())
             #endif
         }
         #if os(macOS)
@@ -56,6 +57,48 @@ struct KayaApp: App {
     }
     CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
 }
+
+#if os(iOS)
+/// iOS's word on whether this launch continues the last (docs/restoration-plan.md
+/// SR6, F9): the scene's restoration activity, through SceneStorage, carries
+/// the session id. The core's first read waits for this hand-over.
+struct KayaSessionVehicle: ViewModifier {
+    @SceneStorage("kaya.session") private var saved = ""
+
+    func body(content: Content) -> some View {
+        let _ = kayaHandSessionToken(saved)
+        content
+            .onAppear { saved = kayaSessionId() }
+            .onReceive(NotificationCenter.default.publisher(for: UIScene.didEnterBackgroundNotification)) { _ in
+                saved = kayaSessionId()
+                KayaHost.api.session_save_point()
+                if ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil {
+                    print("KAYA_SESSION: background save point, scene carries \(saved)")
+                }
+            }
+    }
+}
+
+@MainActor var kayaSessionTokenHanded = false
+
+@MainActor func kayaHandSessionToken(_ saved: String) {
+    guard !kayaSessionTokenHanded else { return }
+    kayaSessionTokenHanded = true
+    if ProcessInfo.processInfo.environment["KAYA_SELFTEST"] != nil {
+        print("KAYA_SESSION: the scene hands token \(saved.isEmpty ? "(none)" : saved)")
+    }
+    let bytes = Array(saved.utf8)
+    bytes.withUnsafeBufferPointer {
+        KayaHost.api.session_platform_token(saved.isEmpty ? 0 : 1, $0.baseAddress, UInt($0.count))
+    }
+}
+
+func kayaSessionId() -> String {
+    var buffer = [UInt8](repeating: 0, count: 128)
+    let n = Int(KayaHost.api.session_id(&buffer, UInt(buffer.count)))
+    return String(decoding: buffer.prefix(min(n, buffer.count)), as: UTF8.self)
+}
+#endif
 
 #if os(macOS)
 /// kaya owns restoration, so AppKit reopens no window it saved, from this

@@ -327,6 +327,58 @@ pub(crate) fn forget(token: &str) {
     }
 }
 
+/// iOS's row (SR11): a plain bookmark made by the backend while the picked
+/// URL's scope is held; the ledger counts the URL it names.
+#[cfg(target_os = "ios")]
+pub(crate) fn mint(locator: &str) -> Result<String, ReferenceError> {
+    let payload = crate::swiftui_host::bookmark(locator).map_err(|why| {
+        refuse(ReferenceRefusal::Missing, format!("kaya: iOS made no bookmark for {locator} ({why}), so it cannot be referenced"))
+    })?;
+    let token = envelope(TAG, &payload);
+    if token.len() > BOUND {
+        return Err(refuse(
+            ReferenceRefusal::Foreign,
+            format!("kaya: the platform's reference for {locator} is {} bytes in kaya's envelope, past the {BOUND}-byte bound", token.len()),
+        ));
+    }
+    if let Some(dir) = ledger_dir() {
+        ledger_admit(&dir, locator)?;
+    }
+    Ok(token)
+}
+
+#[cfg(target_os = "ios")]
+fn resolve_ios(payload: &[u8]) -> Result<(String, bool), ReferenceError> {
+    use crate::swiftui_host::Resolved;
+    match crate::swiftui_host::resolve_bookmark(payload) {
+        Resolved::Found { locator, stale } => Ok((locator, stale)),
+        Resolved::Gone(why) => Err(refuse(ReferenceRefusal::Missing, format!("kaya: the file this reference names no longer exists: {why}"))),
+        Resolved::Unknown(why) => Err(refuse(
+            ReferenceRefusal::Missing,
+            format!("kaya: the file this reference names did not answer ({why}); kaya cannot tell a missing file from an unreachable one here"),
+        )),
+    }
+}
+
+/// SR11 on iOS: the locator the bookmark resolves to now (registered with
+/// the backend), and the token to keep.
+#[cfg(target_os = "ios")]
+pub(crate) fn redeem(token: &str) -> Result<(String, String), ReferenceError> {
+    let payload = open_envelope(token, TAG)?;
+    let (locator, stale) = resolve_ios(&payload)?;
+    let token = if stale { mint(&locator).unwrap_or_else(|_| token.to_owned()) } else { token.to_owned() };
+    Ok((locator, token))
+}
+
+#[cfg(target_os = "ios")]
+pub(crate) fn forget(token: &str) {
+    let Ok(payload) = open_envelope(token, TAG) else { return };
+    let Ok((locator, _)) = resolve_ios(&payload) else { return };
+    if let Some(dir) = ledger_dir() {
+        ledger_forget(&dir, &locator);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
