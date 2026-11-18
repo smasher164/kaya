@@ -5420,17 +5420,18 @@ def ios_provider(driver, runsim, flightrec):
         bad.append("tools/ios/run-sim.py: simdrive_watch forwards a picker commit without "
                    "provider_quiet(udid, PROVIDER_COMMIT_WAIT) first")
     leg = body_of(runsim, "def run_swiftui_on(", "\ndef ")
-    gate = leg.find("provider_quiet(udid, PROVIDER_LAUNCH_WAIT)")
+    gate = leg.find("provider_quiet(udid, PROVIDER_LAUNCH_WAIT, settle=0)")
     launch = leg.find("launched_at = time.time()")
     if gate < 0 or launch < 0 or gate > launch:
         bad.append("tools/ios/run-sim.py: run_swiftui_on launches a picker leg without "
-                   "provider_quiet(udid, PROVIDER_LAUNCH_WAIT) first")
+                   "provider_quiet(udid, PROVIDER_LAUNCH_WAIT, settle=0) first")
     reading = body_of(runsim, "def provider_reading(", "\n\n_PURGING")
     if 'str(len(re.findall(r"deleteSearchableItemsWith"' not in reading:
         bad.append("tools/ios/run-sim.py: provider_reading no longer counts the Spotlight "
                    "purges in flight, which read `indexing: no` while they run")
     quiet = body_of(runsim, "def provider_quiet(", "\n\ndef ")
-    if 'fields["purges"] == "0"' not in quiet or "PROVIDER_SETTLE" not in quiet:
+    if ('fields["purges"] == "0"' not in quiet or "settle=PROVIDER_SETTLE" not in quiet
+            or "now - idle_since >= settle" not in quiet):
         bad.append("tools/ios/run-sim.py: provider_quiet takes one idle read on trust; "
                    "the press needs no purge in flight for PROVIDER_SETTLE seconds")
     if "_got = provider_reading(_text)" not in runsim:
@@ -5467,8 +5468,9 @@ for label, pattern, repl, which, want in (
          "no longer holds savepress"),
         ("the commit gate", r"quiet, provider = provider_quiet\(udid, PROVIDER_COMMIT_WAIT\)",
          "quiet, provider = True, ''", "runsim", "PROVIDER_COMMIT_WAIT) first"),
-        ("the launch gate", r"_, provider = provider_quiet\(udid, PROVIDER_LAUNCH_WAIT\)",
-         "provider = ''", "runsim", "PROVIDER_LAUNCH_WAIT) first"),
+        ("the launch gate",
+         r"_, provider = provider_quiet\(udid, PROVIDER_LAUNCH_WAIT, settle=0\)",
+         "provider = ''", "runsim", "PROVIDER_LAUNCH_WAIT, settle=0) first"),
         ("the purge count", r'str\(len\(re\.findall\(r"deleteSearchableItemsWith"', 'str((',
          "runsim", "purges in flight, which read"),
         ("the settle", r'and fields\["purges"\] == "0"', "", "runsim",
@@ -5516,6 +5518,12 @@ for _reads, _bound, _want in (
     print(f"check-steps: provider wait over {len(_reads)} read(s): idle={_quiet} {_said}")
     if _want not in _said or _quiet != ("read idle" in _want or "for 3.0s" in _want):
         selftest_fail(f"the provider wait's sentence missed {_want!r}")
+_clock[0] = 0.0
+_ns["provider_indexer"] = lambda _u: (_IDLE, "exit 0")
+_quiet, _said = _ns["provider_quiet"]("udid", 10, settle=0)
+print(f"check-steps: the launch's provider wait over one idle read: idle={_quiet} {_said}")
+if not _quiet or "for 0.0s, after 0.0s" not in _said:
+    selftest_fail("the launch's provider wait did not pass one idle read")
 
 _purge = flightrec_lane.ios_provider_purges
 _start = ("2026-10-14 08:37:36.106 Df LocalStorageFileProvider[51975:1] [spotlight] "

@@ -1621,10 +1621,11 @@ def provider_indexer(udid):
     return provider_reading(got.stdout), f"exit {got.returncode}: {said[-300:]!r}"
 
 
-def provider_quiet(udid, bound):
+def provider_quiet(udid, bound, settle=PROVIDER_SETTLE):
     """(idle, sentence): waits until the device's LocalStorage indexer reads idle
-    with no Spotlight purge in flight on every read for PROVIDER_SETTLE seconds,
-    or `bound` seconds pass."""
+    with no Spotlight purge in flight on every read for `settle` seconds, or
+    `bound` seconds pass. A launch takes settle 0: the settle cost the f6019c50
+    matrix's iOS lane its ceiling there, and the press is where it was needed."""
     started = time.monotonic()
     idle_since = None
     while True:
@@ -1633,7 +1634,7 @@ def provider_quiet(udid, bound):
         waited = now - started
         if fields is not None and fields["indexing"] == "no" and fields["purges"] == "0":
             idle_since = now if idle_since is None else idle_since
-            if now - idle_since >= PROVIDER_SETTLE:
+            if now - idle_since >= settle:
                 return True, (f"the LocalStorage indexer read idle with no purge in flight "
                               f"for {now - idle_since:.1f}s, after {waited:.1f}s "
                               f"(errors {fields.get('errors', '?')})")
@@ -2196,7 +2197,7 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     # leg dies unread.
     if any(line.split()[0] in PROVIDER_STEPS for line in script.splitlines()
            if line.strip() and not line.lstrip().startswith("#")):
-        _, provider = provider_quiet(udid, PROVIDER_LAUNCH_WAIT)
+        _, provider = provider_quiet(udid, PROVIDER_LAUNCH_WAIT, settle=0)
         print(f"run-sim: {name} launches with {provider}", file=log)
     if drive_dir.is_dir():
         (drive_dir / "deadline").write_text(f"{time.time() + 100:.3f}\n",

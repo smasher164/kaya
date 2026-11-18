@@ -42,9 +42,12 @@ flight shows as `deleteSearchableItemsWithSpotlightDomainIdentifiers:...` under
 "alive due to XPC calls", and it read `indexing: no` while it ran 17 times in
 six minutes (one device held two purge calls at `indexing: no` for 12 s);
 after a purge the indexer often read `yes` again within 1 to 3 s. One idle
-read was never a settled provider. The wait now needs `indexing: no` AND no
-purge call on every read for PROVIDER_SETTLE (3 s), and its refusal names the
-purge count and how long it had been idle. Prior art: Apple's forums carry the
+read was never a settled provider. The press now waits for `indexing: no` AND
+no purge call on every read for PROVIDER_SETTLE (3 s), and its refusal names
+the purge count and how long it had been idle. The launch wait takes no
+settle: with it, the 5cb6fe34 matrix's iOS launch waits summed 115 s
+(filedialog-swiftui alone 57.2 s) against about 5 s before, and the lane read
+1376 s net against its 1350 s ceiling. Prior art: Apple's forums carry the
 same empty-array line (threads 711714, 772053) from failed materialization,
 with no fix. GUARD: check-steps' ios_provider (the purge count and the settle,
 each cut and watched red) and its self-test, which drives every branch of the
