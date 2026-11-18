@@ -1608,6 +1608,9 @@ if proof.returncode != 0:
 elif "a gate hung past its wall" not in proof.stdout:
     fail("tools/gates.py --selftest no longer runs a hung gate against its wall "
          "(tools/lib/walls.py)")
+elif "a kaya app's real store" not in proof.stdout:
+    fail("tools/gates.py --selftest no longer runs a gate that writes a kaya app's real "
+         "store against the real-store wall (tools/lib/real_stores.py)")
 
 # THE WALLS (tools/lib/walls.py): every gate, lane, leg worker and ssh call
 # bounded where it is launched, each wall run against a hung stand-in.

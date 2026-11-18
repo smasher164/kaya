@@ -420,7 +420,7 @@ fn session_dir() -> Option<PathBuf> {
         return None;
     }
     let id = crate::scene::declared_id()?;
-    if crate::prefs::selftest() {
+    if crate::prefs::scratch() {
         return Some(crate::prefs::selftest_session_root()?.join("selftest").join(&id).join("session"));
     }
     real_dir(&id)
@@ -435,7 +435,7 @@ pub(crate) fn store_dir(leaf: &str) -> Option<PathBuf> {
         return None;
     }
     let id = crate::scene::declared_id()?;
-    if crate::prefs::selftest() {
+    if crate::prefs::scratch() {
         return Some(crate::prefs::selftest_session_root()?.join("selftest").join(&id).join(leaf));
     }
     Some(real_dir(&id)?.parent()?.join(leaf))

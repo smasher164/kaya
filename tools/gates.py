@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT, TARGET, dev_shell_or_die
 import exclusive
+import real_stores
 from host_lib import HOST_LIB, SWEEP_TARGET, host_lib_stamp
 import walls
 
@@ -421,7 +422,8 @@ def gate_wall(name):
     return walls.gate_wall(WEIGHT.get(name, 0))
 
 
-def sweep(gates, label="gates", lib_root=None, lanes_root=None, wall_of=gate_wall):
+def sweep(gates, label="gates", lib_root=None, lanes_root=None, wall_of=gate_wall,
+          stores_under=None):
     """Run every gate; return True only if every declared one passed.
 
     COUNT IN, COUNT OUT. `declared` comes from the list itself and
@@ -463,6 +465,9 @@ def sweep(gates, label="gates", lib_root=None, lanes_root=None, wall_of=gate_wal
     running = set()
     relinked = []
     took = {}
+    # THE USER'S REAL STORES may not move under a gate (tools/lib/real_stores.py).
+    stores_seen = {"snap": real_stores.snapshot(stores_under)}
+    wrote_real = []
 
     def run_one(name, cmd, keyed):
         nonlocal ran
@@ -512,6 +517,14 @@ def sweep(gates, label="gates", lib_root=None, lanes_root=None, wall_of=gate_wal
                       f"and this pool's probes load it by path and a launch "
                       f"inside the relink dies in dyld before main "
                       f"(docs/traps.md, 2026-09-21)", file=sys.stderr, flush=True)
+            stores_now = real_stores.snapshot(stores_under)
+            changes = real_stores.moved(stores_seen["snap"], stores_now)
+            if changes:
+                stores_seen["snap"] = stores_now
+                wrote_real.append(name)
+                print(f"{label}: " + real_stores.refusal(
+                    f"{name} (also running: {' '.join(sorted(running)) or 'nothing'})", changes),
+                    file=sys.stderr, flush=True)
             ran += 1
             took[name] = dt
             print(f"[{ran:02d}/{declared:02d}] {name}")
@@ -558,6 +571,10 @@ def sweep(gates, label="gates", lib_root=None, lanes_root=None, wall_of=gate_wal
     if relinked:
         print(f"{label}: THE HOST LIBKAYA WAS RELINKED DURING THE SWEEP "
               f"(while {' '.join(relinked)} ran) — no verdict", file=sys.stderr)
+        return False
+    if wrote_real:
+        print(f"{label}: THE USER'S REAL kaya STORE CHANGED DURING THE SWEEP "
+              f"(while {' '.join(wrote_real)} ran) — no verdict", file=sys.stderr)
         return False
     print(f"{label}: OK — {passed}/{declared}", flush=True)
     return True
@@ -761,12 +778,45 @@ def selftest():
                   file=sys.stderr)
             ok = False
 
+    # J. a gate that writes a kaya app's real store is refused by name; one
+    # that writes a `.selftest` suite (scratch by name) is not.
+    with tempfile.TemporaryDirectory(prefix="kaya-gates-stores-") as tmp:
+        under = [pathlib.Path(tmp)]
+        os.environ["KAYA_GATES_SELFTEST_STORE"] = tmp
+        os.environ["KAYA_GATES_SELFTEST_REAL"] = "dev.kaya.wall/kaya-session/session.v1"
+        os.environ["KAYA_GATES_SELFTEST_SUITE"] = "dev.kaya.wall.selftest.scratch.plist"
+
+        def writes(var):
+            return ["python3", "-c",
+                    "import os, pathlib; p = pathlib.Path(os.environ['KAYA_GATES_SELFTEST_STORE'])"
+                    f".joinpath(os.environ['{var}']); p.parent.mkdir(parents=True, exist_ok=True); "
+                    "p.write_text('x')"]
+        real = [("a", ["true"], False, "x"),
+                ("writes-real", writes("KAYA_GATES_SELFTEST_REAL"), False, "x")]
+        scratch = [("writes-scratch", writes("KAYA_GATES_SELFTEST_SUITE"), False, "x")]
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said):
+            verdict = sweep(real, "selftest-J", stores_under=under)
+        print(f"selftest-J: {said.getvalue().strip()[:400]}")
+        if (verdict or "writes-real" not in said.getvalue()
+                or "dev.kaya.wall" not in said.getvalue()):
+            print("gates: SELF-TEST FAIL — a gate that wrote a kaya app's real store was not "
+                  "refused by name", file=sys.stderr)
+            ok = False
+        if not sweep(scratch, "selftest-J0", stores_under=under):
+            print("gates: SELF-TEST FAIL — a gate that wrote a .selftest suite was refused",
+                  file=sys.stderr)
+            ok = False
+        for var in ("KAYA_GATES_SELFTEST_STORE", "KAYA_GATES_SELFTEST_REAL",
+                    "KAYA_GATES_SELFTEST_SUITE"):
+            del os.environ[var]
+
     if ok:
         print("gates: SELF-TEST OK — the count refused an under-run (1 of 3), "
               "a gate hung past its wall, "
               "a failing gate, a missing script, a gate that relinked the "
               "host libkaya and one that relinked the lanes' copy from a sweep "
-              "target of its own")
+              "target of its own, and a gate that wrote a kaya app's real store")
     return ok
 
 
@@ -870,7 +920,12 @@ def main(args):
         return 1
     print(f"gates: {len(GATES)} declared — building what they read first "
           f"(cargo target {TARGET})", flush=True)
+    before = real_stores.snapshot()
     if not build():
+        return 1
+    changes = real_stores.moved(before, real_stores.snapshot())
+    if changes:
+        print("gates: " + real_stores.refusal("BUILD (rung 1 among it)", changes), file=sys.stderr)
         return 1
     walls.forward_signals()
     return 0 if sweep(GATES) else 1

@@ -228,7 +228,11 @@ docs/gates.md.
      gate cannot verify an artifact the run has not built yet, and ends with
      tools/prune-objects.py.
    - It REFUSES A VERDICT unless the number of gates that ran equals the
-     number it declared. There is deliberately no subset flag, because a
+     number it declared. AND IF THE USER'S REAL kaya STORE MOVED under BUILD
+     or a gate (tools/lib/real_stores.py, named by gate; validate-all reads
+     it across a run): everything the prelude starts carries
+     `KAYA_SCRATCH_STORES`, so a process outside a scene keeps its stores
+     in scratch. There is deliberately no subset flag, because a
      flag that runs part of the list and still prints a verdict is the
      under-run defect with an interface; to run one gate, run that gate.
    - A GATE IS ITS `.py` FILE, run directly: executable, python shebang, the

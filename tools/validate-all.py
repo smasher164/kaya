@@ -9,6 +9,7 @@ import docker_up
 import exclusive
 import lane_health
 import matrix_args
+import real_stores
 import target_sweep
 import walls
 from host_lib import SWEEP_TARGET
@@ -435,6 +436,8 @@ T0 = time.monotonic()
 # line and a sleep inside the run is named before the verdict.
 SLEEP = walls.SleepClock()
 SLEEP_EPOCH = time.time()
+# THE USER'S REAL STORES may not move under a run (tools/lib/real_stores.py).
+REAL_STORES_AT_LAUNCH = real_stores.snapshot()
 walls.forward_signals()
 # THE HOST'S LOAD RIDES THE RECORD (2026-09-01: three ceilings fired in
 # one contended evening). WITH THE TOP CONSUMERS, because the load figure
@@ -666,6 +669,10 @@ if _slept > walls.SLEEP_NOTICE_S:
           f"measurement and the run is not the record. pmset's own lines: "
           + ("; ".join(_lines) if _lines else "none in `pmset -g log` since the launch"),
           file=sys.stderr, flush=True)
+    status = 1
+_real = real_stores.moved(REAL_STORES_AT_LAUNCH, real_stores.snapshot())
+if _real:
+    print("validate-all: " + real_stores.refusal("this matrix", _real), file=sys.stderr, flush=True)
     status = 1
 if only.active():
     # A filtered verdict SAYS it is one, in the same line every reader

@@ -45,6 +45,16 @@ def cargo_target(env=None):
 
 TARGET = cargo_target()
 
+# Everything a gate, test or lane starts keeps its stores off the user's real
+# ones (crates/kaya/src/prefs.rs's ENV_SCRATCH; docs/traps.md, a gate wrote
+# the user's real session store). One directory per outermost run, removed
+# by the run that made it.
+SCRATCH_STORES = "KAYA_SCRATCH_STORES"
+if not os.environ.get(SCRATCH_STORES):
+    _stores = tempfile.mkdtemp(prefix="kaya-stores-")
+    os.environ[SCRATCH_STORES] = _stores
+    atexit.register(shutil.rmtree, _stores, True)
+
 
 def nested_target(workspace):
     """The `--target-dir` for building one of tools/' own cargo workspaces:

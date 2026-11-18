@@ -4,6 +4,33 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A gate wrote the user's real session store (measured 2026-11-18)
+
+Two gate sweeps on 2026-11-18 created
+`~/Library/Application Support/dev.kaya.aurora.notes/kaya-session/`
+(`session.v1`, `session.lock`) on the host, the user's REAL store for the
+guests' app id. Since the session store (docs/restoration-plan.md) every
+batch reports the window shape to it, so any process that runs a scene
+loads it, and outside a scene (no `KAYA_SELFTEST`) that is the real
+directory. The writer was check-abort (its Go, Java, C# and Swift
+probes run the real library with no scene armed): with the scratch
+variable below cut from the prelude, `tools/check-abort.py` alone created
+the three entries; with it, nothing moved. The same exposure was already
+there for preferences and the data directory, and check-window-memory's
+Swift probe wrote a real `dev.kaya.check-window-memory` defaults suite on
+every sweep.
+
+The fix: tools/lib/kaya_gate.py exports `KAYA_SCRATCH_STORES` (a temporary
+directory, removed by the run that made it) to everything a gate, test or
+lane starts, and the core (crates/kaya/src/prefs.rs, `scratch()`) keeps a
+process's preferences, data directory, session file and reference ledger
+under it whenever no scene is armed; a scene's own scratch wins. The probe's
+suite is now `dev.kaya.check-window-memory.selftest`. The wall: gates.py
+and validate-all refuse a verdict when anything under the real store roots
+for a `dev.kaya*` id moved during the run (docs/gates.md, How the sweep
+runs). The pre-existing `tasks.sqlite` in that directory (2026-09-09) was
+left alone.
+
 ## A Python guest read the session store before kaya_run (measured 2026-11-18)
 
 The first Python run of the restore scene went red in act two with

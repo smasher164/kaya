@@ -68,7 +68,7 @@ pub(crate) fn domain() -> Option<String> {
     DOMAIN
         .get_or_init(|| {
             let id = crate::scene::declared_id()?;
-            Some(if selftest() { format!("{id}.selftest{}", leg_tag()) } else { id })
+            Some(if scratch() { format!("{id}.selftest{}", leg_tag()) } else { id })
         })
         .clone()
 }
@@ -82,6 +82,9 @@ pub(crate) fn domain() -> Option<String> {
 /// that home — empty when the runner set none, so a plain relaunch that
 /// inherits the leg's environment lands in the same suite.
 fn leg_tag() -> String {
+    if scratch_stores().is_some() {
+        return ".scratch".to_owned();
+    }
     let Some(home) = std::env::var_os("XDG_STATE_HOME") else { return String::new() };
     let home = home.to_string_lossy();
     if home.is_empty() {
@@ -102,6 +105,25 @@ pub(crate) fn selftest() -> bool {
     std::env::var_os("KAYA_SELFTEST").is_some()
 }
 
+/// Set by tools/lib/kaya_gate.py for everything a gate, test or lane starts:
+/// a process outside a scene keeps its stores under this directory instead
+/// of the user's real ones (docs/traps.md, a gate wrote the user's real
+/// session store; gates.py's real-store wall).
+pub(crate) const ENV_SCRATCH: &str = "KAYA_SCRATCH_STORES";
+
+fn scratch_stores() -> Option<PathBuf> {
+    if selftest() {
+        return None;
+    }
+    let dir = std::env::var_os(ENV_SCRATCH)?;
+    (!dir.is_empty()).then(|| PathBuf::from(dir))
+}
+
+/// Whether this process's stores are scratch: a scene's, or a test's.
+pub(crate) fn scratch() -> bool {
+    selftest() || scratch_stores().is_some()
+}
+
 /// The app's own writable directory (docs/tasks-s4-plan.md §4), created on
 /// first ask. `None` before Android's attach has handed the files
 /// directory in.
@@ -114,10 +136,10 @@ pub(crate) fn app_data_dir() -> Option<PathBuf> {
 
 fn data_dir_path() -> Option<PathBuf> {
     let id = crate::scene::declared_id()?;
-    if selftest() {
+    if scratch() {
         // THE SCRATCH DATA DIRECTORY (§4), under the same state home the
         // second act's marker uses.
-        return Some(selftest_root()?.join("selftest").join(id).join("data"));
+        return Some(selftest_session_root()?.join("selftest").join(id).join("data"));
     }
     real_data_dir(&id)
 }
@@ -188,7 +210,7 @@ fn selftest_root() -> Option<PathBuf> {
 
 /// The scratch root the session file shares with the data directory.
 pub(crate) fn selftest_session_root() -> Option<PathBuf> {
-    selftest_root()
+    scratch_stores().or_else(selftest_root)
 }
 
 // ------------------------------------------------------------- the store
@@ -518,6 +540,8 @@ mod tests {
     fn the_leg_tag_follows_the_state_home_and_is_empty_without_one() {
         let _serial = crate::assets::serially();
         let before = std::env::var_os("XDG_STATE_HOME");
+        let scratch = std::env::var_os(ENV_SCRATCH);
+        unsafe { std::env::remove_var(ENV_SCRATCH) };
         unsafe { std::env::remove_var("XDG_STATE_HOME") };
         assert_eq!(super::leg_tag(), "");
         unsafe { std::env::set_var("XDG_STATE_HOME", "/tmp/kaya-leg-a/state") };
@@ -528,8 +552,37 @@ mod tests {
             Some(v) => unsafe { std::env::set_var("XDG_STATE_HOME", v) },
             None => unsafe { std::env::remove_var("XDG_STATE_HOME") },
         }
+        if let Some(v) = scratch {
+            unsafe { std::env::set_var(ENV_SCRATCH, v) };
+        }
         assert!(a.starts_with('.') && a.len() == 17, "{a}");
         assert_ne!(a, b, "two legs, two suites");
+    }
+
+    /// docs/traps.md, a gate wrote the user's real session store.
+    #[test]
+    fn a_process_outside_a_scene_keeps_its_stores_in_the_scratch_it_was_given() {
+        let _serial = crate::assets::serially();
+        let scratch = std::env::var_os(ENV_SCRATCH);
+        let armed = std::env::var_os("KAYA_SELFTEST");
+        unsafe { std::env::remove_var("KAYA_SELFTEST") };
+        unsafe { std::env::remove_var(ENV_SCRATCH) };
+        let unset = (super::scratch(), super::selftest_session_root());
+        unsafe { std::env::set_var(ENV_SCRATCH, "/tmp/kaya-stores-x") };
+        let given = (super::scratch(), super::selftest_session_root(), super::leg_tag());
+        unsafe { std::env::set_var("KAYA_SELFTEST", "restore") };
+        let scene = super::selftest_session_root();
+        match armed {
+            Some(v) => unsafe { std::env::set_var("KAYA_SELFTEST", v) },
+            None => unsafe { std::env::remove_var("KAYA_SELFTEST") },
+        }
+        match scratch {
+            Some(v) => unsafe { std::env::set_var(ENV_SCRATCH, v) },
+            None => unsafe { std::env::remove_var(ENV_SCRATCH) },
+        }
+        assert!(!unset.0, "no scene and no scratch: the real stores");
+        assert_eq!(given, (true, Some(PathBuf::from("/tmp/kaya-stores-x")), ".scratch".to_owned()));
+        assert_ne!(scene, Some(PathBuf::from("/tmp/kaya-stores-x")), "a scene's own scratch wins");
     }
 
     use super::*;

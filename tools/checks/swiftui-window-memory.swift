@@ -403,7 +403,8 @@ enum KayaWindowMemoryProbe {
             optedOut.frame == held && kayaFrameMemory[10] == nil)
 
         // --- AppKit's host-domain autosave: forgotten, the rest kept. ---
-        let suite = "dev.kaya.check-window-memory"
+        // A `.selftest` suite: scratch by name (gates.py's real-store wall).
+        let suite = "dev.kaya.check-window-memory.selftest"
         let host = UserDefaults(suiteName: suite)!
         let mine = [
             "NSWindow Frame main.KayaRoot-1-AppWindow-1",

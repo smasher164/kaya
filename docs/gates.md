@@ -42,7 +42,15 @@ is that same defect with an interface; to run one gate, run that gate
 — each is standalone. `tools/check-gates.py` holds this prose list,
 gates.py's list and validate-mac's delegation to ONE census and fails
 naming both sides of any disagreement; the three had already drifted
-by four gates the day it landed. What each gate is for:
+by four gates the day it landed. AND IT REFUSES A VERDICT IF THE USER'S
+REAL kaya STORE MOVED (since 2026-11-18): tools/lib/real_stores.py
+snapshots every `dev.kaya*` entry under the host's real store roots
+(Application Support and Preferences on the Mac, the XDG homes,
+LOCALAPPDATA and APPDATA), `.selftest` suites left out as scratch by name,
+before BUILD, after it, and after each gate, and names the gate that moved
+it; validate-all reads the same snapshot across a whole run. Self-test J
+watches a stand-in gate that writes one refused by name (docs/traps.md, a
+gate wrote the user's real session store). What each gate is for:
 
 ## tools/gen-header.py, tools/gen-bindings.py, tools/gen-guests.py
 
