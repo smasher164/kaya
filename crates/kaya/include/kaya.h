@@ -3238,6 +3238,12 @@ typedef struct KayaHostApi {
   uint32_t (*ink_on)(uint32_t, uint32_t);
   uint32_t (*highlight_ground)(uint32_t, uint32_t);
   uint32_t (*find_on_mark)(uint32_t);
+  /**
+   * docs/restoration-plan.md SR5: the toolkit's idle and a platform save point.
+   */
+  void (*session_idle)(void);
+  void (*session_save_point)(void);
+  uint32_t (*session_restored)(void);
 } KayaHostApi;
 
 
@@ -3635,6 +3641,134 @@ void kaya_pref_set_bool(const uint8_t *key, uintptr_t key_len, uint8_t value);
  * `key` must be valid for `key_len` bytes.
  */
 void kaya_pref_remove(const uint8_t *key, uintptr_t key_len);
+
+/**
+ * 1 = present, with `*len` the full length and min(len, cap) bytes
+ * written into `out`; 0 = absent, which includes a key holding another type.
+ *
+ * # Safety
+ * `key` must be valid for `key_len` bytes; `out` null or valid for `cap`;
+ * `len` null or valid for one `usize`.
+ */
+int32_t kaya_session_get_string(uint32_t scope,
+                                uint64_t id,
+                                const uint8_t *key,
+                                uintptr_t key_len,
+                                uint8_t *out,
+                                uintptr_t cap,
+                                uintptr_t *len);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes; `out` valid for one `i64`.
+ */
+int32_t kaya_session_get_i64(uint32_t scope,
+                             uint64_t id,
+                             const uint8_t *key,
+                             uintptr_t key_len,
+                             int64_t *out);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes; `out` valid for one `double`.
+ */
+int32_t kaya_session_get_f64(uint32_t scope,
+                             uint64_t id,
+                             const uint8_t *key,
+                             uintptr_t key_len,
+                             double *out);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes; `out` valid for one byte.
+ */
+int32_t kaya_session_get_bool(uint32_t scope,
+                              uint64_t id,
+                              const uint8_t *key,
+                              uintptr_t key_len,
+                              uint8_t *out);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes and `value` for `value_len`.
+ */
+void kaya_session_set_string(uint32_t scope,
+                             uint64_t id,
+                             const uint8_t *key,
+                             uintptr_t key_len,
+                             const uint8_t *value,
+                             uintptr_t value_len);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes.
+ */
+void kaya_session_set_i64(uint32_t scope,
+                          uint64_t id,
+                          const uint8_t *key,
+                          uintptr_t key_len,
+                          int64_t value);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes.
+ */
+void kaya_session_set_f64(uint32_t scope,
+                          uint64_t id,
+                          const uint8_t *key,
+                          uintptr_t key_len,
+                          double value);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes.
+ */
+void kaya_session_set_bool(uint32_t scope,
+                           uint64_t id,
+                           const uint8_t *key,
+                           uintptr_t key_len,
+                           uint8_t value);
+
+/**
+ * # Safety
+ * `key` must be valid for `key_len` bytes.
+ */
+void kaya_session_remove(uint32_t scope, uint64_t id, const uint8_t *key, uintptr_t key_len);
+
+/**
+ * Which launch this is (SR6): 0 fresh, 1 resumed, 2 recovered.
+ */
+uint32_t kaya_session_restored(void);
+
+/**
+ * The backend's idle (SR5): the first clears the crash-at-launch mark, each
+ * writes what changed.
+ */
+void kaya_session_idle(void);
+
+/**
+ * A platform save point (SR5): synchronous.
+ */
+void kaya_session_save_point(void);
+
+/**
+ * A phone host's word before the first touch (SR6): `present` 0 = the
+ * platform says this launch does not continue the last (a null Bundle),
+ * 1 = it continues the session `token` names.
+ *
+ * # Safety
+ * `token` must be valid for `token_len` bytes when `present` is 1.
+ */
+void kaya_session_platform_token(uint8_t present, const uint8_t *token, uintptr_t token_len);
+
+/**
+ * This process's session id, for the phone host to hand its platform's
+ * save (SR6). Answers the full length; min(len, cap) bytes are written.
+ *
+ * # Safety
+ * `out` null or valid for `cap` bytes.
+ */
+uintptr_t kaya_session_id(uint8_t *out, uintptr_t cap);
 
 /**
  * Fetch a blob's bytes by the handle an apply record carried. Returns

@@ -496,6 +496,10 @@ pub struct KayaHostApi {
     pub ink_on: extern "C" fn(u32, u32) -> u32,
     pub highlight_ground: extern "C" fn(u32, u32) -> u32,
     pub find_on_mark: extern "C" fn(u32) -> u32,
+    /// docs/restoration-plan.md SR5: the toolkit's idle and a platform save point.
+    pub session_idle: extern "C" fn(),
+    pub session_save_point: extern "C" fn(),
+    pub session_restored: extern "C" fn() -> u32,
 }
 
 /// # Safety
@@ -832,6 +836,9 @@ pub(crate) fn run() -> i32 {
         ink_on: crate::capi::kaya_ink_on,
         highlight_ground: crate::capi::kaya_highlight_ground,
         find_on_mark: crate::capi::kaya_find_on_mark,
+        session_idle: crate::capi::kaya_session_idle,
+        session_save_point: crate::capi::kaya_session_save_point,
+        session_restored: crate::capi::kaya_session_restored,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

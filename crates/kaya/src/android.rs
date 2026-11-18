@@ -714,6 +714,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_stalled_ms as *mut _,
             },
             NativeMethod {
+                name: "sessionRestored".into(),
+                sig: "()I".into(),
+                fn_ptr: present_session_restored as *mut _,
+            },
+            NativeMethod {
                 name: "fault".into(),
                 sig: "()[B".into(),
                 fn_ptr: present_fault as *mut _,
@@ -1622,6 +1627,11 @@ fn open_through_resolver(uri: &str, mode: &str) -> std::io::Result<i64> {
         )));
     }
     Ok(i64::from(fd))
+}
+
+/// docs/restoration-plan.md SR15: `expect_restored`'s read.
+extern "system" fn present_session_restored(_env: JNIEnv, _class: JClass) -> i32 {
+    crate::capi::kaya_session_restored() as i32
 }
 
 /// The stall watchdog's reading, for the Compose interpreter's

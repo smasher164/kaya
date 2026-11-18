@@ -16272,6 +16272,8 @@ private func kayaRunScript(_ script: String) {
                 #if os(macOS)
                     DispatchQueue.main.sync { kayaFlushWindowFrames() }
                 #endif
+                // A save point (docs/restoration-plan.md SR5): act one leaves next.
+                KayaHost.api.session_save_point()
                 if let why = kayaWriteActTwoMarker(
                     ProcessInfo.processInfo.environment["KAYA_SELFTEST"] ?? "",
                     kayaActTwoSource(script))
@@ -18830,6 +18832,15 @@ private func kayaRunScript(_ script: String) {
                     observed.append("appearance \(wantMode)")
                 } else {
                     failures.append("appearance \(got), wanted \(wantMode)")
+                }
+            case "expect_restored":
+                // docs/restoration-plan.md SR15: the core's answer for this launch.
+                let wantRestored = parts.count > 1 ? String(parts[1]) : ""
+                let gotRestored = ["fresh", "resumed", "recovered"][Int(min(KayaHost.api.session_restored(), 2))]
+                if gotRestored == wantRestored {
+                    observed.append("restored \(gotRestored)")
+                } else {
+                    failures.append("restored \(gotRestored), wanted \(wantRestored)")
                 }
             case "expect_pref", "expect_no_pref":
                 // THE PLATFORM'S OWN STORE, RE-OPENED (docs/tasks-s4-plan.md

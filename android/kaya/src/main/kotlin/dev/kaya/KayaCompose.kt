@@ -13760,6 +13760,13 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         if (hit) observed.add("appearance $want")
                         else failures.add("appearance $mode $source, wanted $want")
                     }
+                    "expect_restored" -> {
+                        // docs/restoration-plan.md SR15: the core's answer for this launch.
+                        val want = parts.getOrNull(1) ?: ""
+                        val got = listOf("fresh", "resumed", "recovered")[KayaPresent.sessionRestored().coerceIn(0, 2)]
+                        if (got == want) observed.add("restored $got")
+                        else failures.add("restored $got, wanted $want")
+                    }
                     "expect_pref" -> {
                         // THE PLATFORM'S OWN STORE, RE-OPENED
                         // (docs/tasks-s4-plan.md §4): SharedPreferences

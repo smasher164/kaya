@@ -3265,6 +3265,198 @@ pub unsafe extern "C" fn kaya_pref_remove(key: *const u8, key_len: usize) {
     crate::prefs::remove(&key);
 }
 
+// ------------------------------------------- the session store (docs/restoration-plan.md SR3)
+
+/// `scope`: 0 the app, 1 a window, 2 a document; `id` names the surface.
+/// Any other scope reads as the app's, since the floor cannot unwind.
+fn session_scope(scope: u32, id: u64) -> crate::session::Scope {
+    match scope {
+        1 => crate::session::Scope::Window(id),
+        2 => crate::session::Scope::Document(id),
+        _ => crate::session::Scope::App,
+    }
+}
+
+/// The walls (§4) at the floor: a refusal is reported through `fault`, the
+/// prefs shape, since this frame cannot unwind.
+fn session_write(scope: u32, id: u64, key: &str, value: crate::prefs::PrefValue) {
+    if let Err(why) = crate::session::set(session_scope(scope, id), key, value) {
+        crate::fault::report(why);
+    }
+}
+
+/// 1 = present, with `*len` the full length and min(len, cap) bytes
+/// written into `out`; 0 = absent, which includes a key holding another type.
+///
+/// # Safety
+/// `key` must be valid for `key_len` bytes; `out` null or valid for `cap`;
+/// `len` null or valid for one `usize`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_session_get_string(
+    scope: u32,
+    id: u64,
+    key: *const u8,
+    key_len: usize,
+    out: *mut u8,
+    cap: usize,
+    len: *mut usize,
+) -> i32 {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return 0 };
+    let Some(crate::prefs::PrefValue::Str(text)) = crate::session::get(session_scope(scope, id), &key) else {
+        return 0;
+    };
+    let full = unsafe { fill(text.as_bytes(), out, cap) };
+    if !len.is_null() {
+        unsafe { *len = full };
+    }
+    1
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes; `out` valid for one `i64`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_session_get_i64(scope: u32, id: u64, key: *const u8, key_len: usize, out: *mut i64) -> i32 {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return 0 };
+    let Some(crate::prefs::PrefValue::I64(value)) = crate::session::get(session_scope(scope, id), &key) else {
+        return 0;
+    };
+    if !out.is_null() {
+        unsafe { *out = value };
+    }
+    1
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes; `out` valid for one `double`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_session_get_f64(scope: u32, id: u64, key: *const u8, key_len: usize, out: *mut f64) -> i32 {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return 0 };
+    let Some(crate::prefs::PrefValue::F64(value)) = crate::session::get(session_scope(scope, id), &key) else {
+        return 0;
+    };
+    if !out.is_null() {
+        unsafe { *out = value };
+    }
+    1
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes; `out` valid for one byte.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_session_get_bool(scope: u32, id: u64, key: *const u8, key_len: usize, out: *mut u8) -> i32 {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return 0 };
+    let Some(crate::prefs::PrefValue::Bool(value)) = crate::session::get(session_scope(scope, id), &key) else {
+        return 0;
+    };
+    if !out.is_null() {
+        unsafe { *out = u8::from(value) };
+    }
+    1
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes and `value` for `value_len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_session_set_string(
+    scope: u32,
+    id: u64,
+    key: *const u8,
+    key_len: usize,
+    value: *const u8,
+    value_len: usize,
+) {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return };
+    let Some(value) = (unsafe { borrowed_str(value, value_len) }) else { return };
+    session_write(scope, id, &key, crate::prefs::PrefValue::Str(value));
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_session_set_i64(scope: u32, id: u64, key: *const u8, key_len: usize, value: i64) {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return };
+    session_write(scope, id, &key, crate::prefs::PrefValue::I64(value));
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_session_set_f64(scope: u32, id: u64, key: *const u8, key_len: usize, value: f64) {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return };
+    session_write(scope, id, &key, crate::prefs::PrefValue::F64(value));
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_session_set_bool(scope: u32, id: u64, key: *const u8, key_len: usize, value: u8) {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return };
+    session_write(scope, id, &key, crate::prefs::PrefValue::Bool(value != 0));
+}
+
+/// # Safety
+/// `key` must be valid for `key_len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_session_remove(scope: u32, id: u64, key: *const u8, key_len: usize) {
+    let Some(key) = (unsafe { borrowed_str(key, key_len) }) else { return };
+    if let Err(why) = crate::session::remove(session_scope(scope, id), &key) {
+        crate::fault::report(why);
+    }
+}
+
+/// Which launch this is (SR6): 0 fresh, 1 resumed, 2 recovered.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_session_restored() -> u32 {
+    match crate::session::restored() {
+        crate::session::Restored::Fresh => 0,
+        crate::session::Restored::Resumed => 1,
+        crate::session::Restored::Recovered => 2,
+    }
+}
+
+/// The backend's idle (SR5): the first clears the crash-at-launch mark, each
+/// writes what changed.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_session_idle() {
+    crate::session::idle();
+}
+
+/// A platform save point (SR5): synchronous.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_session_save_point() {
+    crate::session::save_point();
+}
+
+/// A phone host's word before the first touch (SR6): `present` 0 = the
+/// platform says this launch does not continue the last (a null Bundle),
+/// 1 = it continues the session `token` names.
+///
+/// # Safety
+/// `token` must be valid for `token_len` bytes when `present` is 1.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_session_platform_token(present: u8, token: *const u8, token_len: usize) {
+    let token = if present == 0 {
+        crate::session::Token::Absent
+    } else {
+        match unsafe { borrowed_str(token, token_len) } {
+            Some(id) => crate::session::Token::Session(id),
+            None => crate::session::Token::Absent,
+        }
+    };
+    crate::session::set_platform_token(token);
+}
+
+/// This process's session id, for the phone host to hand its platform's
+/// save (SR6). Answers the full length; min(len, cap) bytes are written.
+///
+/// # Safety
+/// `out` null or valid for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_session_id(out: *mut u8, cap: usize) -> usize {
+    let id = crate::session::session_id();
+    unsafe { fill(id.as_bytes(), out, cap) }
+}
+
 /// Fetch a blob's bytes by the handle an apply record carried. Returns
 /// the byte pointer and writes the length; NULL for a dead handle (a
 /// batch already superseded). The pointer borrows core memory and is

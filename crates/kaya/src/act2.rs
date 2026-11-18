@@ -151,6 +151,7 @@ pub(crate) fn arm(state_root: Option<&Path>) {
             // The harness's stores are emptied here, before the app thread
             // reads them (docs/tasks-s4-plan.md §4).
             crate::prefs::clear_selftest_scratch();
+            crate::session::clear_selftest_scratch();
             crate::prefs::export_domain();
         }
         Act::Two => {

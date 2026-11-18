@@ -921,6 +921,9 @@ pub enum Step {
     /// The same store does NOT hold that key. Also the answer for a key
     /// holding another type, which the semantics calls absent.
     ExpectNoPref(String),
+    /// Which launch this is, `fresh`, `resumed` or `recovered`
+    /// (docs/restoration-plan.md SR15).
+    ExpectRestored(String),
     ExpectFileDialog(Option<String>, Vec<String>),
     FileChoose(Option<String>),
     FileDialogGoto(String),
@@ -1587,6 +1590,7 @@ impl Step {
             | Step::Relaunch(..)
             | Step::ExpectPref(..)
             | Step::ExpectNoPref(..)
+            | Step::ExpectRestored(..)
             | Step::ExpectAlerts(..)
             | Step::ExpectEntries(..)
             | Step::Back(..)
@@ -1791,6 +1795,7 @@ impl Step {
             Step::Relaunch(..) => false,
             Step::ExpectPref { .. } => true,
             Step::ExpectNoPref { .. } => true,
+            Step::ExpectRestored { .. } => true,
             Step::ExpectAlerts { .. } => true,
             Step::ExpectEntries { .. } => true,
             Step::Back { .. } => false,
@@ -4844,6 +4849,13 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_no_pref wants a key: {line:?}"));
                 }
                 Step::ExpectNoPref(key.to_owned())
+            }
+            "expect_restored" => {
+                let want = rest.trim();
+                if !["fresh", "resumed", "recovered"].contains(&want) {
+                    return Err(format!("expect_restored wants fresh, resumed or recovered: {line:?}"));
+                }
+                Step::ExpectRestored(want.to_owned())
             }
             "expect_file_dialog" => {
                 // `expect_file_dialog <dir> <name>...`: bare names, so
@@ -8082,6 +8094,14 @@ fn run_with_log(
                         value.display()
                     )),
                     None => Err(format!("pref {key} absent, wanted {want:?}")),
+                }
+            })),
+            Step::ExpectRestored(want) => Some(poll(|| {
+                let got = crate::session::restored().as_str();
+                if got == want {
+                    Ok(format!("restored {got}"))
+                } else {
+                    Err(format!("restored {got}, wanted {want}"))
                 }
             })),
             Step::ExpectNoPref(key) => Some(poll(|| match crate::prefs::read_back(key) {

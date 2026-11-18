@@ -1,0 +1,14 @@
+# SESSION RESTORATION (docs/restoration-plan.md SR15): the draft comes back
+# through the session store after the platform's continuation.
+expect_title "restore"
+expect_restored fresh
+expect label#0 "launch fresh"
+expect entry#0 ""
+set_text entry#0 "half typed"
+
+relaunch resume
+
+expect_title "restore"
+expect_restored resumed
+expect label#0 "launch resumed"
+expect entry#0 "half typed"

@@ -48,6 +48,8 @@ mod prefs;
 mod prefs_android;
 #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
 mod prefs_keyfile;
+// docs/restoration-plan.md: the session store and its file.
+mod session;
 // App links (docs/app-links-plan.md §4): the route table, the one
 // matcher, and the door every platform arm hands a URL to. Ungated —
 // every target has a door.
@@ -149,6 +151,8 @@ pub use app::{
     // The app's own document directory and its settings store
     // (docs/tasks-s4-plan.md P1, P3).
     Prefs, app_data_dir, prefs,
+    // docs/restoration-plan.md SR3, SR6: the session store.
+    Session, Restored, document_session, restored, session, window_session,
     Field, ForScope, Inset, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     PathKey,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,

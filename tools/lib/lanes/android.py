@@ -579,7 +579,8 @@ IME_SCENES = ["ranges", "richtext"]
 # phone has; split/panes drive resize_window, which this host rejects
 # by design (the system owns surfaces; DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem", "auxquit"]
-UNWIRED_SCENES = []
+# docs/restoration-plan.md §5: the Mac first, then the fan-out wires it here.
+UNWIRED_SCENES = ["restore"]
 
 
 def scene_of(leg):

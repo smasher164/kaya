@@ -33,11 +33,14 @@ the same bundle id: one window titled with the bundle name, registered as
   show NO window at all (AppKit restored "no windows" and SwiftUI opened no
   default one), so it is not the fix.
 
-The fix: kaya reads the user's answer into `kayaQuitKeepsWindows` and then
-sets `NSQuitAlwaysKeepsWindows` false and `ApplePersistenceIgnoreState` true in
-the argument domain before `KayaApp.main()`, so AppKit saves no window at a
-quit and ignores any state an older build saved (it logs "ApplePersistenceIgnoreState:
-Existing state will not be touched" on stderr at each launch). The guard is the
+The fix: `ApplePersistenceIgnoreState` true in the argument domain before
+`KayaApp.main()`, so AppKit ignores whatever state it saved, from this build or
+an older one, and writes the new state to a temporary directory (it logs
+"ApplePersistenceIgnoreState: Existing state will not be touched. New state
+will be written to /var/folders/.../T/<id>.savedState" on stderr at each
+launch). The user's `NSQuitAlwaysKeepsWindows` is left alone, because the
+core reads it for its own resume-or-fresh answer (docs/restoration-plan.md
+SR6); overriding it in the argument domain as well raced the core's read. The guard is the
 mac lane's `auxquit` leg (tools/scenes/auxquit.steps, a regular bundle, door
 `relaunch resume` = the harness leaves through `NSApp.terminate` with the
 setting on in both acts) and the interpreter's verdict, which fails any leg in

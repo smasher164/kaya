@@ -60,3 +60,9 @@ pub(crate) fn clear() {
 pub(crate) fn data_dir() -> Option<PathBuf> {
     crate::android::state_root().map(PathBuf::from)
 }
+
+/// `noBackupFilesDir`, the files directory's sibling `no_backup`
+/// (docs/restoration-plan.md SR14: outside Auto Backup).
+pub(crate) fn no_backup_dir() -> Option<PathBuf> {
+    Some(data_dir()?.parent()?.join("no_backup"))
+}

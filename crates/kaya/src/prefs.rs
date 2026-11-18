@@ -186,6 +186,11 @@ fn selftest_root() -> Option<PathBuf> {
     None
 }
 
+/// The scratch root the session file shares with the data directory.
+pub(crate) fn selftest_session_root() -> Option<PathBuf> {
+    selftest_root()
+}
+
 // ------------------------------------------------------------- the store
 
 /// A STORE TOUCHED BEFORE kaya_run IS THE PROCESS'S FIRST STEP: a binding

@@ -167,6 +167,13 @@ fn manifest_value(text: &str, key: &str) -> Option<String> {
     None
 }
 
+/// A top-level key of the app's identity manifest, for the declarations the
+/// core reads before the app thread exists (docs/restoration-plan.md SR7).
+pub(crate) fn declared_value(key: &str) -> Option<String> {
+    let bytes = crate::assets::read(&identity_manifest()).ok()?;
+    manifest_value(&String::from_utf8(bytes).ok()?, key)
+}
+
 /// The declared icon's ASSET NAME: what follows the asset root's own
 /// directory component in the repo-relative path the manifest declares.
 fn asset_name_of(declared: &str) -> Option<&str> {
@@ -6384,6 +6391,7 @@ impl Scene {
                     out.push(ApplyOp::AddChild { parent, child });
                 }
                 TxOp::Mount { window, root } => {
+                    crate::session::note_first_build();
                     // The target's domain is SURFACES: the primary, a
                     // created window, a pushed navigation entry, or an
                     // added section.

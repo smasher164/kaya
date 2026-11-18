@@ -75,7 +75,8 @@ SCENES="background stall milestone2 entry search gallery todos reorder feed grow
 # saferestore: a rename cannot leave a backup, so there is no second act
 # to run (docs/rich-document-plan.md §4.1). auxquit: AppKit's window
 # restoration is the Mac's alone (docs/traps.md, SwiftUI reopens an aux window after a quit).
-OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland editorkeyboard windowmem saferestore auxquit"
+# restore: the Mac first, depth then breadth (docs/restoration-plan.md §5).
+OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland editorkeyboard windowmem saferestore auxquit restore"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md

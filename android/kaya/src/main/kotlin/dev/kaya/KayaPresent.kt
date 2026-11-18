@@ -23,6 +23,10 @@ object KayaPresent {
      * reading, which `expect_stall` asserts. */
     @JvmStatic external fun stalledMs(): Long
 
+    /** Which launch this is, 0 fresh, 1 resumed, 2 recovered
+     * (docs/restoration-plan.md SR6). */
+    @JvmStatic external fun sessionRestored(): Int
+
     /**
      * The core's latched fault as UTF-8, or null for none
      * (crates/kaya/src/fault.rs). A PEEK, never a take: the run asks

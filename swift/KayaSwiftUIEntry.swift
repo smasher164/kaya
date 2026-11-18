@@ -46,18 +46,25 @@ struct KayaApp: App {
     }
 }
 
-#if os(macOS)
-/// The user's "close windows when quitting" answer, read before kaya overrides
-/// it for AppKit (docs/restoration-plan.md SR6): true keeps, false or absent closes.
-nonisolated(unsafe) var kayaQuitKeepsWindows = false
+/// The toolkit's idle (docs/restoration-plan.md SR5): the session file is
+/// written once per loop turn that changed it, never on a timer.
+@MainActor func kayaInstallSessionIdle() {
+    let observer = CFRunLoopObserverCreateWithHandler(
+        nil, CFRunLoopActivity.beforeWaiting.rawValue, true, 2_001_200
+    ) { _, _ in
+        KayaHost.api.session_idle()
+    }
+    CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+}
 
-/// kaya owns restoration, so AppKit neither saves windows at a quit nor reopens
-/// any an older build saved (docs/traps.md, SwiftUI reopens an aux window after a quit).
+#if os(macOS)
+/// kaya owns restoration, so AppKit reopens no window it saved, from this
+/// build or an older one (docs/traps.md, SwiftUI reopens an aux window after
+/// a quit). The user's NSQuitAlwaysKeepsWindows stays as it is: the core
+/// reads it for its own answer (docs/restoration-plan.md SR6).
 func kayaTakeRestorationFromAppKit() {
     let defaults = UserDefaults.standard
-    kayaQuitKeepsWindows = defaults.bool(forKey: "NSQuitAlwaysKeepsWindows")
     var argument = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
-    argument["NSQuitAlwaysKeepsWindows"] = false
     argument["ApplePersistenceIgnoreState"] = true
     defaults.setVolatileDomain(argument, forName: UserDefaults.argumentDomain)
 }
@@ -114,6 +121,7 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
         // taken before AppKit converts it, so no window is added for it.
         kayaInstallLinkDoor()
         kayaStartPumpOnce("launch")
+        kayaInstallSessionIdle()
         // PIXEL-PROOF RUNS ONLY (KAYA_ACTIVATE=1): AppKit renders an inactive
         // app's chrome grey, and macOS 14's cooperative activation ignores
         // another process's activate call, so the app must ask for itself.
@@ -121,6 +129,10 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["KAYA_ACTIVATE"] != nil {
             NSApplication.shared.activate()
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        KayaHost.api.session_save_point()
     }
 }
 #else
@@ -145,6 +157,7 @@ final class KayaUIAppDelegate: UIResponder, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         kayaStartPumpOnce("launch")
+        kayaInstallSessionIdle()
         return true
     }
 

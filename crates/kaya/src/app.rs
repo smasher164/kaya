@@ -988,6 +988,99 @@ impl Prefs {
     }
 }
 
+/// The session store's app scope (docs/restoration-plan.md SR3): prefs'
+/// four types with a session's lifetime, read before the first build.
+pub fn session() -> Session {
+    Session { scope: crate::session::Scope::App }
+}
+
+/// A window's session scope, discarded with the window (SR9).
+pub fn window_session(window: WindowId) -> Session {
+    Session { scope: crate::session::Scope::Window(window.0) }
+}
+
+/// A document's session scope, discarded with the document (SR9).
+pub fn document_session(document: WindowId) -> Session {
+    Session { scope: crate::session::Scope::Document(document.0) }
+}
+
+/// Which launch this is (SR6): final before the first build.
+pub fn restored() -> Restored {
+    crate::session::restored()
+}
+
+pub use crate::session::Restored;
+
+/// The handle [`session`] answers. Do not put secrets in it (SR7).
+#[derive(Clone, Copy, Debug)]
+pub struct Session {
+    scope: crate::session::Scope,
+}
+
+impl Session {
+    pub fn get_string(&self, key: &str, default: &str) -> String {
+        match self.read(key) {
+            Some(crate::prefs::PrefValue::Str(text)) => text,
+            _ => default.to_owned(),
+        }
+    }
+
+    pub fn get_i64(&self, key: &str, default: i64) -> i64 {
+        match self.read(key) {
+            Some(crate::prefs::PrefValue::I64(value)) => value,
+            _ => default,
+        }
+    }
+
+    pub fn get_f64(&self, key: &str, default: f64) -> f64 {
+        match self.read(key) {
+            Some(crate::prefs::PrefValue::F64(value)) => value,
+            _ => default,
+        }
+    }
+
+    pub fn get_bool(&self, key: &str, default: bool) -> bool {
+        match self.read(key) {
+            Some(crate::prefs::PrefValue::Bool(value)) => value,
+            _ => default,
+        }
+    }
+
+    pub fn set_string(&self, key: &str, value: &str) {
+        self.write(key, crate::prefs::PrefValue::Str(value.to_owned()));
+    }
+
+    pub fn set_i64(&self, key: &str, value: i64) {
+        self.write(key, crate::prefs::PrefValue::I64(value));
+    }
+
+    pub fn set_f64(&self, key: &str, value: f64) {
+        self.write(key, crate::prefs::PrefValue::F64(value));
+    }
+
+    pub fn set_bool(&self, key: &str, value: bool) {
+        self.write(key, crate::prefs::PrefValue::Bool(value));
+    }
+
+    pub fn remove(&self, key: &str) {
+        if let Err(why) = crate::session::remove(self.scope, key) {
+            panic!("{why}");
+        }
+    }
+
+    fn read(&self, key: &str) -> Option<crate::prefs::PrefValue> {
+        assert!(!key.is_empty(), "{}", crate::session::empty_key_refusal());
+        crate::session::get(self.scope, key)
+    }
+
+    /// The walls' sentences, raised in Rust's idiom (the app thread can unwind).
+    fn write(&self, key: &str, value: crate::prefs::PrefValue) {
+        if let Err(why) = crate::session::set(self.scope, key, value) {
+            panic!("{why}");
+        }
+    }
+}
+
 /// One attribute over one span, in kaya's unit (docs/ranges-units.md §7);
 /// `value` is "true" for the flags, a URL for a link, a kind for a block.
 pub type Run = crate::protocol::TextRun;
