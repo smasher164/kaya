@@ -138,6 +138,35 @@ public final class KayaRing {
     public static native void prefRemove(byte[] key);
 
     /**
+     * The session store, restored windows and durable references
+     * (docs/restoration-plan.md SR3, SR9, SR11); crates/kaya/src/jvm.rs
+     * spells each answer's bytes.
+     */
+    public static native byte[] sessionGet(int scope, long id, byte[] key, int tag);
+
+    public static native void sessionSet(int scope, long id, byte[] key, int tag, byte[] value);
+
+    public static native void sessionRemove(int scope, long id, byte[] key);
+
+    public static native int sessionRestored();
+
+    public static native long[] sessionWindows();
+
+    public static native void sessionRestore(int scope, long saved, long now);
+
+    public static native byte[] referenceMint(long handle);
+
+    public static native byte[] referenceRedeem(byte[] token);
+
+    public static native void referenceForget(byte[] token);
+
+    public static native byte[] pickedText(long handle, int field);
+
+    public static native void prepareProcess();
+
+    public static native byte[] getenv(byte[] name);
+
+    /**
      * The formatter door and the catalog (docs/compliance-plan.md §3; the
      * kaya_fmt_*, kaya_locale, kaya_direction, kaya_text_scale, kaya_catalog
      * and kaya_tr JNI spellings). A NULL answer from a formatter or tr means

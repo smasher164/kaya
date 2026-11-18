@@ -1492,6 +1492,17 @@ public final class KayaApp {
     public record FontChoice(String family, int weight, boolean italic, int width) {}
 
     public record PickedFile(long handle, String name, String localPath) {
+        /** A durable reference to this file (docs/restoration-plan.md
+         * SR11), redeemed at a later launch by {@link KayaApp#redeem}. */
+        public String reference() throws ReferenceException {
+            byte[] a = KayaRing.referenceMint(handle);
+            String text = new String(a, 1, a.length - 1, java.nio.charset.StandardCharsets.UTF_8);
+            if (a[0] != 0) {
+                throw new ReferenceException(a[0], text);
+            }
+            return text;
+        }
+
         /**
          * Redeem the handle for real streams, plus whether it seeks.
          * THE MODE DECIDES: {@link FileMode#READ} a reading half only,
@@ -1787,6 +1798,184 @@ public final class KayaApp {
     /** The app's preferences store — one per process. */
     public static Prefs prefs() {
         return Prefs.THE;
+    }
+
+    /**
+     * The session store (docs/restoration-plan.md SR3): the preferences'
+     * four types with a session's lifetime, scoped to the app, a window or
+     * a document. The platform decides whether a launch continues the last
+     * ({@link #restored}). Do not put secrets in it (SR7).
+     */
+    public static final class SessionHandle {
+        private final int scope;
+        private final long id;
+
+        SessionHandle(int scope, long id) {
+            this.scope = scope;
+            this.id = id;
+        }
+
+        private static byte[] key(String key) {
+            if (key.isEmpty()) {
+                throw new IllegalArgumentException("kaya: a session key must not be empty");
+            }
+            return key.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        }
+
+        private static byte[] writeKey(String key) {
+            byte[] raw = key(key);
+            if (key.startsWith("kaya.")) {
+                throw new IllegalArgumentException(
+                        "kaya: session key \"" + key + "\" is reserved "
+                                + "(the kaya. prefix is kaya's own)");
+            }
+            return raw;
+        }
+
+        private static byte[] eight(long bits) {
+            return java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN).putLong(bits).array();
+        }
+
+        private static long bits(byte[] value) {
+            return java.nio.ByteBuffer.wrap(value).order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong();
+        }
+
+        public String getString(String name, String def) {
+            byte[] v = KayaRing.sessionGet(scope, id, key(name), 0);
+            return v == null ? def : new String(v, java.nio.charset.StandardCharsets.UTF_8);
+        }
+
+        public long getI64(String name, long def) {
+            byte[] v = KayaRing.sessionGet(scope, id, key(name), 1);
+            return v == null ? def : bits(v);
+        }
+
+        public double getF64(String name, double def) {
+            byte[] v = KayaRing.sessionGet(scope, id, key(name), 2);
+            return v == null ? def : Double.longBitsToDouble(bits(v));
+        }
+
+        public boolean getBool(String name, boolean def) {
+            byte[] v = KayaRing.sessionGet(scope, id, key(name), 3);
+            return v == null ? def : v[0] != 0;
+        }
+
+        public void setString(String name, String value) {
+            KayaRing.sessionSet(scope, id, writeKey(name), 0, value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+
+        public void setI64(String name, long value) {
+            KayaRing.sessionSet(scope, id, writeKey(name), 1, eight(value));
+        }
+
+        public void setF64(String name, double value) {
+            KayaRing.sessionSet(scope, id, writeKey(name), 2, eight(Double.doubleToRawLongBits(value)));
+        }
+
+        public void setBool(String name, boolean value) {
+            KayaRing.sessionSet(scope, id, writeKey(name), 3, new byte[] {(byte) (value ? 1 : 0)});
+        }
+
+        public void remove(String name) {
+            KayaRing.sessionRemove(scope, id, writeKey(name));
+        }
+    }
+
+    /** The session store's app scope (docs/restoration-plan.md SR3). */
+    public static SessionHandle session() {
+        return new SessionHandle(0, 0);
+    }
+
+    /** A window's session scope, discarded with the window (SR9). */
+    public static SessionHandle windowSession(long window) {
+        return new SessionHandle(1, window);
+    }
+
+    /** A document's session scope, discarded with the document (SR9). */
+    public static SessionHandle documentSession(long document) {
+        return new SessionHandle(2, document);
+    }
+
+    /** Which launch this is (SR6): "fresh", "resumed" or "recovered". */
+    public static String restored() {
+        return new String[] {"fresh", "resumed", "recovered"}[KayaRing.sessionRestored()];
+    }
+
+    /** One window as the last launch left it (SR9); activeDocument and
+     * section are 0 for none. */
+    public record RestoredWindow(long id, java.util.List<Long> documents, long activeDocument, long section, int depth) {}
+
+    /** The windows the last launch left, the primary first; empty on a
+     * fresh launch. */
+    public static java.util.List<RestoredWindow> restoredWindows() {
+        long[] flat = KayaRing.sessionWindows();
+        java.util.List<RestoredWindow> out = new java.util.ArrayList<>();
+        int i = 0;
+        while (i + 5 <= flat.length) {
+            int n = (int) flat[i + 4];
+            java.util.List<Long> docs = new java.util.ArrayList<>();
+            for (int j = 0; j < n; j++) {
+                docs.add(flat[i + 5 + j]);
+            }
+            out.add(new RestoredWindow(flat[i], java.util.List.copyOf(docs), flat[i + 1], flat[i + 2], (int) flat[i + 3]));
+            i += 5 + n;
+        }
+        return out;
+    }
+
+    /** A durable reference that did not mint or redeem (SR12): the refusal
+     * is one of missing, revoked, provider_gone, foreign, cap. */
+    public static final class ReferenceException extends Exception {
+        private static final String[] REFUSALS = {"", "missing", "revoked", "provider_gone", "foreign", "cap"};
+        private final String refusal;
+
+        ReferenceException(int code, String message) {
+            super(message);
+            this.refusal = REFUSALS[code];
+        }
+
+        public String refusal() {
+            return refusal;
+        }
+    }
+
+    /** A redeemed reference: the file, and the token to keep. */
+    public record Redeemed(PickedFile file, String token) {}
+
+    /** An ordinary picked file for a token {@link PickedFile#reference}
+     * minted, at this launch or an earlier one (SR11). */
+    public static Redeemed redeem(String token) throws ReferenceException {
+        byte[] a = KayaRing.referenceRedeem(token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String text = new String(a, 9, a.length - 9, java.nio.charset.StandardCharsets.UTF_8);
+        if (a[0] != 0) {
+            throw new ReferenceException(a[0], text);
+        }
+        long handle = java.nio.ByteBuffer.wrap(a, 1, 8).order(java.nio.ByteOrder.LITTLE_ENDIAN).getLong();
+        return new Redeemed(new PickedFile(handle, pickedText(handle, 0), pickedText(handle, 1)), text);
+    }
+
+    private static String pickedText(long handle, int field) {
+        byte[] v = KayaRing.pickedText(handle, field);
+        return v == null ? "" : new String(v, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    /** Releases a reference from kaya's durable count (SR13). */
+    public static void forget(String token) {
+        KayaRing.referenceForget(token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    /** What run does first, for a host that picks its scene from the
+     * environment (docs/traps.md, a Python guest read the session store
+     * before kaya_run). */
+    public static void prepareProcess() {
+        KayaRing.prepareProcess();
+    }
+
+    /** An environment variable as the process holds it now; the JVM's
+     * System.getenv is a copy taken at startup. */
+    public static String env(String name) {
+        byte[] v = KayaRing.getenv(name.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return v == null ? null : new String(v, java.nio.charset.StandardCharsets.UTF_8);
     }
 
     // --- The formatter door and the catalog (docs/compliance-plan.md §1.4) --
@@ -3902,6 +4091,12 @@ public final class KayaApp {
             this.id = id;
         }
 
+        /** Takes back the session scope the document was saved under (SR9). */
+        public DocumentRef restore(long saved) {
+            KayaRing.sessionRestore(2, saved, id);
+            return this;
+        }
+
         /** The document's title: its tab's, and the window's while active. */
         public DocumentRef title(String title) {
             tx.emit(KayaWire.txSetDocumentTitle(id, title));
@@ -3997,6 +4192,12 @@ public final class KayaApp {
             this.tx = tx;
             this.app = app;
             this.id = id;
+        }
+
+        /** Takes back the session scope the window was saved under (SR9). */
+        public WindowRef restore(long saved) {
+            KayaRing.sessionRestore(1, saved, id);
+            return this;
         }
 
         /** Binds the close-veto handler to THIS window (per-window —

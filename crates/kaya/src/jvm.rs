@@ -208,6 +208,69 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
                 sig: "([B)V".into(),
                 fn_ptr: ring_pref_remove as *mut _,
             },
+            // The session store, restored windows and durable references
+            // (docs/restoration-plan.md SR3, SR9, SR11): one typed get and set
+            // carry the four types as bytes, the tag naming the type.
+            NativeMethod {
+                name: "sessionGet".into(),
+                sig: "(IJ[BI)[B".into(),
+                fn_ptr: ring_session_get as *mut _,
+            },
+            NativeMethod {
+                name: "sessionSet".into(),
+                sig: "(IJ[BI[B)V".into(),
+                fn_ptr: ring_session_set as *mut _,
+            },
+            NativeMethod {
+                name: "sessionRemove".into(),
+                sig: "(IJ[B)V".into(),
+                fn_ptr: ring_session_remove as *mut _,
+            },
+            NativeMethod {
+                name: "sessionRestored".into(),
+                sig: "()I".into(),
+                fn_ptr: ring_session_restored as *mut _,
+            },
+            NativeMethod {
+                name: "sessionWindows".into(),
+                sig: "()[J".into(),
+                fn_ptr: ring_session_windows as *mut _,
+            },
+            NativeMethod {
+                name: "sessionRestore".into(),
+                sig: "(IJJ)V".into(),
+                fn_ptr: ring_session_restore as *mut _,
+            },
+            NativeMethod {
+                name: "referenceMint".into(),
+                sig: "(J)[B".into(),
+                fn_ptr: ring_reference_mint as *mut _,
+            },
+            NativeMethod {
+                name: "referenceRedeem".into(),
+                sig: "([B)[B".into(),
+                fn_ptr: ring_reference_redeem as *mut _,
+            },
+            NativeMethod {
+                name: "referenceForget".into(),
+                sig: "([B)V".into(),
+                fn_ptr: ring_reference_forget as *mut _,
+            },
+            NativeMethod {
+                name: "pickedText".into(),
+                sig: "(JI)[B".into(),
+                fn_ptr: ring_picked_text as *mut _,
+            },
+            NativeMethod {
+                name: "prepareProcess".into(),
+                sig: "()V".into(),
+                fn_ptr: ring_prepare_process as *mut _,
+            },
+            NativeMethod {
+                name: "getenv".into(),
+                sig: "([B)[B".into(),
+                fn_ptr: ring_getenv as *mut _,
+            },
             NativeMethod {
                 name: "specHash".into(),
                 sig: "()J".into(),
@@ -693,6 +756,197 @@ extern "system" fn ring_tr<'a>(
 /// The null object reference every absent answer below returns.
 fn null_ref<T: From<jni::objects::JObject<'static>>>() -> T {
     T::from(unsafe { jni::objects::JObject::from_raw(std::ptr::null_mut()) })
+}
+
+// --- The session store and durable references (docs/restoration-plan.md) --
+// A get or set names its type by tag: 0 string (UTF-8), 1 i64 and 2 f64
+// (8 bytes little-endian), 3 bool (one byte).
+
+extern "system" fn ring_session_get<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    scope: jint,
+    id: jlong,
+    key: JByteArray<'a>,
+    tag: jint,
+) -> JByteArray<'a> {
+    use crate::capi;
+    let key = env.convert_byte_array(&key).expect("kaya: reading the session key failed");
+    let (scope, id, k, n) = (scope as u32, id as u64, key.as_ptr(), key.len());
+    let bytes: Option<Vec<u8>> = unsafe {
+        match tag {
+            0 => {
+                let mut len = 0usize;
+                if capi::kaya_session_get_string(scope, id, k, n, std::ptr::null_mut(), 0, &mut len) == 0 {
+                    None
+                } else {
+                    let mut buf = vec![0u8; len];
+                    let mut got = 0usize;
+                    capi::kaya_session_get_string(scope, id, k, n, buf.as_mut_ptr(), len, &mut got);
+                    buf.truncate(got.min(len));
+                    Some(buf)
+                }
+            }
+            1 => {
+                let mut out = 0i64;
+                (capi::kaya_session_get_i64(scope, id, k, n, &mut out) != 0).then(|| out.to_le_bytes().to_vec())
+            }
+            2 => {
+                let mut out = 0f64;
+                (capi::kaya_session_get_f64(scope, id, k, n, &mut out) != 0).then(|| out.to_le_bytes().to_vec())
+            }
+            _ => {
+                let mut out = 0u8;
+                (capi::kaya_session_get_bool(scope, id, k, n, &mut out) != 0).then(|| vec![out])
+            }
+        }
+    };
+    match bytes {
+        Some(b) => env.byte_array_from_slice(&b).expect("kaya: handing over a session value failed"),
+        None => null_ref(),
+    }
+}
+
+extern "system" fn ring_session_set<'a>(
+    env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    scope: jint,
+    id: jlong,
+    key: JByteArray<'a>,
+    tag: jint,
+    value: JByteArray<'a>,
+) {
+    use crate::capi;
+    let key = env.convert_byte_array(&key).expect("kaya: reading the session key failed");
+    let v = env.convert_byte_array(&value).expect("kaya: reading the session value failed");
+    let (scope, id, k, n) = (scope as u32, id as u64, key.as_ptr(), key.len());
+    let eight = || <[u8; 8]>::try_from(v.as_slice()).expect("kaya: a session number rides as 8 bytes");
+    unsafe {
+        match tag {
+            0 => capi::kaya_session_set_string(scope, id, k, n, v.as_ptr(), v.len()),
+            1 => capi::kaya_session_set_i64(scope, id, k, n, i64::from_le_bytes(eight())),
+            2 => capi::kaya_session_set_f64(scope, id, k, n, f64::from_le_bytes(eight())),
+            _ => capi::kaya_session_set_bool(scope, id, k, n, u8::from(v.first().copied().unwrap_or(0) != 0)),
+        }
+    }
+}
+
+extern "system" fn ring_session_remove<'a>(env: JNIEnv<'a>, _class: JClass<'a>, scope: jint, id: jlong, key: JByteArray<'a>) {
+    let key = env.convert_byte_array(&key).expect("kaya: reading the session key failed");
+    unsafe { crate::capi::kaya_session_remove(scope as u32, id as u64, key.as_ptr(), key.len()) };
+}
+
+extern "system" fn ring_session_restored<'a>(_env: JNIEnv<'a>, _class: JClass<'a>) -> jint {
+    crate::capi::kaya_session_restored() as jint
+}
+
+/// Flattened: per window its id, active document, section, depth, the
+/// count of its documents, then the documents.
+extern "system" fn ring_session_windows<'a>(env: JNIEnv<'a>, _class: JClass<'a>) -> JLongArray<'a> {
+    let mut flat: Vec<i64> = Vec::new();
+    for i in 0..crate::capi::kaya_session_window_count() {
+        let (mut w, mut a, mut sec, mut d) = (0u64, 0u64, 0u64, 0u32);
+        let n = unsafe { crate::capi::kaya_session_window(i, &mut w, &mut a, &mut sec, &mut d, std::ptr::null_mut(), 0) };
+        if n < 0 {
+            continue;
+        }
+        let mut docs = vec![0u64; n as usize];
+        unsafe {
+            crate::capi::kaya_session_window(
+                i,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                docs.as_mut_ptr(),
+                docs.len(),
+            )
+        };
+        flat.extend([w as i64, a as i64, sec as i64, i64::from(d), n]);
+        flat.extend(docs.iter().map(|&x| x as i64));
+    }
+    let arr = env.new_long_array(flat.len() as i32).expect("kaya: allocating the restored windows failed");
+    env.set_long_array_region(&arr, 0, &flat).expect("kaya: writing the restored windows failed");
+    arr
+}
+
+extern "system" fn ring_session_restore<'a>(_env: JNIEnv<'a>, _class: JClass<'a>, scope: jint, saved: jlong, now: jlong) {
+    crate::capi::kaya_session_restore(scope as u32, saved as u64, now as u64);
+}
+
+/// The floor's answer-or-sentence shape read twice.
+fn coded(ask: impl Fn(*mut u8, usize, &mut usize) -> u32) -> (u32, Vec<u8>) {
+    let mut len = 0usize;
+    let mut code = ask(std::ptr::null_mut(), 0, &mut len);
+    let mut buf = vec![0u8; len];
+    if len > 0 {
+        let cap = len;
+        code = ask(buf.as_mut_ptr(), cap, &mut len);
+        buf.truncate(len.min(cap));
+    }
+    (code, buf)
+}
+
+/// One code byte, then the token or the sentence.
+extern "system" fn ring_reference_mint<'a>(env: JNIEnv<'a>, _class: JClass<'a>, handle: jlong) -> JByteArray<'a> {
+    let (code, text) = coded(|out, cap, len| unsafe { crate::capi::kaya_reference_mint(handle as u64, out, cap, len) });
+    let mut answer = vec![code as u8];
+    answer.extend(text);
+    env.byte_array_from_slice(&answer).expect("kaya: handing over a reference failed")
+}
+
+/// One code byte, the handle (8 bytes little-endian), then the token or
+/// the sentence.
+extern "system" fn ring_reference_redeem<'a>(env: JNIEnv<'a>, _class: JClass<'a>, token: JByteArray<'a>) -> JByteArray<'a> {
+    let token = env.convert_byte_array(&token).expect("kaya: reading the token failed");
+    let handle = std::cell::Cell::new(0u64);
+    let (code, text) = coded(|out, cap, len| {
+        let mut h = 0u64;
+        let code = unsafe { crate::capi::kaya_reference_redeem(token.as_ptr(), token.len(), &mut h, out, cap, len) };
+        handle.set(h);
+        code
+    });
+    let mut answer = vec![code as u8];
+    answer.extend(handle.get().to_le_bytes());
+    answer.extend(text);
+    env.byte_array_from_slice(&answer).expect("kaya: handing over a redeemed reference failed")
+}
+
+extern "system" fn ring_reference_forget<'a>(env: JNIEnv<'a>, _class: JClass<'a>, token: JByteArray<'a>) {
+    let token = env.convert_byte_array(&token).expect("kaya: reading the token failed");
+    unsafe { crate::capi::kaya_reference_forget(token.as_ptr(), token.len()) };
+}
+
+extern "system" fn ring_picked_text<'a>(env: JNIEnv<'a>, _class: JClass<'a>, handle: jlong, field: jint) -> JByteArray<'a> {
+    let mut len = 0usize;
+    if unsafe { crate::capi::kaya_picked_text(handle as u64, field as u32, std::ptr::null_mut(), 0, &mut len) } != 1 {
+        return null_ref();
+    }
+    let mut buf = vec![0u8; len];
+    let mut got = 0usize;
+    unsafe { crate::capi::kaya_picked_text(handle as u64, field as u32, buf.as_mut_ptr(), len, &mut got) };
+    buf.truncate(got.min(len));
+    env.byte_array_from_slice(&buf).expect("kaya: handing over a picked file's text failed")
+}
+
+/// What kaya_run does first, for a host that picks its scene from the
+/// environment (docs/traps.md, a Python guest read the session store before
+/// kaya_run). Android's attach prepares instead.
+extern "system" fn ring_prepare_process<'a>(_env: JNIEnv<'a>, _class: JClass<'a>) {
+    #[cfg(not(target_os = "android"))]
+    crate::prepare_process();
+}
+
+/// The environment as the process holds it now: the JVM's System.getenv is
+/// a copy taken at startup (docs/traps.md, the Python entry's C# paragraph).
+extern "system" fn ring_getenv<'a>(env: JNIEnv<'a>, _class: JClass<'a>, name: JByteArray<'a>) -> JByteArray<'a> {
+    let name = env.convert_byte_array(&name).expect("kaya: reading the variable's name failed");
+    match std::env::var_os(String::from_utf8_lossy(&name).as_ref()) {
+        Some(v) => env
+            .byte_array_from_slice(v.to_string_lossy().as_bytes())
+            .expect("kaya: handing over a variable failed"),
+        None => null_ref(),
+    }
 }
 
 extern "system" fn ring_pref_get_string<'a>(

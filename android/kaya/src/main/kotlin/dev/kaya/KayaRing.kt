@@ -186,6 +186,33 @@ object KayaRing {
 
     @JvmStatic external fun prefRemove(key: ByteArray)
 
+    // The session store, restored windows and durable references
+    // (docs/restoration-plan.md SR3, SR9, SR11); crates/kaya/src/jvm.rs
+    // spells each answer's bytes.
+    @JvmStatic external fun sessionGet(scope: Int, id: Long, key: ByteArray, tag: Int): ByteArray?
+
+    @JvmStatic external fun sessionSet(scope: Int, id: Long, key: ByteArray, tag: Int, value: ByteArray)
+
+    @JvmStatic external fun sessionRemove(scope: Int, id: Long, key: ByteArray)
+
+    @JvmStatic external fun sessionRestored(): Int
+
+    @JvmStatic external fun sessionWindows(): LongArray
+
+    @JvmStatic external fun sessionRestore(scope: Int, saved: Long, now: Long)
+
+    @JvmStatic external fun referenceMint(handle: Long): ByteArray
+
+    @JvmStatic external fun referenceRedeem(token: ByteArray): ByteArray
+
+    @JvmStatic external fun referenceForget(token: ByteArray)
+
+    @JvmStatic external fun pickedText(handle: Long, field: Int): ByteArray?
+
+    @JvmStatic external fun prepareProcess()
+
+    @JvmStatic external fun getenv(name: ByteArray): ByteArray?
+
     /**
      * Redeem a picked file: a [java.io.FileDescriptor] the caller owns,
      * with `seekable[0]` set to 1 for random access. Native because no

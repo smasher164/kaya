@@ -72,6 +72,11 @@ before it reads; restoredocs-go watched red with that call cut (title
 environment needs the same call when its relaunch legs are wired.
 
 
+Java (measured 2026-11-18): the JVM's System.getenv is a startup copy too.
+guests/java's Main calls KayaRing.prepareProcess() and reads KAYA_SELFTEST
+through KayaRing.getenv (jvm.rs, std's live environment); restoredocs-java
+watched red with System.getenv put back (title "milestone2"), sha restored.
+
 C# (measured 2026-11-18, the same day): the C# host picks its scene with a
 `switch` in Main and needs the same prepare first, and two more traps sit
 under it. .NET on Unix reads a COPY of the environment taken at startup, so

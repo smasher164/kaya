@@ -74,7 +74,7 @@ public final class FileDialog {
 
     /** This process's id, without NAMING {@code ProcessHandle}: the Android
      * SDK has no such class, so naming it is a compile error there. */
-    private static long pid() {
+    static long pid() {
         try {
             return Long.parseLong(
                     new java.io.File("/proc/self").getCanonicalFile().getName());

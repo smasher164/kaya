@@ -16,7 +16,12 @@ public final class Main {
         }
         KayaRing.attach();
 
-        String scene = System.getenv("KAYA_SELFTEST");
+        // Act two of a relaunch learns its scene only from the marker this
+        // adopts, and System.getenv is a copy taken at startup (docs/traps.md,
+        // a Python guest read the session store before kaya_run).
+        KayaRing.prepareProcess();
+        byte[] named = KayaRing.getenv("KAYA_SELFTEST".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String scene = named == null ? null : new String(named, java.nio.charset.StandardCharsets.UTF_8);
         Runnable app;
         switch (scene == null ? "" : scene) {
             case "a11y":
@@ -193,6 +198,15 @@ public final class Main {
                 break;
             case "doctabs":
                 app = Doctabs::app;
+                break;
+            case "restore":
+                app = Restore::app;
+                break;
+            case "restoredocs":
+                app = Restoredocs::app;
+                break;
+            case "references":
+                app = References::app;
                 break;
             case "fullscreen":
                 app = Fullscreen::app;
