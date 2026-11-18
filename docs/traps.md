@@ -54,6 +54,20 @@ before it reads; restoredocs-go watched red with that call cut (title
 "milestone2"). Every other binding whose host picks a scene from the
 environment needs the same call when its relaunch legs are wired.
 
+
+C# (measured 2026-11-18, the same day): the C# host picks its scene with a
+`switch` in Main and needs the same prepare first, and two more traps sit
+under it. .NET on Unix reads a COPY of the environment taken at startup, so
+`Environment.GetEnvironmentVariable("KAYA_SELFTEST")` stayed empty after
+the core's setenv adopted the marker and act two ran milestone2;
+`KayaApp.Env` reads libc's `getenv` (Windows reads the live block itself).
+And the binding's library resolver is installed by `Kaya.Init`, which only
+the KayaApp constructor called, so `PrepareProcess` before it died in
+dlopen; `Init` is idempotent now and `PrepareProcess` calls it. The host
+prepares only when no scene is named, since the headless checks
+(encodebench) never load libkaya. Guard: restoredocs-csharp watched red
+with the `Env` read put back to `Environment.GetEnvironmentVariable`
+(title milestone2), sha restored.
 ## The WiFi off a cold boot lost (measured 2026-11-18)
 
 The f6019c50 matrix's Android lane failed at admission in 59 s, no leg run:

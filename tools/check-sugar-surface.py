@@ -8815,7 +8815,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 28")
+        if n == 1 else src, n, "typed-row reader found only 29")
     return "\n".join(lines)
 
 

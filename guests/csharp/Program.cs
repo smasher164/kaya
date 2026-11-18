@@ -30,8 +30,16 @@ static class Program
             MediaCheck.Run();
             System.Environment.Exit(0);
         }
-        switch (System.Environment.GetEnvironmentVariable("KAYA_SELFTEST"))
+        // Act two learns its scene only from the marker this adopts (docs/traps.md,
+        // a Python guest read the session store before kaya_run); act one has it
+        // already, and the headless checks never load libkaya.
+        if (string.IsNullOrEmpty(System.Environment.GetEnvironmentVariable("KAYA_SELFTEST")))
+            KayaApp.PrepareProcess();
+        switch (KayaApp.Env("KAYA_SELFTEST"))
         {
+            case "restore": Restore.RestoreScene.Run(); break;
+            case "restoredocs": RestoredocsScene.Run(); break;
+            case "references": ReferencesScene.Run(); break;
             case "a11y": A11yScene.Run(); break;
             case "a11yrows": A11yrowsScene.Run(); break;
             case "entry": EntryScene.Run(); break;
@@ -121,7 +129,7 @@ static class Program
             case null: case "": case "1": case "milestone2": Milestone2Scene.Run(); break;
             default:
                 throw new InvalidOperationException(
-                    $"kaya: no scene named \"{System.Environment.GetEnvironmentVariable("KAYA_SELFTEST")}\" in this guest; the runner asked for a leg it does not carry");
+                    $"kaya: no scene named \"{KayaApp.Env("KAYA_SELFTEST")}\" in this guest; the runner asked for a leg it does not carry");
         }
     }
 }

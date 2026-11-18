@@ -29,6 +29,17 @@ public readonly record struct PickedFile(ulong Handle, string Name, string? Loca
     /// next launch hands to App.OnBackupLeft; a rename cannot leave one, so
     /// on iOS and the desktops that never fires.
     public void Save(ReadOnlySpan<byte> bytes) => Kaya.SavePicked(Handle, bytes);
+
+    /// A durable reference to this file (docs/restoration-plan.md SR11): a
+    /// text token, at most 8 KiB, to store anywhere and redeem with
+    /// KayaApp.Redeem at a later launch. Throws ReferenceException naming
+    /// its refusal (SR12).
+    public string Reference()
+    {
+        var (code, text) = Kaya.ReferenceMint(Handle);
+        if (code != 0) throw new ReferenceException(ReferenceException.Refusals[code], text);
+        return text;
+    }
 }
 
 /// A backup a safe save left that this launch could not prove redundant
@@ -404,12 +415,16 @@ static partial class Kaya
     }
 
     static RingInfo ring;
+    static bool initialized;
 
     /// On Windows, "kaya" resolves to kaya.dll via PATH. Elsewhere, point
     /// KAYA_LIB at the built library (e.g. target/debug/libkaya.dylib).
     /// Call once, before anything else.
     public static void Init()
     {
+        // KayaApp.PrepareProcess may have run it first (act two's host).
+        if (initialized) return;
+        initialized = true;
         NativeLibrary.SetDllImportResolver(typeof(Kaya).Assembly, (name, _, _) =>
         {
             string? env = Environment.GetEnvironmentVariable("KAYA_LIB");
@@ -678,6 +693,191 @@ static partial class Kaya
     {
         byte[] raw = Encoding.UTF8.GetBytes(key);
         kaya_pref_remove(raw, (nuint)raw.Length);
+    }
+
+    // The session store and durable file references (docs/restoration-plan.md
+    // SR3, SR11): the C floor's kaya_session_* and kaya_reference_*.
+    [DllImport("kaya")]
+    internal static extern void kaya_prepare_process();
+
+    [DllImport("kaya")]
+    static extern int kaya_session_get_string(uint scope, ulong id,
+        byte[] key, nuint keyLen, byte[]? into, nuint cap, out nuint len);
+
+    [DllImport("kaya")]
+    static extern int kaya_session_get_i64(uint scope, ulong id, byte[] key, nuint keyLen, out long value);
+
+    [DllImport("kaya")]
+    static extern int kaya_session_get_f64(uint scope, ulong id, byte[] key, nuint keyLen, out double value);
+
+    [DllImport("kaya")]
+    static extern int kaya_session_get_bool(uint scope, ulong id, byte[] key, nuint keyLen, out byte value);
+
+    [DllImport("kaya")]
+    static extern void kaya_session_set_string(uint scope, ulong id,
+        byte[] key, nuint keyLen, byte[] value, nuint valueLen);
+
+    [DllImport("kaya")]
+    static extern void kaya_session_set_i64(uint scope, ulong id, byte[] key, nuint keyLen, long value);
+
+    [DllImport("kaya")]
+    static extern void kaya_session_set_f64(uint scope, ulong id, byte[] key, nuint keyLen, double value);
+
+    [DllImport("kaya")]
+    static extern void kaya_session_set_bool(uint scope, ulong id, byte[] key, nuint keyLen, byte value);
+
+    [DllImport("kaya")]
+    static extern void kaya_session_remove(uint scope, ulong id, byte[] key, nuint keyLen);
+
+    [DllImport("kaya")]
+    internal static extern uint kaya_session_restored();
+
+    [DllImport("kaya")]
+    static extern uint kaya_session_window_count();
+
+    [DllImport("kaya")]
+    static extern long kaya_session_window(uint index, out ulong window, out ulong active,
+        out ulong section, out uint depth, ulong[]? docs, nuint cap);
+
+    [DllImport("kaya")]
+    internal static extern void kaya_session_restore(uint scope, ulong saved, ulong now);
+
+    [DllImport("kaya")]
+    static extern uint kaya_reference_mint(ulong handle, byte[] into, nuint cap, out nuint len);
+
+    [DllImport("kaya")]
+    static extern uint kaya_reference_redeem(byte[] token, nuint tokenLen, out ulong handle,
+        byte[] into, nuint cap, out nuint len);
+
+    [DllImport("kaya")]
+    static extern void kaya_reference_forget(byte[] token, nuint tokenLen);
+
+    [DllImport("kaya")]
+    static extern int kaya_picked_text(ulong handle, uint field, byte[]? into, nuint cap, out nuint len);
+
+    [DllImport("libc", EntryPoint = "getenv")]
+    static extern IntPtr libc_getenv(string name);
+
+    /// The environment as it is NOW: .NET on Unix reads a copy taken at startup,
+    /// and act two's scene arrives by the core's setenv from the marker
+    /// (docs/traps.md, a Python guest read the session store before kaya_run).
+    internal static string? Env(string name)
+    {
+        if (OperatingSystem.IsWindows()) return Environment.GetEnvironmentVariable(name);
+        IntPtr p = libc_getenv(name);
+        return p == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(p);
+    }
+
+    internal static string? SessionGetString(uint scope, ulong id, string key)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        if (kaya_session_get_string(scope, id, raw, (nuint)raw.Length, null, 0, out nuint len) == 0)
+            return null;
+        if (len == 0) return "";
+        byte[] into = new byte[(int)len];
+        if (kaya_session_get_string(scope, id, raw, (nuint)raw.Length, into, len, out nuint got) == 0)
+            return null;
+        return Encoding.UTF8.GetString(into, 0, System.Math.Min((int)got, (int)len));
+    }
+
+    internal static long? SessionGetI64(uint scope, ulong id, string key)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        return kaya_session_get_i64(scope, id, raw, (nuint)raw.Length, out long value) == 0 ? null : value;
+    }
+
+    internal static double? SessionGetF64(uint scope, ulong id, string key)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        return kaya_session_get_f64(scope, id, raw, (nuint)raw.Length, out double value) == 0 ? null : value;
+    }
+
+    internal static bool? SessionGetBool(uint scope, ulong id, string key)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        return kaya_session_get_bool(scope, id, raw, (nuint)raw.Length, out byte value) == 0
+            ? null : value != 0;
+    }
+
+    internal static void SessionSetString(uint scope, ulong id, string key, string value)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        byte[] packed = Encoding.UTF8.GetBytes(value);
+        kaya_session_set_string(scope, id, raw, (nuint)raw.Length, packed, (nuint)packed.Length);
+    }
+
+    internal static void SessionSetI64(uint scope, ulong id, string key, long value)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        kaya_session_set_i64(scope, id, raw, (nuint)raw.Length, value);
+    }
+
+    internal static void SessionSetF64(uint scope, ulong id, string key, double value)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        kaya_session_set_f64(scope, id, raw, (nuint)raw.Length, value);
+    }
+
+    internal static void SessionSetBool(uint scope, ulong id, string key, bool value)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        kaya_session_set_bool(scope, id, raw, (nuint)raw.Length, value ? (byte)1 : (byte)0);
+    }
+
+    internal static void SessionRemove(uint scope, ulong id, string key)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(key);
+        kaya_session_remove(scope, id, raw, (nuint)raw.Length);
+    }
+
+    internal static List<RestoredWindow> SessionWindows()
+    {
+        uint count = kaya_session_window_count();
+        var windows = new List<RestoredWindow>((int)count);
+        for (uint i = 0; i < count; i++)
+        {
+            long n = kaya_session_window(i, out ulong w, out ulong active, out ulong section,
+                out uint depth, null, 0);
+            if (n < 0) break;
+            var docs = new ulong[n];
+            if (n > 0)
+                kaya_session_window(i, out _, out _, out _, out _, docs, (nuint)n);
+            windows.Add(new RestoredWindow(w, docs, active, section, depth));
+        }
+        return windows;
+    }
+
+    const int ReferenceCap = 16 * 1024;
+
+    internal static (uint Code, string Text) ReferenceMint(ulong handle)
+    {
+        byte[] into = new byte[ReferenceCap];
+        uint code = kaya_reference_mint(handle, into, (nuint)ReferenceCap, out nuint len);
+        return (code, Encoding.UTF8.GetString(into, 0, System.Math.Min((int)len, ReferenceCap)));
+    }
+
+    internal static (uint Code, ulong Handle, string Text) ReferenceRedeem(string token)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(token);
+        byte[] into = new byte[ReferenceCap];
+        uint code = kaya_reference_redeem(raw, (nuint)raw.Length, out ulong handle,
+            into, (nuint)ReferenceCap, out nuint len);
+        return (code, handle, Encoding.UTF8.GetString(into, 0, System.Math.Min((int)len, ReferenceCap)));
+    }
+
+    internal static void ReferenceForget(string token)
+    {
+        byte[] raw = Encoding.UTF8.GetBytes(token);
+        kaya_reference_forget(raw, (nuint)raw.Length);
+    }
+
+    internal static string? PickedText(ulong handle, uint field)
+    {
+        if (kaya_picked_text(handle, field, null, 0, out nuint len) == 0) return null;
+        if (len == 0) return "";
+        byte[] into = new byte[(int)len];
+        kaya_picked_text(handle, field, into, len, out nuint got);
+        return Encoding.UTF8.GetString(into, 0, System.Math.Min((int)got, (int)len));
     }
 
     [DllImport("kaya")]

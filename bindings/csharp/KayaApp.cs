@@ -2184,6 +2184,77 @@ readonly struct PrefsHandle
     public void Remove(string key) => Kaya.PrefRemove(WriteKey(key));
 }
 
+/// The session store (docs/restoration-plan.md SR3): Prefs' four types with a
+/// session's lifetime, scoped to the app, a window or a document, read before
+/// the first build and written whenever a value changes. The platform decides
+/// whether a launch continues the last (KayaApp.Restored). Do not put secrets
+/// in it (SR7).
+readonly struct SessionHandle
+{
+    readonly uint scope;
+    readonly ulong id;
+
+    internal SessionHandle(uint scope, ulong id)
+    {
+        this.scope = scope;
+        this.id = id;
+    }
+
+    static string Key(string key)
+    {
+        if (string.IsNullOrEmpty(key))
+            throw new ArgumentException("kaya: a session key must not be empty");
+        return key;
+    }
+
+    static string WriteKey(string key)
+    {
+        Key(key);
+        if (key.StartsWith("kaya.", StringComparison.Ordinal))
+            throw new ArgumentException(
+                $"kaya: session key \"{key}\" is reserved (the kaya. prefix is kaya's own)");
+        return key;
+    }
+
+    public string GetString(string key, string def) => Kaya.SessionGetString(scope, id, Key(key)) ?? def;
+
+    public long GetI64(string key, long def) => Kaya.SessionGetI64(scope, id, Key(key)) ?? def;
+
+    public double GetF64(string key, double def) => Kaya.SessionGetF64(scope, id, Key(key)) ?? def;
+
+    public bool GetBool(string key, bool def) => Kaya.SessionGetBool(scope, id, Key(key)) ?? def;
+
+    public void SetString(string key, string value) => Kaya.SessionSetString(scope, id, WriteKey(key), value);
+
+    public void SetI64(string key, long value) => Kaya.SessionSetI64(scope, id, WriteKey(key), value);
+
+    public void SetF64(string key, double value) => Kaya.SessionSetF64(scope, id, WriteKey(key), value);
+
+    public void SetBool(string key, bool value) => Kaya.SessionSetBool(scope, id, WriteKey(key), value);
+
+    public void Remove(string key) => Kaya.SessionRemove(scope, id, WriteKey(key));
+}
+
+/// One window as the last launch left it (docs/restoration-plan.md SR9):
+/// recreate it from its scope's values and hand the id back through
+/// CreateWindow's restore. ActiveDocument and Section are 0 for none.
+public readonly record struct RestoredWindow(
+    ulong Id, IReadOnlyList<ulong> Documents, ulong ActiveDocument, ulong Section, uint Depth);
+
+/// A durable reference that did not mint or redeem (docs/restoration-plan.md
+/// SR12): Refusal is one of missing, revoked, provider_gone, foreign, cap. A
+/// failed redeem does not forget the token.
+sealed class ReferenceException(string refusal, string message) : Exception(message)
+{
+    internal static readonly string[] Refusals = ["", "missing", "revoked", "provider_gone", "foreign", "cap"];
+
+    public string Refusal { get; } = refusal;
+}
+
+/// A redeemed reference: the file, and the token to keep, which is a new one
+/// when the platform re-minted it.
+public readonly record struct Redeemed(PickedFile File, string Token);
+
 sealed class KayaApp
 {
     /// This host's capabilities. Constant for the life of the process,
@@ -2266,6 +2337,52 @@ sealed class KayaApp
 
     /// The app's preferences store — one per process.
     public static PrefsHandle Prefs() => default;
+
+    /// The session store's app scope (docs/restoration-plan.md SR3).
+    public static SessionHandle Session() => new(0, 0);
+
+    /// A window's session scope, discarded with the window (SR9).
+    public static SessionHandle WindowSession(ulong window) => new(1, window);
+
+    /// A document's session scope, discarded with the document (SR9).
+    public static SessionHandle DocumentSession(ulong document) => new(2, document);
+
+    /// Which launch this is (SR6): "fresh", "resumed" or "recovered", final
+    /// before the first build.
+    public static string Restored() => new[] { "fresh", "resumed", "recovered" }[Kaya.kaya_session_restored()];
+
+    /// The windows the last launch left, the primary first; empty on a fresh
+    /// launch. A scope not taken back is discarded at the first idle after the
+    /// first build (SR9).
+    public static IReadOnlyList<RestoredWindow> RestoredWindows() => Kaya.SessionWindows();
+
+    /// An ordinary picked file for a token PickedFile.Reference minted, at this
+    /// launch or an earlier one (SR11). Throws ReferenceException.
+    public static Redeemed Redeem(string token)
+    {
+        var (code, handle, text) = Kaya.ReferenceRedeem(token);
+        if (code != 0) throw new ReferenceException(ReferenceException.Refusals[code], text);
+        var file = new PickedFile(handle, Kaya.PickedText(handle, 0) ?? "", Kaya.PickedText(handle, 1));
+        return new Redeemed(file, text);
+    }
+
+    /// Releases a reference from kaya's durable count (SR13).
+    public static void Forget(string token) => Kaya.ReferenceForget(token);
+
+    /// What Run does first (kaya_prepare_process): a host that picks its scene
+    /// from the environment calls it before reading, since act two of a
+    /// relaunch learns its scene only from the marker this adopts (docs/traps.md,
+    /// a Python guest read the session store before kaya_run).
+    /// An environment variable as the process holds it now, which a host that
+    /// picks its scene after PrepareProcess reads (docs/traps.md, a Python guest
+    /// read the session store before kaya_run).
+    public static string? Env(string name) => Kaya.Env(name);
+
+    public static void PrepareProcess()
+    {
+        Kaya.Init();
+        Kaya.kaya_prepare_process();
+    }
 
     // Work handed over by other threads, waiting to run as transactions
     // on the app thread. THE ONLY STATE HERE TOUCHED FROM ANOTHER THREAD,
@@ -7123,9 +7240,12 @@ sealed class Tx : IDisposable
         MenuItem[]? menus = null,
         bool? newDocument = null, Action<Tx>? onNewDocument = null,
         Action<Tx, List<ulong>>? onDocumentsCloseRequested = null,
-        Action<Tx, ulong, List<ulong>>? onDocumentsDetached = null)
+        Action<Tx, ulong, List<ulong>>? onDocumentsDetached = null,
+        ulong? restore = null)
     {
         Records.Add(KayaWire.TxCreateWindow(id));
+        // Takes back the session scope the window was saved under (SR9).
+        if (restore is { } saved) Kaya.kaya_session_restore(1, saved, id);
         Window(title, width, height, vetoClose, panes, dirty, rememberFrame, inset,
             sectionsPresentation,
             appearance, fullscreen, onCloseRequested, onClosed, onUndone, onRedone,
@@ -7534,9 +7654,11 @@ sealed class Tx : IDisposable
         bool? interceptClose = null,
         Action<Tx>? onSelected = null, Action<Tx>? onCloseRequested = null,
         Action<Tx>? onClosed = null, Action<Tx, ulong, uint>? onMoved = null,
-        ulong window = 0)
+        ulong window = 0, ulong? restore = null)
     {
         Records.Add(KayaWire.TxAddDocument(window, id));
+        // Takes back the session scope the document was saved under (SR9).
+        if (restore is { } saved) Kaya.kaya_session_restore(2, saved, id);
         UpdateDocument(id, title, titleSignal, tooltip, dirty, dirtySignal, interceptClose);
         if (onSelected is { } s) App.documentSelected[id] = s;
         if (onCloseRequested is { } r) App.documentCloseRequested[id] = r;
