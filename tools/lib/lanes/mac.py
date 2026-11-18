@@ -104,6 +104,9 @@ C_SCENES = ["undo", "dirty", "ranges", "save", "a11yrows", "styling",
             "safearea",
             # Network images at the floor (docs/network-images-plan.md N16).
             "netimage",
+            # The session store and the restored shape at the floor
+            # (docs/restoration-plan.md SR3, SR9).
+            "restore", "restoredocs", "references",
             # The skin at the floor (docs/styling-pass-plan.md Y10).
             "grounds", "shapes", "cards", "tracks", "dock",
             # The capture at the floor (docs/capture-plan.md, the C floor's parsers).
@@ -458,9 +461,9 @@ ORDER = [
     ("drain",),
     ("auxquit", ("rust",)),
     ("drain",),
-    ("restore", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java", "js")),
-    ("references", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java", "js")),
-    ("restoredocs", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java", "js")),
+    ("restore", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java", "js", "c")),
+    ("references", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java", "js", "c")),
+    ("restoredocs", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java", "js", "c")),
     ("drain",),
     # APP LINKS (docs/app-links-plan.md L5): the tasks guest a third
     # time, warm through NSWorkspace and cold through `open`. Alone

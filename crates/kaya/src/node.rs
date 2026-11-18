@@ -874,27 +874,25 @@ unsafe extern "C" fn session_set(env: Env, info: CbInfo) -> Value {
     let key = try_or_throw!(env, unsafe { string_arg(env, k, "sessionSet key") });
     let tag = try_or_throw!(env, unsafe { u64_arg(env, t, "sessionSet tag") });
     let (kp, kn) = (key.as_ptr(), key.len());
-    unsafe {
-        match tag {
-            0 => {
-                let value = try_or_throw!(env, string_arg(env, v, "sessionSet value"));
-                capi::kaya_session_set_string(scope, id, kp, kn, value.as_ptr(), value.len());
-            }
-            1 => {
-                let value = try_or_throw!(env, f64_arg(env, v, "sessionSet value"));
-                capi::kaya_session_set_i64(scope, id, kp, kn, value as i64);
-            }
-            2 => {
-                let value = try_or_throw!(env, f64_arg(env, v, "sessionSet value"));
-                capi::kaya_session_set_f64(scope, id, kp, kn, value);
-            }
-            _ => {
-                let value = try_or_throw!(env, u64_arg(env, v, "sessionSet value"));
-                capi::kaya_session_set_bool(scope, id, kp, kn, u8::from(value != 0));
-            }
+    match tag {
+        0 => {
+            let value = try_or_throw!(env, unsafe { string_arg(env, v, "sessionSet value") });
+            unsafe { capi::kaya_session_set_string(scope, id, kp, kn, value.as_ptr(), value.len()) };
         }
-        undefined(env)
+        1 => {
+            let value = try_or_throw!(env, unsafe { f64_arg(env, v, "sessionSet value") });
+            unsafe { capi::kaya_session_set_i64(scope, id, kp, kn, value as i64) };
+        }
+        2 => {
+            let value = try_or_throw!(env, unsafe { f64_arg(env, v, "sessionSet value") });
+            unsafe { capi::kaya_session_set_f64(scope, id, kp, kn, value) };
+        }
+        _ => {
+            let value = try_or_throw!(env, unsafe { u64_arg(env, v, "sessionSet value") });
+            unsafe { capi::kaya_session_set_bool(scope, id, kp, kn, u8::from(value != 0)) };
+        }
     }
+    unsafe { undefined(env) }
 }
 
 unsafe extern "C" fn session_remove(env: Env, info: CbInfo) -> Value {

@@ -31,6 +31,17 @@ for a `dev.kaya*` id moved during the run (docs/gates.md, How the sweep
 runs). The pre-existing `tasks.sqlite` in that directory (2026-09-09) was
 left alone.
 
+## The content-id test raced its neighbour (measured 2026-11-18)
+
+rung 1 went red once on `equal_bytes_share_an_id_and_one_allocation_hashes_once`
+("a clone of a hashed allocation is hashed again"), and twice in a row with
+the content_id filter alone: the test read the memo's hash count before and
+after ten clones, and the count was the process's, so its neighbour
+`a_freed_allocation_reused_for_new_bytes_is_hashed_again` (or any capi test
+that registers a blob) hashing on another test thread moved it. The count is
+per thread now (content_id.rs, `HASHED`). GUARD: the test still goes red with
+the memo hit cut (`return *id` replaced), sha restored.
+
 ## A Swift guest's session read raced act one's emptying (measured 2026-11-18)
 
 Run together, the restore, restoredocs and references legs went red in Swift

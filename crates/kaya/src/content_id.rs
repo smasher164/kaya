@@ -9,12 +9,11 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 struct Memo {
     by_allocation: HashMap<usize, (Weak<[u8]>, u64)>,
     prune_at: usize,
-    hashed: u64,
 }
 
 fn memo() -> &'static Mutex<Memo> {
     static MEMO: OnceLock<Mutex<Memo>> = OnceLock::new();
-    MEMO.get_or_init(|| Mutex::new(Memo { by_allocation: HashMap::new(), prune_at: 256, hashed: 0 }))
+    MEMO.get_or_init(|| Mutex::new(Memo { by_allocation: HashMap::new(), prune_at: 256 }))
 }
 
 fn hash(bytes: &[u8]) -> u64 {
@@ -36,7 +35,8 @@ pub(crate) fn of(bytes: &Arc<[u8]>) -> u64 {
         }
     }
     let id = hash(bytes);
-    m.hashed += 1;
+    #[cfg(test)]
+    HASHED.with(|h| h.set(h.get() + 1));
     m.by_allocation.insert(at, (Arc::downgrade(bytes), id));
     if m.by_allocation.len() >= m.prune_at {
         m.by_allocation.retain(|_, (weak, _)| weak.strong_count() > 0);
@@ -45,9 +45,15 @@ pub(crate) fn of(bytes: &Arc<[u8]>) -> u64 {
     id
 }
 
+// PER THREAD: the memo is the process's, and a test running beside this one
+// that hashed a blob moved a shared count (docs/traps.md, the content-id test
+// raced its neighbour).
+#[cfg(test)]
+thread_local!(static HASHED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) });
+
 #[cfg(test)]
 fn hashed() -> u64 {
-    memo().lock().unwrap().hashed
+    HASHED.with(std::cell::Cell::get)
 }
 
 #[cfg(test)]
