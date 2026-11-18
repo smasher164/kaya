@@ -16400,7 +16400,9 @@ private func kayaRunScript(_ script: String) {
                 }
                 actOne = true
                 #if os(macOS)
-                    leaveByQuit = door == "resume"
+                    // `relaunch fresh` quits the same way; the user's setting
+                    // (-NSQuitAlwaysKeepsWindows NO) is what makes it a dismissal.
+                    leaveByQuit = door == "resume" || door == "fresh"
                 #else
                     parkForPlatform = door == "resume"
                 #endif

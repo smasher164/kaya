@@ -136,8 +136,9 @@ RUST_SCENES = [
     # docs/doctabs-plan.md §1.6: the list of open documents.
     "doctabs",
     # docs/restoration-plan.md SR15: the draft, scroll and caret after the
-    # platform's continuation; the restored documents; a durable reference.
-    "restore", "restoredocs", "references",
+    # platform's continuation; the restored documents; a durable reference;
+    # the user's dismissal over the restore guest.
+    "restore", "restoredocs", "references", "restorefresh",
     # docs/font-picker-plan.md §7: UIFontPickerViewController through the
     # resident XCUITest driver.
     "fontpick",
@@ -523,7 +524,10 @@ RELAUNCH_DOOR = {"tasks": "launch-notification",
                  # THE CONTINUATION (docs/restoration-plan.md SR15): act one
                  # parks, another app takes the front, the system ends it.
                  "restore": "resume", "restoredocs": "resume",
-                 "references": "resume"}
+                 "references": "resume",
+                 # The user's dismissal: the plain launch with the session
+                 # knob (SR15; the switcher is out of the driver's reach).
+                 "restorefresh": "fresh"}
 # Which notification the door hands back: the scene's act one sets t1's
 # reminder, and a task's key IS its notification id (R2).
 RELAUNCH_NOTIFICATION = {"tasks": 1}
@@ -542,7 +546,7 @@ def swift_scene(entry):
 
 # Scene -> the cargo example it builds, where the two differ: a scene
 # selects a SCRIPT, never an app.
-RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks", "richdocax": "richdoc",
+RUST_EXAMPLE = {"restorefresh": "restore", "listdetail": "split", "taskspersist": "tasks", "richdocax": "richdoc",
                 "links": "tasks", "formatde": "format", "formatar": "format",
                 "tasksrtl": "tasks", "tasksbig": "tasks", "formatbig": "format",
                 "codesurfacebig": "codesurface",

@@ -308,6 +308,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("sheet") => sheet::app(ctx),
         Ok("doctabs") => doctabs::app(ctx),
         Ok("restore") => restore::app(ctx),
+        Ok("restorefresh") => restore::app(ctx),
         Ok("restoredocs") => restoredocs::app(ctx),
         Ok("references") => references::app(ctx),
         Ok("toast") => toast::app(ctx),

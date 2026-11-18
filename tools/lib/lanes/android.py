@@ -232,6 +232,8 @@ LEGS = {
         "farend-compose",
         # Session restoration (docs/restoration-plan.md SR15).
         "restore-compose", "restoredocs-compose", "references-compose",
+        # The user's dismissal over the restore guest (SR15).
+        "restorefresh-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",
@@ -346,7 +348,10 @@ RELAUNCH_DOOR = {"tasks": "notify_tap", "taskspersist": "launch",
                  "links": "link",
                  # THE CONTINUATION (docs/restoration-plan.md SR15): act one
                  # parks, HOME stops it, `am kill` ends it with its task kept.
-                 "restore": "resume", "restoredocs": "resume", "references": "resume"}
+                 "restore": "resume", "restoredocs": "resume", "references": "resume",
+                 # The user's dismissal: act one leaves with its task removed,
+                 # and the plain door's force-stop hands a null saved state.
+                 "restorefresh": "fresh"}
 
 # THE RECREATION LEGS' SCENE and the statement they cut in half:
 # `todos` because the model it re-projects is EARNED, and the cut is

@@ -125,7 +125,7 @@ LANGS = ("rust", "python", "go", "csharp", "ocaml", "haskell", "swift",
 # differ: the listdetail legs run split's guests (a scene selects a
 # SCRIPT, never an app). editor/portfolio/varied are single-language
 # apps whose launchers already name the right artifact.
-GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks", "windowmem": "split",
+GUEST_STEM = {"restorefresh": "restore", "listdetail": "split", "taskspersist": "tasks", "windowmem": "split",
               "links": "tasks", "formatde": "format", "formatar": "format",
               "tasksrtl": "tasks", "clock24": "format", "scrollrtl": "scroll",
               "numberfieldde": "numberfield", "numberfieldar": "numberfield",
@@ -203,6 +203,9 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "chatcall": "go", "portfolio": "pyt
                # §4): the same rust example under another script, so it
                # derives no --example of its own.
                "taskspersist": "rust",
+               # The user's dismissal over the restore guest (SR15), whose
+               # bindings restore covers.
+               "restorefresh": "rust",
                # What VoiceOver is told of a drawn list marker (docs/rich-document-plan.md RD19).
                "richdocax": "rust",
                # The split guest's dragged sidebar across a relaunch
@@ -464,6 +467,7 @@ ORDER = [
     ("restore", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java", "js", "c")),
     ("references", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java", "js", "c")),
     ("restoredocs", ("rust", "python", "go", "csharp", "swift", "ocaml", "haskell", "java", "js", "c")),
+    ("restorefresh", ("rust",)),
     ("drain",),
     # APP LINKS (docs/app-links-plan.md L5): the tasks guest a third
     # time, warm through NSWorkspace and cold through `open`. Alone
@@ -1350,6 +1354,8 @@ RELAUNCH_DOOR = {"tasks": "launch-notification", "taskspersist": "launch",
                  "restore": "resume",
                  "references": "resume",
                  "restoredocs": "resume",
+                 # The user's dismissal: the same quit with the setting off.
+                 "restorefresh": "fresh",
                  # THE LINK DOOR (docs/app-links-plan.md L5): `open` hands
                  # the URL to LaunchServices, which starts the bundle and
                  # delivers it as an Apple event 21 ms in.
@@ -1653,7 +1659,7 @@ def second_act(root, scene, argv, env, log, launch=None):
                     .strip())
             lf.write(f"{scene}: act two verdict {line}\n")
             return 0 if line.startswith("KAYA_SELFTEST: OK") else 1
-        if door in ("launch", "resume"):
+        if door in ("launch", "resume", "fresh"):
             lf.write(f"== act two: {door} ==\n")
         else:
             notification = RELAUNCH_NOTIFICATION[scene]
@@ -1699,6 +1705,8 @@ def leg_argv(scene, lang, hs_bin):
     if RELAUNCH_DOOR.get(scene) == "resume":
         # Both acts run as a user who keeps windows at a quit.
         argv = argv + ["-NSQuitAlwaysKeepsWindows", "YES"]
+    if RELAUNCH_DOOR.get(scene) == "fresh":
+        argv = argv + ["-NSQuitAlwaysKeepsWindows", "NO"]
     return argv
 
 

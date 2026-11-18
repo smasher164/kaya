@@ -161,6 +161,9 @@ def _act2(win, leg):
             continue
         suffix = f" > {_out(leg)} 2>&1"
         out.append(line[:-len(suffix)] if line.endswith(suffix) else line)
+    scene, _ = win.scene_lang(leg)
+    if win.RELAUNCH_DOOR.get(scene) == "fresh":
+        out.insert(1, "set KAYA_SESSION_TOKEN=absent")
     return out
 
 

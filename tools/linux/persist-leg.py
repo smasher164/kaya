@@ -46,7 +46,7 @@ VERDICT = "act2.verdict"
 # with the word act one prints, check-steps.py reads that line, and this
 # leg reads the same variable for the scene it runs.
 DOOR = "launch"
-DOORS = (DOOR, "resume")
+DOORS = (DOOR, "resume", "fresh")
 
 
 def scene_door(env):
@@ -70,11 +70,15 @@ def say(message):
     print(f"persist-leg: {message}", file=sys.stderr, flush=True)
 
 
-def door_env(base):
-    """The environment the plain door hands the relaunched process."""
+def door_env(base, door=DOOR):
+    """The environment the plain door hands the relaunched process; the
+    fresh door adds the session knob (docs/restoration-plan.md SR15), since
+    GTK has no dismissal to drive."""
     out = dict(base)
     for name in STRIPPED:
         out.pop(name, None)
+    if door == "fresh":
+        out["KAYA_SESSION_TOKEN"] = "absent"
     return out
 
 
@@ -177,7 +181,8 @@ def run_leg(argv, home):
     # process inherits (S9 R6): DBusActivatable=true is on the generator's
     # entry, so the door takes D-Bus activation and the started
     # process's environ is the daemon's.
-    bus = door_record.Bus(door_env(env), home / "bus.log")
+    door, _ = scene_door(env)
+    bus = door_record.Bus(door_env(env, door), home / "bus.log")
     if bus.refusal:
         say(f"no session bus: {bus.refusal}")
         return 1
@@ -273,7 +278,7 @@ def act_one_then_door(argv, env, app_id, entry, home, bus):
     say(f"the plain door: {' '.join(launcher)}")
     watch = door_record.Watch(env["XDG_STATE_HOME"],
                               bus.variables["DBUS_SESSION_BUS_PID"], started)
-    pushed = door_record.push(launcher, door_env(env), home / "door.log",
+    pushed = door_record.push(launcher, door_env(env, door), home / "door.log",
                               watch=watch)
     status = poll_verdict(verdict, started, 90.0, app_id, watch)
     door_record.report("plain", launcher, pushed,

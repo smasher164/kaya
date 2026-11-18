@@ -2253,6 +2253,11 @@ for proto in x11 wayland; do
         python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" references-c env KAYA_SELFTEST=references \
         python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh /tmp/c-guests/references
+    # The user's dismissal (SR15): no dismissal exists to drive here, so
+    # persist-leg hands act two the session knob (KAYA_SESSION_TOKEN=absent).
+    export RELAUNCH_DOOR_RESTOREFRESH=fresh
+    run "$proto" restorefresh-rust env KAYA_SELFTEST=restorefresh \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/restore"
     # FULLSCREEN (docs/fullscreen-plan.md §5), on the protocols the lane
     # table admits, with this lane's header-bar steps appended (§9).
     if scene_runs_on fullscreen "$proto"; then

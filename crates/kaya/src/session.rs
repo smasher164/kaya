@@ -587,8 +587,20 @@ fn load() -> Store {
     }
     let token = platform_token();
     let token = mac_rule(token);
+    let token = fresh_door(token);
     let (declared, token) = effective(declared, token);
     load_with(declared, token, crate::scene::declared_id().unwrap_or_default(), session_dir())
+}
+
+/// `relaunch fresh` where no dismissal can be driven (iOS, GTK, WinUI;
+/// docs/restoration-plan.md SR15): the runner's knob, honoured only in a
+/// scene run, hands the platform's no.
+fn fresh_door(token: Token) -> Token {
+    if crate::prefs::selftest() && std::env::var("KAYA_SESSION_TOKEN").as_deref() == Ok("absent") {
+        say("KAYA_SESSION: the runner's fresh door hands this launch the platform's no (KAYA_SESSION_TOKEN=absent)");
+        return Token::Absent;
+    }
+    token
 }
 
 /// `restore_always()` overrides the platform's no; a headless process writes nothing.

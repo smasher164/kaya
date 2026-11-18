@@ -1,0 +1,18 @@
+# THE USER'S DISMISSAL (docs/restoration-plan.md SR15): the restore guest's
+# state, then `relaunch fresh`, and every default after it.
+expect_title "restore"
+expect_restored fresh
+expect label#0 "launch fresh"
+set_text entry#0 "half typed"
+click button@jump
+expect_scrolled_to column@messages m30
+click button@select
+expect_selection textarea@doc "4:9=quick"
+
+relaunch fresh
+
+expect_title "restore"
+expect_restored fresh
+expect label#0 "launch fresh"
+expect entry#0 ""
+expect_scrolled_to column@messages m1

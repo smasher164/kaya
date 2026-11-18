@@ -3771,6 +3771,10 @@ def act_two(serial, name, package, component, dump, log):
     plain = "KAYA_RELAUNCH: door launch" in dump
     link = re.search(r"KAYA_RELAUNCH: door link url=(\S+)", dump)
     resume = "KAYA_RELAUNCH: door resume" in dump
+    # THE USER'S DISMISSAL (docs/restoration-plan.md SR15): act one leaves
+    # with its task removed, and the plain door's force-stop and start below
+    # hand the next activity a null saved state.
+    plain = plain or "KAYA_RELAUNCH: door fresh" in dump
     if tap is None and not plain and link is None and not resume:
         print(f"{name}: act one published ACT 1 OK and named no door — "
               f"its log carries no KAYA_RELAUNCH line, so there is nothing "
@@ -4933,11 +4937,11 @@ def run_suite_legs(suite):
         # a leg that would wait out its ceiling for a tap nobody makes.
         two_act = relaunch_count(script_text) > 0
         door = lane.RELAUNCH_DOOR.get(scene)
-        if two_act and door not in ("notify_tap", "launch", "link", "resume"):
+        if two_act and door not in ("notify_tap", "launch", "link", "resume", "fresh"):
             die(f"run-emulator: {scene}.steps carries a `relaunch` and "
                 f"lanes/android.py names its door {door!r}; this runner "
-                f"opens \"notify_tap\", \"launch\", \"link\" and \"resume\" "
-                f"and nothing else")
+                f"opens \"notify_tap\", \"launch\", \"link\", \"resume\" and "
+                f"\"fresh\" and nothing else")
         if door and not two_act:
             die(f"run-emulator: lanes/android.py names a relaunch door "
                 f"for {scene}, whose scene script has no `relaunch`")

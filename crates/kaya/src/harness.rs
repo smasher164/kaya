@@ -3960,6 +3960,8 @@ pub(crate) const PLAIN_DOOR: &str = "launch";
 pub(crate) const LINK_DOOR: &str = "link";
 /// The platform's continuation (docs/restoration-plan.md SR15).
 pub(crate) const RESUME_DOOR: &str = "resume";
+/// The user's dismissal (docs/restoration-plan.md SR15).
+pub(crate) const FRESH_DOOR: &str = "fresh";
 
 pub fn parse(script: &str) -> Result<Vec<Step>, String> {
     let mut steps = Vec::new();
@@ -4820,7 +4822,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 let arg = arg.trim();
                 if door.is_empty() {
                     Step::Relaunch(None, None)
-                } else if (door == PLAIN_DOOR || door == RESUME_DOOR) && arg.is_empty() {
+                } else if (door == PLAIN_DOOR || door == RESUME_DOOR || door == FRESH_DOOR) && arg.is_empty() {
                     Step::Relaunch(Some(door.to_owned()), None)
                 } else if door == LINK_DOOR {
                     // THE ONE DOOR WITH AN ARGUMENT: the URL the runner
@@ -4832,7 +4834,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                         "relaunch takes no argument (the notification door), \
                          `{PLAIN_DOOR}` (the plain one — the runner starts the same \
                          artifact the way a user would), `{RESUME_DOOR}` (the platform's \
-                         continuation) or `{LINK_DOOR} \"<url>\"` \
+                         continuation), `{FRESH_DOOR}` (the user's dismissal) or `{LINK_DOOR} \"<url>\"` \
                          (the platform starts it with that link), not {rest:?}: {line:?}"
                     ));
                 }

@@ -14293,15 +14293,16 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         val steps = actTwoSteps
                         when {
                             door != "notify_tap" && door != "launch" && door != "link" &&
-                                door != "resume" ->
+                                door != "resume" && door != "fresh" ->
                                 failures.add(
                                     "relaunch $door: no harness opens a door by that name " +
                                         "— `relaunch` is the notification's row in the " +
                                         "shade, `relaunch launch` is the app started the " +
                                         "way a user starts it, `relaunch link \"<url>\"` " +
                                         "is that URL opened against a process that is gone, " +
-                                        "and `relaunch resume` is the platform ending a " +
-                                        "backgrounded app and restoring it")
+                                        "`relaunch resume` is the platform ending a " +
+                                        "backgrounded app and restoring it, and `relaunch " +
+                                        "fresh` is the user removing the app's task")
                             door == "link" && linkUrl.isEmpty() -> failures.add(
                                 "relaunch link: the door takes the URL to open as its own " +
                                     "argument, and this statement names none")
@@ -14326,6 +14327,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                         when (door) {
                                             "launch" -> "KAYA_RELAUNCH: door launch"
                                             "resume" -> "KAYA_RELAUNCH: door resume"
+                                            "fresh" -> "KAYA_RELAUNCH: door fresh"
                                             "link" -> "KAYA_RELAUNCH: door link url=$linkUrl"
                                             else -> "KAYA_RELAUNCH: door notify_tap " +
                                                 "notification=${live[0].first} " +
@@ -14336,6 +14338,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                         when (door) {
                                             "launch" -> "relaunch through a plain launch"
                                             "resume" -> "relaunch through the platform's continuation"
+                                            "fresh" -> "relaunch through the user's dismissal"
                                             "link" -> "relaunch through the link $linkUrl"
                                             else -> "relaunch through notification " +
                                                 "${live[0].first}"

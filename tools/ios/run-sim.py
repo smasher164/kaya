@@ -2116,10 +2116,14 @@ def second_act(udid, bundle_id, name, scene, env, act_one_out, log):
             return False
         print(f"== act two: {door} {url} ==", file=log)
         return link_door(udid, bundle_id, name, url, verdict, log)
-    if door in ("launch", "resume"):
+    if door in ("launch", "resume", "fresh"):
         # THE PLAIN DOOR (docs/tasks-s4-plan.md P5): the bundle again,
-        # nothing pending, nothing added.
+        # nothing pending, nothing added; the fresh door adds the session
+        # knob, since the switcher's force quit is out of the driver's reach
+        # (docs/restoration-plan.md SR15).
         print(f"== act two: {door} ==", file=log)
+        if door == "fresh":
+            act2_env["SIMCTL_CHILD_KAYA_SESSION_TOKEN"] = "absent"
     else:
         notification = lane.RELAUNCH_NOTIFICATION[scene]
         print(f"== act two: {door} notification {notification} ==", file=log)

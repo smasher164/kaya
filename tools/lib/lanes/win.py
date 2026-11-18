@@ -180,10 +180,13 @@ RELAUNCH_DOOR = {"tasks": "com-activator", "taskspersist": "launch",
                  # WinUI has no rule that tells a continuation from a
                  # dismissal (docs/restoration-plan.md SR15): the plain door,
                  # through each leg's act2_<leg>.cmd (tools/lib/win_launchers.py).
-                 "restore": "resume", "restoredocs": "resume", "references": "resume"}
+                 "restore": "resume", "restoredocs": "resume", "references": "resume",
+                 # No dismissal exists to drive: act2_<leg>.cmd sets the
+                 # session knob KAYA_SESSION_TOKEN=absent.
+                 "restorefresh": "fresh"}
 # The doors that start the leg's own act-two launcher by path, so a pooled
 # neighbour cannot answer them (check-steps' relaunch clause).
-POOLED_DOORS = {"resume"}
+POOLED_DOORS = {"resume", "fresh"}
 # The door scripts the runner drives (tools/guest/, shipped by the deploy),
 # one per door.
 RELAUNCH_DOOR_SCRIPT = "relaunch-com.ps1"
@@ -321,6 +324,8 @@ ORDER = [
      # SESSION RESTORATION (docs/restoration-plan.md SR15), pooled:
      # POOLED_DOORS.
      "restore_rust", "restore_python", "restore_js", "restore_go", "restore_csharp", "restore_java", "restoredocs_rust", "restoredocs_python", "restoredocs_js", "restoredocs_go", "restoredocs_csharp", "restoredocs_java",
+     # The user's dismissal over the restore guest (SR15), the runner's door.
+     "restorefresh_rust",
      "entry_rust", "entry_python", "entry_js", "entry_go", "entry_csharp", "entry_java",
      "gallery_rust", "gallery_python", "gallery_js", "gallery_go", "gallery_csharp", "gallery_java",
      "todos_rust", "todos_python", "todos_js", "todos_go", "todos_csharp", "todos_java",
@@ -1063,7 +1068,7 @@ def act2_launcher(leg):
 
 # A scene that selects a SCRIPT over another scene's guest (the mac lane's
 # GUEST_STEM one platform over): the launcher runs the guest's own file.
-GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
+GUEST_STEM = {"restorefresh": "restore", "listdetail": "split", "formatde": "format", "formatar": "format",
               "taskspersist": "tasks", "links": "tasks", "tasksrtl": "tasks",
               "tasksbig": "tasks", "formatbig": "format", "codesurfacebig": "codesurface", "clock24": "format",
               "scrollrtl": "scroll", "numberfieldde": "numberfield", "numberfieldar": "numberfield",
