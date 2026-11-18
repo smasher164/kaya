@@ -236,7 +236,8 @@ status = 'needs ruling'
 size = 'L'
 unblocks = 'every document app'
 key = 'Session restoration'
-text = "nothing restores an app the way the user left it, and a picked file cannot be reopened next launch (the safe save of 2026-11-14 writes one safely, but holds no grant across launches). L; needs a design pass first, since the backends hold state the core never sees. Unblocks every document app, the editor's recent projects among them."
+plan = 'docs/restoration-plan.md'
+text = "DESIGNED 2026-11-17 (docs/restoration-plan.md, rulings SR1 to SR18 open): nothing restores an app the way the user left it, and a picked file cannot be reopened next launch. The plan recommends that kaya restore presentation state (scroll, caret, dividers, the window frame) by <code>a11y_id</code> on its own, that the app restore its model through a session store read before its first build, that a launch restore only when the platform says it continues the last one, and that a picked file mint a text token redeemed for a picked handle. SR1, SR3, SR6 and SR11 need the maintainer first. Unblocks every document app, the editor's recent projects among them."
 
 [[menu]]
 title = '<b>The residue pass</b>'

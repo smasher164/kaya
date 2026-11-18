@@ -4062,8 +4062,11 @@ unpicked.
   persistable grant for its own crash path, and a leftover backup's
   document handle reaches the relaunched process through it
   (docs/rich-document-plan.md §4.1), but no app can ask for one.
+  DESIGNED 2026-11-17 in docs/restoration-plan.md SR11 to SR13 (rulings
+  open): a picked file mints a text token, `redeem` answers a picked handle
+  or a why-not, `forget` releases it, and a uniform cap of 128.
   KEY: bookmark, persistence, security-scoped, persistable URI, recent
-  files, reopen across restarts
+  files, reopen across restarts, durable reference, restoration-plan
 
 - ~~**Dirty state**~~ — LANDED 2026-08-06, and CLOSED on this entry's own
   terms: all four backend arms are struck below, the window prop has its
@@ -5167,6 +5170,15 @@ unpicked.
   emitted during an undo. Do the design pass before any protocol work;
   the machinery being present is not the same as the semantics being
   obvious.
+  THE DESIGN PASS IS docs/restoration-plan.md (PROPOSED 2026-11-17, rulings
+  SR1 to SR18 open), and it corrects this entry's premise: the core holds no
+  scroll, caret, typed text or selection, so "serialize the core scene"
+  saves derived signals and misses what the user sees. Its recommendation:
+  kaya restores presentation state (scroll, caret, dividers, the frame) by
+  `a11y_id` on its own, and the app restores its model through a session
+  store; this entry closes when that build does.
+  KEY: session restoration, restore, session store, restored(), relaunch
+  resume, restoration-plan
 - **The system-integration floor** (from the survey; the editor
   triggers the first three). Four surfaces, native on every platform,
   none previously in this ledger, and collectively what separates a
