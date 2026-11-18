@@ -35,11 +35,14 @@ static class RestoredocsScene
                 var caption = tx.Signal($"{title} body");
                 tx.MountIn(id, tx.Column(root =>
                 {
-                    tx.Label(bind: caption);
+                    tx.SetA11yId(tx.Label(bind: caption), $"caption-{title}");
                     var field = tx.Entry(onChange: (_, text) =>
                         KayaApp.DocumentSession(id).SetString("body", text));
                     tx.SetA11yId(field, $"body-{title}");
                     tx.SetText(field, scope.GetString("body", ""));
+                    tx.SetA11yId(tx.Button("recall", onClick: t =>
+                        t.Write(caption, KayaApp.DocumentSession(id).GetString("title", "untitled") + " body")),
+                        $"recall-{title}");
                     return root;
                 }));
             }

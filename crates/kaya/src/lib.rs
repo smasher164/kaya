@@ -264,10 +264,34 @@ pub(crate) fn prepare_process() {
     // the iOS Python host's environment race). The preferences call it too,
     // and a claim run after this process's own check-in reads its own record
     // as another app's (docs/traps.md, the identity claim run twice).
-    static PREPARED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    if PREPARED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+    // AND THE SECOND CALLER WAITS FOR THE FIRST TO FINISH (docs/traps.md, a
+    // Swift guest's session read raced act one's emptying).
+    static PREPARED: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
+    thread_local!(static INSIDE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+    once_blocking(&PREPARED, &INSIDE, prepare_process_body);
+}
+
+/// `body` once per process; a caller on another thread blocks until it has
+/// finished, and a call from inside `body` returns at once.
+pub(crate) fn once_blocking(
+    gate: &std::sync::Mutex<bool>,
+    inside: &'static std::thread::LocalKey<std::cell::Cell<bool>>,
+    body: impl FnOnce(),
+) {
+    if inside.with(std::cell::Cell::get) {
         return;
     }
+    let mut done = gate.lock().unwrap_or_else(|e| e.into_inner());
+    if *done {
+        return;
+    }
+    inside.with(|i| i.set(true));
+    body();
+    inside.with(|i| i.set(false));
+    *done = true;
+}
+
+fn prepare_process_body() {
     // BEFORE EVERYTHING ELSE, since a respawn runs this process again
     // (docs/traps.md, the Preview a Go guest's checkin relaunched).
     #[cfg(target_os = "macos")]
@@ -397,5 +421,30 @@ pub fn appearance_raw(mode: Appearance) -> i64 {
         Appearance::System => 0,
         Appearance::Light => 1,
         Appearance::Dark => 2,
+    }
+}
+
+#[cfg(test)]
+mod prepare_tests {
+    use std::sync::atomic::{AtomicU8, Ordering};
+
+    #[test]
+    fn a_second_caller_waits_for_the_first_to_finish() {
+        static GATE: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
+        thread_local!(static INSIDE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+        static STATE: AtomicU8 = AtomicU8::new(0);
+        let (entered, wait) = std::sync::mpsc::channel();
+        let first = std::thread::spawn(move || {
+            super::once_blocking(&GATE, &INSIDE, || {
+                entered.send(()).unwrap();
+                super::once_blocking(&GATE, &INSIDE, || panic!("ran from inside itself"));
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                STATE.store(1, Ordering::SeqCst);
+            })
+        });
+        wait.recv().unwrap();
+        super::once_blocking(&GATE, &INSIDE, || panic!("ran twice"));
+        assert_eq!(STATE.load(Ordering::SeqCst), 1, "the second caller returned before the first finished");
+        first.join().unwrap();
     }
 }

@@ -1156,14 +1156,19 @@ def ls_identity_findings(root):
         return [f"{LS_LIB}: no `pub(crate) fn prepare_process()` to read"]
     code = [ln.strip() for ln in prep.splitlines()
             if ln.strip() and not ln.strip().startswith("//")]
-    head = ["static PREPARED: std::sync::atomic::AtomicBool = "
-            "std::sync::atomic::AtomicBool::new(false);",
-            "if PREPARED.swap(true, std::sync::atomic::Ordering::SeqCst) {", "return;", "}",
-            '#[cfg(target_os = "macos")]', "ls_identity::claim_own_identity();"]
-    if code[:6] != head:
+    guard = ["static PREPARED: std::sync::Mutex<bool> = std::sync::Mutex::new(false);",
+             "thread_local!(static INSIDE: std::cell::Cell<bool> = "
+             "const { std::cell::Cell::new(false) });",
+             "once_blocking(&PREPARED, &INSIDE, prepare_process_body);"]
+    once = rust_fn_body(texts[LS_LIB], "fn prepare_process_body()") or ""
+    first = [ln.strip() for ln in once.splitlines()
+             if ln.strip() and not ln.strip().startswith("//")][:2]
+    head = ['#[cfg(target_os = "macos")]', "ls_identity::claim_own_identity();"]
+    if code != guard or first != head:
         bad.append(f"{LS_LIB}: prepare_process's first statement is not "
                    f"`ls_identity::claim_own_identity();` under cfg macos right after its "
-                   f"run-once guard (it begins {code[:6]!r}); anything before it runs twice "
+                   f"run-once guard (it reads {code!r}, then {first!r}); "
+                   f"anything before it runs twice "
                    f"when the process respawns, anything that checks in before it registers "
                    f"under the record the pid holds, and a claim outside the guard reads this "
                    f"process's own record on every later call (docs/traps.md, the identity "
@@ -1744,12 +1749,9 @@ for _tag, _rel, _pat, _repl, _want in (
      r"    ls_identity::claim_own_identity\(\);", "",
      "first statement is not `ls_identity::claim_own_identity();`"),
     ("lsunguarded", LS_LIB,
-     r"(\n    static PREPARED: std::sync::atomic::AtomicBool = "
-     r"std::sync::atomic::AtomicBool::new\(false\);\n"
-     r"    if PREPARED\.swap\(true, std::sync::atomic::Ordering::SeqCst\) \{\n"
-     r"        return;\n    \}\n)"
+     r"(    once_blocking\(&PREPARED, &INSIDE, prepare_process_body\);\n)"
      r"(.*?)(    #\[cfg\(target_os = \"macos\"\)\]\n"
-     r"    ls_identity::claim_own_identity\(\);\n)", r"\n\3\1\2",
+     r"    ls_identity::claim_own_identity\(\);\n)", r"\3\1\2",
      "first statement is not `ls_identity::claim_own_identity();`"),
     ("lslate", LS_LIB,
      r"(\n    #\[cfg\(target_os = \"macos\"\)\]\n    ls_identity::claim_own_identity\(\);)"

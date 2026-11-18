@@ -554,6 +554,20 @@ fn load_with(declared: Declared, token: Token, app_id: String, dir: Option<PathB
     }
     let text = std::fs::read_to_string(dir.join(FILE)).ok();
     let swept = sweep(text.as_deref(), &app_id, declared.restore_version, &token);
+    if crate::prefs::selftest() {
+        let age = std::fs::metadata(dir.join(FILE))
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .map_or("no file".to_owned(), |a| format!("written {} ms ago", a.as_millis()));
+        say(&format!(
+            "KAYA_SESSION: pid {} loaded {:?} from {} ({} bytes there, {age}, token {token:?})",
+            std::process::id(),
+            swept.restored,
+            dir.display(),
+            text.as_ref().map_or(0, String::len)
+        ));
+    }
     if let Some(why) = &swept.why {
         say(why);
     }
@@ -839,7 +853,11 @@ pub(crate) fn clear_selftest_scratch() {
         return;
     }
     if let Some(dir) = session_dir() {
-        let _ = std::fs::remove_file(dir.join(FILE));
+        let removed = match std::fs::remove_file(dir.join(FILE)) {
+            Ok(()) => "removed the file".to_owned(),
+            Err(e) => format!("removed nothing ({e})"),
+        };
+        say(&format!("KAYA_SESSION: pid {} act one emptied {}: {removed}", std::process::id(), dir.display()));
     }
     if let Some(dir) = store_dir("kaya-references") {
         let _ = std::fs::remove_dir_all(dir);

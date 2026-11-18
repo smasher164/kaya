@@ -24,6 +24,10 @@ def typed(did: int):
     return lambda text: kaya.document_session(did).set("body", text)
 
 
+def recall(did: int, caption):
+    return lambda: caption.set(kaya.document_session(did).get("title", "untitled") + " body")
+
+
 with app.window(title="restoredocs", width=640, height=420):
     pass
 
@@ -33,8 +37,9 @@ for did in documents:
     with app.add_document(did, title=title, restore=did):
         caption = kaya.signal(f"{title} body")
         with kaya.column():
-            kaya.label(bind=caption)
+            kaya.label(bind=caption).a11y_id(f"caption-{title}")
             kaya.entry(scope.get("body", ""), on_change=typed(did)).a11y_id(f"body-{title}")
+            kaya.button("recall", on_click=recall(did, caption)).a11y_id(f"recall-{title}")
 
 with app.build():
     if active is not None:

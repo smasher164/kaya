@@ -1830,7 +1830,7 @@ public struct KayaPickedFile: Sendable {
     /// A RE-OPENABLE NAME, nil unless re-opening it actually works —
     /// measurement puts that at the three desktops and neither phone
     /// (DESIGN.md, File dialogs).
-    let localPath: String?
+    public let localPath: String?
 
     init(handle: UInt64, name: String, localPath: String) {
         self.handle = handle
@@ -1855,6 +1855,19 @@ public struct KayaPickedFile: Sendable {
                     "kaya: opening the picked file failed (code \(rc))"])
         }
         return (FileHandle(fileDescriptor: Int32(raw), closeOnDealloc: true), seekable != 0)
+    }
+
+    /// A durable reference to this file (docs/restoration-plan.md SR11): a
+    /// token to keep in the session store or the app's own data, redeemed at
+    /// a later launch by `KayaApp.redeem`.
+    public func reference() throws -> String {
+        let (code, text) = kayaCoded { out, cap, len in
+            kaya_reference_mint(handle, out, cap, len)
+        }
+        guard code == 0 else {
+            throw KayaReferenceError(refusal: KayaReferenceError.refusals[Int(code)], message: text)
+        }
+        return text
     }
 
     /// THE SAFE SAVE (docs/rich-document-plan.md §4.1): on return the
@@ -2168,13 +2181,15 @@ struct KayaPrefs {
 /// The four wire-storable primitive types a preference may hold
 /// (docs/tasks-s4-plan.md P2/P3); `KayaPrefs.get`/`set` resolve to one
 /// of these four by the call site's inferred type.
-protocol KayaPrefValue {
+public protocol KayaPrefValue {
     static func kayaPrefGet(_ raw: [UInt8], default def: Self) -> Self
     static func kayaPrefSet(_ raw: [UInt8], _ value: Self)
+    static func kayaSessionGet(_ at: KayaSession, _ raw: [UInt8], default def: Self) -> Self
+    static func kayaSessionSet(_ at: KayaSession, _ raw: [UInt8], _ value: Self)
 }
 
 extension String: KayaPrefValue {
-    static func kayaPrefGet(_ raw: [UInt8], default def: String) -> String {
+    public static func kayaPrefGet(_ raw: [UInt8], default def: String) -> String {
         var len = UInt(0)
         let present = raw.withUnsafeBufferPointer { k in
             kaya_pref_get_string(k.baseAddress, UInt(k.count), nil, 0, &len)
@@ -2192,7 +2207,7 @@ extension String: KayaPrefValue {
         return String(decoding: out[0..<Int(len)], as: UTF8.self)
     }
 
-    static func kayaPrefSet(_ raw: [UInt8], _ value: String) {
+    public static func kayaPrefSet(_ raw: [UInt8], _ value: String) {
         let packed = Array(value.utf8)
         raw.withUnsafeBufferPointer { k in
             packed.withUnsafeBufferPointer { v in
@@ -2204,7 +2219,7 @@ extension String: KayaPrefValue {
 }
 
 extension Int64: KayaPrefValue {
-    static func kayaPrefGet(_ raw: [UInt8], default def: Int64) -> Int64 {
+    public static func kayaPrefGet(_ raw: [UInt8], default def: Int64) -> Int64 {
         var out: Int64 = 0
         let present = raw.withUnsafeBufferPointer { k in
             kaya_pref_get_i64(k.baseAddress, UInt(k.count), &out)
@@ -2212,7 +2227,7 @@ extension Int64: KayaPrefValue {
         return present == 0 ? def : out
     }
 
-    static func kayaPrefSet(_ raw: [UInt8], _ value: Int64) {
+    public static func kayaPrefSet(_ raw: [UInt8], _ value: Int64) {
         raw.withUnsafeBufferPointer { k in
             kaya_pref_set_i64(k.baseAddress, UInt(k.count), value)
         }
@@ -2225,17 +2240,17 @@ extension Int64: KayaPrefValue {
 /// cites, conforms Int first). It forwards to the Int64 arm; the store
 /// has one integer channel.
 extension Int: KayaPrefValue {
-    static func kayaPrefGet(_ raw: [UInt8], default def: Int) -> Int {
+    public static func kayaPrefGet(_ raw: [UInt8], default def: Int) -> Int {
         Int(Int64.kayaPrefGet(raw, default: Int64(def)))
     }
 
-    static func kayaPrefSet(_ raw: [UInt8], _ value: Int) {
+    public static func kayaPrefSet(_ raw: [UInt8], _ value: Int) {
         Int64.kayaPrefSet(raw, Int64(value))
     }
 }
 
 extension Double: KayaPrefValue {
-    static func kayaPrefGet(_ raw: [UInt8], default def: Double) -> Double {
+    public static func kayaPrefGet(_ raw: [UInt8], default def: Double) -> Double {
         var out: Double = 0
         let present = raw.withUnsafeBufferPointer { k in
             kaya_pref_get_f64(k.baseAddress, UInt(k.count), &out)
@@ -2243,7 +2258,7 @@ extension Double: KayaPrefValue {
         return present == 0 ? def : out
     }
 
-    static func kayaPrefSet(_ raw: [UInt8], _ value: Double) {
+    public static func kayaPrefSet(_ raw: [UInt8], _ value: Double) {
         raw.withUnsafeBufferPointer { k in
             kaya_pref_set_f64(k.baseAddress, UInt(k.count), value)
         }
@@ -2251,7 +2266,7 @@ extension Double: KayaPrefValue {
 }
 
 extension Bool: KayaPrefValue {
-    static func kayaPrefGet(_ raw: [UInt8], default def: Bool) -> Bool {
+    public static func kayaPrefGet(_ raw: [UInt8], default def: Bool) -> Bool {
         var out: UInt8 = 0
         let present = raw.withUnsafeBufferPointer { k in
             kaya_pref_get_bool(k.baseAddress, UInt(k.count), &out)
@@ -2259,11 +2274,194 @@ extension Bool: KayaPrefValue {
         return present == 0 ? def : out != 0
     }
 
-    static func kayaPrefSet(_ raw: [UInt8], _ value: Bool) {
+    public static func kayaPrefSet(_ raw: [UInt8], _ value: Bool) {
         raw.withUnsafeBufferPointer { k in
             kaya_pref_set_bool(k.baseAddress, UInt(k.count), value ? 1 : 0)
         }
     }
+}
+
+/// The session store (docs/restoration-plan.md SR3): the preferences' four
+/// types with a session's lifetime, scoped to the app, a window or a
+/// document, read before the first build and written whenever a value
+/// changes. The platform decides whether a launch continues the last
+/// (`KayaApp.restored()`). Do not put secrets in it (SR7).
+public struct KayaSession: Sendable {
+    let scope: UInt32
+    let id: UInt64
+
+    private static func key(_ name: String) -> [UInt8] {
+        precondition(!name.isEmpty, "kaya: a session key must not be empty")
+        return Array(name.utf8)
+    }
+
+    private static func writeKey(_ name: String) -> [UInt8] {
+        let raw = key(name)
+        precondition(
+            !name.hasPrefix("kaya."),
+            "kaya: session key \"\(name)\" is reserved "
+                + "(the kaya. prefix is kaya's own)")
+        return raw
+    }
+
+    public func get<V: KayaPrefValue>(_ name: String, default def: V) -> V {
+        V.kayaSessionGet(self, KayaSession.key(name), default: def)
+    }
+
+    public func set<V: KayaPrefValue>(_ name: String, _ value: V) {
+        V.kayaSessionSet(self, KayaSession.writeKey(name), value)
+    }
+
+    public subscript<V: KayaPrefValue>(name: String, default def: V) -> V {
+        get { get(name, default: def) }
+        nonmutating set { set(name, newValue) }
+    }
+
+    public func remove(_ name: String) {
+        let raw = KayaSession.writeKey(name)
+        raw.withUnsafeBufferPointer { k in
+            kaya_session_remove(scope, id, k.baseAddress, UInt(k.count))
+        }
+    }
+}
+
+extension String {
+    public static func kayaSessionGet(_ at: KayaSession, _ raw: [UInt8], default def: String) -> String {
+        var len = UInt(0)
+        let present = raw.withUnsafeBufferPointer { k in
+            kaya_session_get_string(at.scope, at.id, k.baseAddress, UInt(k.count), nil, 0, &len)
+        }
+        if present == 0 { return def }
+        if len == 0 { return "" }
+        var out = [UInt8](repeating: 0, count: Int(len))
+        let ok = out.withUnsafeMutableBufferPointer { buf -> Int32 in
+            raw.withUnsafeBufferPointer { k in
+                kaya_session_get_string(
+                    at.scope, at.id, k.baseAddress, UInt(k.count), buf.baseAddress, len, &len)
+            }
+        }
+        if ok == 0 { return def }
+        return String(decoding: out[0..<Int(len)], as: UTF8.self)
+    }
+
+    public static func kayaSessionSet(_ at: KayaSession, _ raw: [UInt8], _ value: String) {
+        let packed = Array(value.utf8)
+        raw.withUnsafeBufferPointer { k in
+            packed.withUnsafeBufferPointer { v in
+                kaya_session_set_string(
+                    at.scope, at.id, k.baseAddress, UInt(k.count), v.baseAddress, UInt(v.count))
+            }
+        }
+    }
+}
+
+extension Int64 {
+    public static func kayaSessionGet(_ at: KayaSession, _ raw: [UInt8], default def: Int64) -> Int64 {
+        var out: Int64 = 0
+        let present = raw.withUnsafeBufferPointer { k in
+            kaya_session_get_i64(at.scope, at.id, k.baseAddress, UInt(k.count), &out)
+        }
+        return present == 0 ? def : out
+    }
+
+    public static func kayaSessionSet(_ at: KayaSession, _ raw: [UInt8], _ value: Int64) {
+        raw.withUnsafeBufferPointer { k in
+            kaya_session_set_i64(at.scope, at.id, k.baseAddress, UInt(k.count), value)
+        }
+    }
+}
+
+extension Int {
+    public static func kayaSessionGet(_ at: KayaSession, _ raw: [UInt8], default def: Int) -> Int {
+        Int(Int64.kayaSessionGet(at, raw, default: Int64(def)))
+    }
+
+    public static func kayaSessionSet(_ at: KayaSession, _ raw: [UInt8], _ value: Int) {
+        Int64.kayaSessionSet(at, raw, Int64(value))
+    }
+}
+
+extension Double {
+    public static func kayaSessionGet(_ at: KayaSession, _ raw: [UInt8], default def: Double) -> Double {
+        var out: Double = 0
+        let present = raw.withUnsafeBufferPointer { k in
+            kaya_session_get_f64(at.scope, at.id, k.baseAddress, UInt(k.count), &out)
+        }
+        return present == 0 ? def : out
+    }
+
+    public static func kayaSessionSet(_ at: KayaSession, _ raw: [UInt8], _ value: Double) {
+        raw.withUnsafeBufferPointer { k in
+            kaya_session_set_f64(at.scope, at.id, k.baseAddress, UInt(k.count), value)
+        }
+    }
+}
+
+extension Bool {
+    public static func kayaSessionGet(_ at: KayaSession, _ raw: [UInt8], default def: Bool) -> Bool {
+        var out: UInt8 = 0
+        let present = raw.withUnsafeBufferPointer { k in
+            kaya_session_get_bool(at.scope, at.id, k.baseAddress, UInt(k.count), &out)
+        }
+        return present == 0 ? def : out != 0
+    }
+
+    public static func kayaSessionSet(_ at: KayaSession, _ raw: [UInt8], _ value: Bool) {
+        raw.withUnsafeBufferPointer { k in
+            kaya_session_set_bool(at.scope, at.id, k.baseAddress, UInt(k.count), value ? 1 : 0)
+        }
+    }
+}
+
+/// One window as the last launch left it (docs/restoration-plan.md SR9):
+/// recreate it from its scope's values and hand the id back through
+/// createWindow's `restore:`. `activeDocument` and `section` are 0 for none.
+public struct KayaRestoredWindow: Sendable {
+    public let id: UInt64
+    public let documents: [UInt64]
+    public let activeDocument: UInt64
+    public let section: UInt64
+    public let depth: UInt32
+}
+
+/// A durable reference that did not mint or redeem (docs/restoration-plan.md
+/// SR12): `refusal` is one of missing, revoked, provider_gone, foreign, cap.
+/// A failed redeem does not forget the token.
+public struct KayaReferenceError: Error, Sendable {
+    public let refusal: String
+    public let message: String
+
+    static let refusals = ["", "missing", "revoked", "provider_gone", "foreign", "cap"]
+}
+
+/// A redeemed reference: the file, and the token to keep, which is a new one
+/// when the platform re-minted it.
+public struct KayaRedeemed: Sendable {
+    public let file: KayaPickedFile
+    public let token: String
+}
+
+/// The floor's answer-or-sentence shape read twice (kaya_reference_*).
+func kayaCoded(_ ask: (UnsafeMutablePointer<UInt8>?, UInt, UnsafeMutablePointer<UInt>) -> UInt32)
+    -> (UInt32, String)
+{
+    var len = UInt(0)
+    var code = ask(nil, 0, &len)
+    var out = [UInt8](repeating: 0, count: Int(len))
+    if len > 0 {
+        code = out.withUnsafeMutableBufferPointer { buf in ask(buf.baseAddress, len, &len) }
+    }
+    return (code, String(decoding: out[0..<min(Int(len), out.count)], as: UTF8.self))
+}
+
+func kayaPickedText(_ handle: UInt64, _ field: UInt32) -> String {
+    var len = UInt(0)
+    guard kaya_picked_text(handle, field, nil, 0, &len) == 1, len > 0 else { return "" }
+    var out = [UInt8](repeating: 0, count: Int(len))
+    _ = out.withUnsafeMutableBufferPointer { buf in
+        kaya_picked_text(handle, field, buf.baseAddress, len, &len)
+    }
+    return String(decoding: out[0..<min(Int(len), out.count)], as: UTF8.self)
 }
 
 // --- Rich text (docs/rich-text-plan.md R1) ---------------------------
@@ -2897,6 +3095,68 @@ public final class KayaApp {
 
     /// The app's preferences store — one per process.
     static func prefs() -> KayaPrefs { KayaPrefs() }
+
+    /// The session store's app scope (docs/restoration-plan.md SR3).
+    public static func session() -> KayaSession { KayaSession(scope: 0, id: 0) }
+
+    /// A window's session scope, discarded with the window (SR9).
+    public static func windowSession(_ window: UInt64) -> KayaSession {
+        KayaSession(scope: 1, id: window)
+    }
+
+    /// A document's session scope, discarded with the document (SR9).
+    public static func documentSession(_ document: UInt64) -> KayaSession {
+        KayaSession(scope: 2, id: document)
+    }
+
+    /// Which launch this is (SR6): "fresh", "resumed" or "recovered", final
+    /// before the first build.
+    public static func restored() -> String {
+        ["fresh", "resumed", "recovered"][Int(kaya_session_restored())]
+    }
+
+    /// The windows the last launch left, the primary first; empty on a fresh
+    /// launch. A scope not taken back is discarded at the first idle after
+    /// the first build (SR9).
+    public static func restoredWindows() -> [KayaRestoredWindow] {
+        (0..<kaya_session_window_count()).compactMap { i in
+            var window: UInt64 = 0, active: UInt64 = 0, section: UInt64 = 0
+            var depth: UInt32 = 0
+            let count = kaya_session_window(i, &window, &active, &section, &depth, nil, 0)
+            guard count >= 0 else { return nil }
+            var docs = [UInt64](repeating: 0, count: Int(count))
+            _ = docs.withUnsafeMutableBufferPointer { buf in
+                kaya_session_window(i, nil, nil, nil, nil, buf.baseAddress, UInt(count))
+            }
+            return KayaRestoredWindow(
+                id: window, documents: docs, activeDocument: active, section: section,
+                depth: depth)
+        }
+    }
+
+    /// An ordinary picked file for a token `KayaPickedFile.reference()`
+    /// minted, at this launch or an earlier one (SR11).
+    public static func redeem(_ token: String) throws -> KayaRedeemed {
+        let raw = Array(token.utf8)
+        var handle: UInt64 = 0
+        let (code, text) = raw.withUnsafeBufferPointer { t in
+            kayaCoded { out, cap, len in
+                kaya_reference_redeem(t.baseAddress, UInt(t.count), &handle, out, cap, len)
+            }
+        }
+        guard code == 0 else {
+            throw KayaReferenceError(refusal: KayaReferenceError.refusals[Int(code)], message: text)
+        }
+        let file = KayaPickedFile(
+            handle: handle, name: kayaPickedText(handle, 0), localPath: kayaPickedText(handle, 1))
+        return KayaRedeemed(file: file, token: text)
+    }
+
+    /// Releases a reference from kaya's durable count (SR13).
+    public static func forget(_ token: String) {
+        let raw = Array(token.utf8)
+        raw.withUnsafeBufferPointer { t in kaya_reference_forget(t.baseAddress, UInt(t.count)) }
+    }
 
     /// The formatter door (docs/compliance-plan.md §1.4): `KayaApp.fmt.date(d, .medium)`.
     public static var fmt: KayaFmt.Type { KayaFmt.self }
@@ -7037,9 +7297,11 @@ public final class KayaAppTx {
         newDocument: Bool? = nil,
         onNewDocument: ((KayaAppTx) throws -> Void)? = nil,
         onDocumentsCloseRequested: ((KayaAppTx, [UInt64]) throws -> Void)? = nil,
-        onDocumentsDetached: ((KayaAppTx, UInt64, [UInt64]) throws -> Void)? = nil
+        onDocumentsDetached: ((KayaAppTx, UInt64, [UInt64]) throws -> Void)? = nil,
+        restore: UInt64? = nil
     ) {
         tx.createWindow(id)
+        if let restore { kaya_session_restore(1, restore, id) }
         window(
             id, title: title, width: width, height: height,
             vetoClose: vetoClose, dirty: dirty, rememberFrame: rememberFrame,
@@ -7458,9 +7720,10 @@ public final class KayaAppTx {
         onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
         onClosed: ((KayaAppTx) throws -> Void)? = nil,
         onMoved: ((KayaAppTx, UInt64, UInt32) throws -> Void)? = nil,
-        window: UInt64 = 0
+        window: UInt64 = 0, restore: UInt64? = nil
     ) {
         tx.addDocument(window, id)
+        if let restore { kaya_session_restore(2, restore, id) }
         updateDocument(
             id, title: title, titleSignal: titleSignal, tooltip: tooltip, dirty: dirty,
             dirtySignal: dirtySignal, interceptClose: interceptClose)

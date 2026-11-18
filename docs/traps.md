@@ -31,6 +31,23 @@ for a `dev.kaya*` id moved during the run (docs/gates.md, How the sweep
 runs). The pre-existing `tasks.sqlite` in that directory (2026-09-09) was
 left alone.
 
+## A Swift guest's session read raced act one's emptying (measured 2026-11-18)
+
+Run together, the restore, restoredocs and references legs went red in Swift
+two runs in three: act one read `restored resumed` with the LAST run's state,
+or act two read a fresh store under KAYA_SCRATCH_STORES. The session lines
+(session.rs, `KAYA_SESSION: pid ... act one emptied` / `loaded ... N bytes
+there, written ... / no file`) settled it: one pid read 626 bytes and then
+found no file, so the read ran BEFORE the emptying, on another thread. A
+Swift guest's closure runs on the app thread while the main thread is still
+inside `prepare_process`, and its once was a bare flag: the second caller
+returned while the first was mid-way (before `act2::arm` emptied the scratch,
+or before act two adopted its marker). `prepare_process` is now
+`once_blocking`: a caller on another thread waits for the first to finish; a
+call from inside it returns at once. GUARD: the unit test
+`a_second_caller_waits_for_the_first_to_finish`, watched red with the flag
+shape restored, sha restored; the fifteen legs green twice after.
+
 ## A Python guest read the session store before kaya_run (measured 2026-11-18)
 
 The first Python run of the restore scene went red in act two with

@@ -134,6 +134,7 @@ def generate(tmp):
                        "guests/swift/toast.swift",
                        "guests/swift/submit.swift",
                        "guests/swift/scrollto.swift",
+                       "guests/swift/restore.swift",
                        "guests/swift/dnd.swift",
                        "guests/swift/undo.swift",
                        "guests/swift/table.swift",

@@ -34,10 +34,13 @@ func App() *kaya.App {
 			caption := tx.Signal(title + " body")
 			var field kaya.Widget
 			tx.MountIn(id, tx.Column(func() {
-				tx.Label(caption)
+				tx.Label(caption).A11yID("caption-" + title)
 				field = tx.Entry(func(_ *kaya.Tx, text string) {
 					scope.SetString("body", text)
 				}).A11yID("body-" + title)
+				tx.Button("recall", func(tx *kaya.Tx) {
+					tx.Write(caption, kaya.DocumentSession(id).GetString("title", "untitled")+" body")
+				}).A11yID("recall-" + title)
 			}))
 			tx.SetText(field, scope.GetString("body", ""))
 		}
