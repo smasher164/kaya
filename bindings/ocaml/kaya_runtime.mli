@@ -176,3 +176,20 @@ val capture_thread_counts : unit -> int * int
 val fmt_timecode : int64 -> int64 -> int64 -> bool -> string option
 val fmt_duration : int64 -> string option
 val fmt_parse_timecode : string -> int64 -> int64 -> bool -> int64 option
+
+val session_get_string : int -> int64 -> string -> string option
+val session_get_i64 : int -> int64 -> string -> int64 option
+val session_get_f64 : int -> int64 -> string -> float option
+val session_get_bool : int -> int64 -> string -> bool option
+val session_set_string : int -> int64 -> string -> string -> unit
+val session_set_i64 : int -> int64 -> string -> int64 -> unit
+val session_set_f64 : int -> int64 -> string -> float -> unit
+val session_set_bool : int -> int64 -> string -> bool -> unit
+val session_remove : int -> int64 -> string -> unit
+val session_restored : unit -> int
+val session_restore : int -> int64 -> int64 -> unit
+val session_windows : unit -> (int64 * int64 list * int64 * int64 * int) list
+val reference_mint : int64 -> int * string
+val reference_redeem : string -> int * int64 * string
+val reference_forget : string -> unit
+val picked_text : int64 -> int -> string

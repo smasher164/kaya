@@ -151,6 +151,59 @@ let the_prefs =
 (* The app's preferences store -- one per process. *)
 let prefs () = the_prefs
 
+(* The session store (docs/restoration-plan.md SR3): the preferences' four
+   types with a session's lifetime, scoped to the app, a window or a
+   document. Do not put secrets in it (SR7). *)
+let session_key key =
+  if String.length key = 0 then failwith "kaya: a session key must not be empty";
+  key
+
+let session_write_key key =
+  ignore (session_key key);
+  if String.length key >= 5 && String.sub key 0 5 = "kaya." then
+    failwith
+      (Printf.sprintf "kaya: session key \"%s\" is reserved (the kaya. prefix is kaya's own)" key);
+  key
+
+let session_scope scope id =
+  let open Kaya_runtime in
+  {
+    get_string = (fun key d -> Option.value (session_get_string scope id (session_key key)) ~default:d);
+    get_i64 = (fun key d -> Option.value (session_get_i64 scope id (session_key key)) ~default:d);
+    get_f64 = (fun key d -> Option.value (session_get_f64 scope id (session_key key)) ~default:d);
+    get_bool = (fun key d -> Option.value (session_get_bool scope id (session_key key)) ~default:d);
+    set_string = (fun key v -> session_set_string scope id (session_write_key key) v);
+    set_i64 = (fun key v -> session_set_i64 scope id (session_write_key key) v);
+    set_f64 = (fun key v -> session_set_f64 scope id (session_write_key key) v);
+    set_bool = (fun key v -> session_set_bool scope id (session_write_key key) v);
+    remove = (fun key -> session_remove scope id (session_write_key key));
+  }
+
+let session () = session_scope 0 0L
+let window_session id = session_scope 1 id
+let document_session id = session_scope 2 id
+
+let restored () =
+  match Kaya_runtime.session_restored () with 1 -> "resumed" | 2 -> "recovered" | _ -> "fresh"
+
+type restored_window = {
+  id : int64;
+  documents : int64 list;
+  active_document : int64;
+  section : int64;
+  depth : int;
+}
+
+let restored_windows () =
+  List.map
+    (fun (id, documents, active_document, section, depth) ->
+      { id; documents; active_document; section; depth })
+    (Kaya_runtime.session_windows ())
+
+exception Reference_error of string * string
+
+let refusals = [| ""; "missing"; "revoked"; "provider_gone"; "foreign"; "cap" |]
+
 (* A live menu item: its OWN id space (the c_menu_item counter) behind its
    own constructor, so cross-use with widget or node handles is a type
    error. *)
@@ -4844,9 +4897,10 @@ let create_window ?title ?width ?height ?inset ?veto_close ?dirty
     ?remember_frame ?panes
     ?sections_presentation ?appearance ?fullscreen
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?on_fullscreen_changed ?menus
-    ?new_document ?on_new_document ?on_documents_close_requested ?on_documents_detached id =
+    ?new_document ?on_new_document ?on_documents_close_requested ?on_documents_detached ?restore id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_create_window id);
+  Option.iter (fun saved -> Kaya_runtime.session_restore 1 saved id) restore;
   window ?title ?width ?height ?inset ?veto_close ?dirty ?remember_frame
     ?panes
     ?sections_presentation ?appearance ?fullscreen
@@ -4950,9 +5004,10 @@ let update_document ?title ?title_bind ?tooltip ?dirty ?dirty_bind ?intercept_cl
    [~on_closed] when the user closed it unarmed, one-shot; [~on_moved window
    index] when the user drags it. A programmatic select or close fires none. *)
 let add_document ?(window = 0L) ?title ?title_bind ?tooltip ?dirty ?dirty_bind
-    ?intercept_close ?on_selected ?on_close_requested ?on_closed ?on_moved id =
+    ?intercept_close ?on_selected ?on_close_requested ?on_closed ?on_moved ?restore id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_add_document window id);
+  Option.iter (fun saved -> Kaya_runtime.session_restore 2 saved id) restore;
   update_document ?title ?title_bind ?tooltip ?dirty ?dirty_bind ?intercept_close id;
   Option.iter (fun f -> Hashtbl.replace tx.app.document_selected id f) on_selected;
   Option.iter (fun f -> Hashtbl.replace tx.app.document_close_requested id f) on_close_requested;
@@ -5515,6 +5570,24 @@ let set_reorderable (Widget id) enabled =
    from a thread you chose and post the result back. *)
 let open_picked file mode =
   Kaya_runtime.open_picked file.handle (File_mode.wire mode)
+
+type redeemed = { file : picked_file; token : string }
+
+let reference (file : picked_file) =
+  match Kaya_runtime.reference_mint file.handle with
+  | 0, token -> token
+  | code, message -> raise (Reference_error (refusals.(code), message))
+
+let redeem token =
+  match Kaya_runtime.reference_redeem token with
+  | 0, handle, token ->
+      let file =
+        { handle; name = Kaya_runtime.picked_text handle 0; local_path = Kaya_runtime.picked_text handle 1 }
+      in
+      { file; token }
+  | code, _, message -> raise (Reference_error (refusals.(code), message))
+
+let forget token = Kaya_runtime.reference_forget token
 
 (* THE SAFE SAVE (docs/rich-document-plan.md §4.1). *)
 let save_picked file bytes = Kaya_runtime.save_picked file.handle bytes

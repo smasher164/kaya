@@ -52,6 +52,22 @@ module KayaRuntime
     prefSetF64,
     prefSetBool,
     prefRemove,
+    sessionGetString,
+    sessionGetI64,
+    sessionGetF64,
+    sessionGetBool,
+    sessionSetString,
+    sessionSetI64,
+    sessionSetF64,
+    sessionSetBool,
+    sessionRemove,
+    sessionRestored,
+    sessionRestore,
+    sessionWindows,
+    referenceMint,
+    referenceRedeem,
+    referenceForget,
+    pickedText,
     assetBytes,
     assetBlob,
     assetClose,
@@ -265,6 +281,62 @@ foreign import ccall unsafe "kaya_catalog"
 
 foreign import ccall unsafe "kaya_tr"
   c_kaya_tr :: Ptr Word8 -> Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> IO CSize
+
+-- The session store, restored windows and durable references
+-- (docs/restoration-plan.md SR3, SR9, SR11), over the C floor.
+foreign import ccall unsafe "kaya_session_get_string"
+  c_kaya_session_get_string ::
+    Word32 -> Word64 -> Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> Ptr CSize -> IO CInt
+
+foreign import ccall unsafe "kaya_session_get_i64"
+  c_kaya_session_get_i64 :: Word32 -> Word64 -> Ptr Word8 -> CSize -> Ptr Int64 -> IO CInt
+
+foreign import ccall unsafe "kaya_session_get_f64"
+  c_kaya_session_get_f64 :: Word32 -> Word64 -> Ptr Word8 -> CSize -> Ptr Double -> IO CInt
+
+foreign import ccall unsafe "kaya_session_get_bool"
+  c_kaya_session_get_bool :: Word32 -> Word64 -> Ptr Word8 -> CSize -> Ptr Word8 -> IO CInt
+
+foreign import ccall unsafe "kaya_session_set_string"
+  c_kaya_session_set_string :: Word32 -> Word64 -> Ptr Word8 -> CSize -> Ptr Word8 -> CSize -> IO ()
+
+foreign import ccall unsafe "kaya_session_set_i64"
+  c_kaya_session_set_i64 :: Word32 -> Word64 -> Ptr Word8 -> CSize -> Int64 -> IO ()
+
+foreign import ccall unsafe "kaya_session_set_f64"
+  c_kaya_session_set_f64 :: Word32 -> Word64 -> Ptr Word8 -> CSize -> Double -> IO ()
+
+foreign import ccall unsafe "kaya_session_set_bool"
+  c_kaya_session_set_bool :: Word32 -> Word64 -> Ptr Word8 -> CSize -> Word8 -> IO ()
+
+foreign import ccall unsafe "kaya_session_remove"
+  c_kaya_session_remove :: Word32 -> Word64 -> Ptr Word8 -> CSize -> IO ()
+
+foreign import ccall unsafe "kaya_session_restored"
+  c_kaya_session_restored :: IO Word32
+
+foreign import ccall unsafe "kaya_session_window_count"
+  c_kaya_session_window_count :: IO Word32
+
+foreign import ccall unsafe "kaya_session_window"
+  c_kaya_session_window ::
+    Word32 -> Ptr Word64 -> Ptr Word64 -> Ptr Word64 -> Ptr Word32 -> Ptr Word64 -> CSize -> IO Int64
+
+foreign import ccall unsafe "kaya_session_restore"
+  c_kaya_session_restore :: Word32 -> Word64 -> Word64 -> IO ()
+
+foreign import ccall safe "kaya_reference_mint"
+  c_kaya_reference_mint :: Word64 -> Ptr Word8 -> CSize -> Ptr CSize -> IO Word32
+
+foreign import ccall safe "kaya_reference_redeem"
+  c_kaya_reference_redeem ::
+    Ptr Word8 -> CSize -> Ptr Word64 -> Ptr Word8 -> CSize -> Ptr CSize -> IO Word32
+
+foreign import ccall unsafe "kaya_reference_forget"
+  c_kaya_reference_forget :: Ptr Word8 -> CSize -> IO ()
+
+foreign import ccall unsafe "kaya_picked_text"
+  c_kaya_picked_text :: Word64 -> Word32 -> Ptr Word8 -> CSize -> Ptr CSize -> IO CInt
 
 foreign import ccall unsafe "kaya_pref_get_string"
   c_kaya_pref_get_string ::
@@ -708,6 +780,123 @@ prefSetF64 key value = withName key $ \k n -> c_kaya_pref_set_f64 k n value
 prefSetBool :: Text -> Bool -> IO ()
 prefSetBool key value =
   withName key $ \k n -> c_kaya_pref_set_bool k n (if value then 1 else 0)
+
+sessionGetString :: Word32 -> Word64 -> Text -> IO (Maybe Text)
+sessionGetString scope ident key =
+  withName key $ \k n -> alloca $ \lenPtr -> do
+    poke lenPtr 0
+    present <- c_kaya_session_get_string scope ident k n nullPtr 0 lenPtr
+    if present == 0
+      then return Nothing
+      else do
+        len <- peek lenPtr
+        if len == 0
+          then return (Just T.empty)
+          else allocaBytes (fromIntegral len) $ \out -> do
+            ok <- c_kaya_session_get_string scope ident k n out len lenPtr
+            if ok == 0
+              then return Nothing
+              else do
+                got <- peek lenPtr
+                Just <$> peekUtf8 out (min got len)
+
+sessionGetI64 :: Word32 -> Word64 -> Text -> IO (Maybe Int64)
+sessionGetI64 scope ident key =
+  withName key $ \k n -> alloca $ \out -> do
+    poke out 0
+    present <- c_kaya_session_get_i64 scope ident k n out
+    if present == 0 then return Nothing else Just <$> peek out
+
+sessionGetF64 :: Word32 -> Word64 -> Text -> IO (Maybe Double)
+sessionGetF64 scope ident key =
+  withName key $ \k n -> alloca $ \out -> do
+    poke out 0
+    present <- c_kaya_session_get_f64 scope ident k n out
+    if present == 0 then return Nothing else Just <$> peek out
+
+sessionGetBool :: Word32 -> Word64 -> Text -> IO (Maybe Bool)
+sessionGetBool scope ident key =
+  withName key $ \k n -> alloca $ \out -> do
+    poke out 0
+    present <- c_kaya_session_get_bool scope ident k n out
+    if present == 0 then return Nothing else Just . (/= 0) <$> peek out
+
+sessionSetString :: Word32 -> Word64 -> Text -> Text -> IO ()
+sessionSetString scope ident key value =
+  withName key $ \k n -> withName value $ \v vn -> c_kaya_session_set_string scope ident k n v vn
+
+sessionSetI64 :: Word32 -> Word64 -> Text -> Int64 -> IO ()
+sessionSetI64 scope ident key value = withName key $ \k n -> c_kaya_session_set_i64 scope ident k n value
+
+sessionSetF64 :: Word32 -> Word64 -> Text -> Double -> IO ()
+sessionSetF64 scope ident key value = withName key $ \k n -> c_kaya_session_set_f64 scope ident k n value
+
+sessionSetBool :: Word32 -> Word64 -> Text -> Bool -> IO ()
+sessionSetBool scope ident key value =
+  withName key $ \k n -> c_kaya_session_set_bool scope ident k n (if value then 1 else 0)
+
+sessionRemove :: Word32 -> Word64 -> Text -> IO ()
+sessionRemove scope ident key = withName key $ \k n -> c_kaya_session_remove scope ident k n
+
+sessionRestored :: IO Word32
+sessionRestored = c_kaya_session_restored
+
+sessionRestore :: Word32 -> Word64 -> Word64 -> IO ()
+sessionRestore = c_kaya_session_restore
+
+-- | Each window the last launch left: id, documents, active, section, depth.
+sessionWindows :: IO [(Word64, [Word64], Word64, Word64, Word32)]
+sessionWindows = do
+  count <- c_kaya_session_window_count
+  fmap concat . mapM one $ takeWhile (< count) [0 ..]
+  where
+    one i = alloca $ \w -> alloca $ \a -> alloca $ \s -> alloca $ \d -> do
+      n <- c_kaya_session_window i w a s d nullPtr 0
+      if n < 0
+        then return []
+        else allocaArray (max 1 (fromIntegral n)) $ \docs -> do
+          _ <- c_kaya_session_window i nullPtr nullPtr nullPtr nullPtr docs (fromIntegral n)
+          ds <- peekArray (fromIntegral n) docs
+          (\wv av sv dv -> [(wv, ds, av, sv, dv)]) <$> peek w <*> peek a <*> peek s <*> peek d
+
+-- | The floor's answer-or-sentence shape read twice.
+coded :: (Ptr Word8 -> CSize -> Ptr CSize -> IO Word32) -> IO (Word32, Text)
+coded ask = alloca $ \lenPtr -> do
+  poke lenPtr 0
+  code <- ask nullPtr 0 lenPtr
+  len <- peek lenPtr
+  if len == 0
+    then return (code, T.empty)
+    else allocaBytes (fromIntegral len) $ \out -> do
+      code' <- ask out len lenPtr
+      got <- peek lenPtr
+      (,) code' <$> peekUtf8 out (min got len)
+
+referenceMint :: Word64 -> IO (Word32, Text)
+referenceMint h = coded (c_kaya_reference_mint h)
+
+referenceRedeem :: Text -> IO (Word32, Word64, Text)
+referenceRedeem token =
+  withName token $ \t tn -> alloca $ \hp -> do
+    poke hp 0
+    (code, text) <- coded (c_kaya_reference_redeem t tn hp)
+    h <- peek hp
+    return (code, h, text)
+
+referenceForget :: Text -> IO ()
+referenceForget token = withName token c_kaya_reference_forget
+
+pickedText :: Word64 -> Word32 -> IO Text
+pickedText h field = alloca $ \lenPtr -> do
+  poke lenPtr 0
+  live <- c_kaya_picked_text h field nullPtr 0 lenPtr
+  len <- peek lenPtr
+  if live /= 1 || len == 0
+    then return T.empty
+    else allocaBytes (fromIntegral len) $ \out -> do
+      _ <- c_kaya_picked_text h field out len lenPtr
+      got <- peek lenPtr
+      peekUtf8 out (min got len)
 
 prefRemove :: Text -> IO ()
 prefRemove key = withName key $ \k n -> c_kaya_pref_remove k n

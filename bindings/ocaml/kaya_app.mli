@@ -68,6 +68,33 @@ type prefs = {
 
 val prefs : unit -> prefs
 
+(* The session store (docs/restoration-plan.md SR3): the preferences' four
+   types with a session's lifetime, scoped to the app, a window or a
+   document; the platform decides whether a launch continues the last
+   ([restored]). Do not put secrets in it (SR7). *)
+val session : unit -> prefs
+val window_session : int64 -> prefs
+val document_session : int64 -> prefs
+
+(* Which launch this is (SR6): "fresh", "resumed" or "recovered". *)
+val restored : unit -> string
+
+(* One window as the last launch left it (SR9); [active_document] and
+   [section] are 0 for none. *)
+type restored_window = {
+  id : int64;
+  documents : int64 list;
+  active_document : int64;
+  section : int64;
+  depth : int;
+}
+
+val restored_windows : unit -> restored_window list
+
+(* A durable reference that did not mint or redeem (SR12): the refusal
+   (missing, revoked, provider_gone, foreign, cap) and its sentence. *)
+exception Reference_error of string * string
+
 (* A live menu item: its OWN id space, so cross-use with a widget or a
    node handle is a type error. *)
 type menu_item = MenuItem of int64
@@ -2116,7 +2143,8 @@ val create_window :
   ?new_document:bool ->
   ?on_new_document:(unit -> unit) ->
   ?on_documents_close_requested:(int64 list -> unit) ->
-  ?on_documents_detached:(int64 -> int64 list -> unit) -> int64 -> unit
+  ?on_documents_detached:(int64 -> int64 list -> unit) ->
+  ?restore:int64 -> int64 -> unit
 
 (* Close and forget an auxiliary window. *)
 val destroy_window : int64 -> unit
@@ -2170,7 +2198,8 @@ val add_document :
   ?on_selected:(unit -> unit) ->
   ?on_close_requested:(unit -> unit) ->
   ?on_closed:(unit -> unit) ->
-  ?on_moved:(int64 -> int -> unit) -> int64 -> unit
+  ?on_moved:(int64 -> int -> unit) ->
+  ?restore:int64 -> int64 -> unit
 
 (* A document's props after its [add_document]. *)
 val update_document :
@@ -2363,6 +2392,15 @@ val open_picked : picked_file -> File_mode.t -> Unix.file_descr * bool
    launch hands to [on_backup_left]; a rename cannot leave one, so on iOS
    and the desktops that never fires. *)
 val save_picked : picked_file -> string -> unit
+
+(* A durable reference to a picked file (SR11), redeemed at a later launch;
+   raises [Reference_error]. *)
+val reference : picked_file -> string
+
+type redeemed = { file : picked_file; token : string }
+
+val redeem : string -> redeemed
+val forget : string -> unit
 
 (* Write the backup back over the document through the safe save, then
    delete it; or delete it and keep the document. Both BLOCK and raise

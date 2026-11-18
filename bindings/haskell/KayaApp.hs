@@ -57,6 +57,17 @@ module KayaApp
     tr,
     Prefs (..),
     prefs,
+    session,
+    windowSession,
+    documentSession,
+    restored,
+    RestoredWindow (..),
+    restoredWindows,
+    ReferenceError (..),
+    Redeemed (..),
+    reference,
+    redeem,
+    forget,
     kayaMain,
     newApp,
     post,
@@ -656,7 +667,7 @@ import Data.Time.LocalTime (TimeOfDay (..))
 import Data.Word (Word16, Word32, Word64)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
 
-import Control.Exception (SomeException, catch, evaluate)
+import Control.Exception (Exception, SomeException, catch, evaluate, throwIO)
 import System.IO (hFlush, hPutStrLn, stderr)
 import System.IO.Unsafe (unsafePerformIO)
 
@@ -985,6 +996,116 @@ prefs =
       prefRemove = \k -> R.prefRemove (prefWriteKey k)
     }
 
+-- | The session store (docs\/restoration-plan.md SR3): the preferences'
+-- four types with a session's lifetime, scoped to the app, a window or a
+-- document; the platform decides whether a launch continues the last
+-- ('restored'). Do not put secrets in it (SR7).
+sessionScope :: Word32 -> Word64 -> Prefs
+sessionScope scope n =
+  Prefs
+    { prefGetString = \k d -> maybe d id <$> R.sessionGetString scope n (sessionKey k),
+      prefGetI64 = \k d -> maybe d id <$> R.sessionGetI64 scope n (sessionKey k),
+      prefGetF64 = \k d -> maybe d id <$> R.sessionGetF64 scope n (sessionKey k),
+      prefGetBool = \k d -> maybe d id <$> R.sessionGetBool scope n (sessionKey k),
+      prefSetString = \k v -> R.sessionSetString scope n (sessionWriteKey k) v,
+      prefSetI64 = \k v -> R.sessionSetI64 scope n (sessionWriteKey k) v,
+      prefSetF64 = \k v -> R.sessionSetF64 scope n (sessionWriteKey k) v,
+      prefSetBool = \k v -> R.sessionSetBool scope n (sessionWriteKey k) v,
+      prefRemove = \k -> R.sessionRemove scope n (sessionWriteKey k)
+    }
+
+sessionKey :: Text -> Text
+sessionKey key
+  | T.null key = errorWithoutStackTrace "kaya: a session key must not be empty"
+  | otherwise = key
+
+sessionWriteKey :: Text -> Text
+sessionWriteKey key
+  | T.null key = sessionKey key
+  | T.isPrefixOf "kaya." key =
+      let name = T.unpack key
+       in errorWithoutStackTrace
+            ( "kaya: session key \"" ++ name ++ "\" is reserved "
+                ++ "(the kaya. prefix is kaya's own)"
+            )
+  | otherwise = key
+
+-- | The session store's app scope.
+session :: Prefs
+session = sessionScope 0 0
+
+-- | A window's session scope, discarded with the window (SR9).
+windowSession :: Word64 -> Prefs
+windowSession = sessionScope 1
+
+-- | A document's session scope, discarded with the document (SR9).
+documentSession :: Word64 -> Prefs
+documentSession = sessionScope 2
+
+-- | Which launch this is (SR6): "fresh", "resumed" or "recovered".
+restored :: IO Text
+restored = do
+  r <- R.sessionRestored
+  return $ case r of
+    1 -> "resumed"
+    2 -> "recovered"
+    _ -> "fresh"
+
+-- | One window as the last launch left it (SR9); 'activeDocument' and
+-- 'section' are 0 for none.
+data RestoredWindow = RestoredWindow
+  { id :: !Word64,
+    documents :: ![Word64],
+    activeDocument :: !Word64,
+    section :: !Word64,
+    depth :: !Word32
+  }
+
+-- | The windows the last launch left, the primary first; empty on a fresh
+-- launch.
+restoredWindows :: IO [RestoredWindow]
+restoredWindows = map (\(w, ds, a, s, d) -> RestoredWindow w ds a s d) <$> R.sessionWindows
+
+-- | A durable reference that did not mint or redeem (SR12): the refusal
+-- (missing, revoked, provider_gone, foreign, cap) and its sentence.
+data ReferenceError = ReferenceError {refusal :: Text, message :: Text}
+  deriving (Show)
+
+instance Exception ReferenceError
+
+refusalOf :: Word32 -> Text
+refusalOf code = case code of
+  1 -> "missing"
+  2 -> "revoked"
+  3 -> "provider_gone"
+  4 -> "foreign"
+  _ -> "cap"
+
+-- | A redeemed reference: the file, and the token to keep.
+data Redeemed = Redeemed {file :: PickedFile, token :: Text}
+
+-- | A durable reference to a picked file (SR11); throws 'ReferenceError'.
+reference :: PickedFile -> IO Text
+reference f = do
+  (code, text) <- R.referenceMint f.handle
+  if code == 0 then return text else throwIO (ReferenceError (refusalOf code) text)
+
+-- | An ordinary picked file for a token 'reference' minted, at this launch
+-- or an earlier one; throws 'ReferenceError'.
+redeem :: Text -> IO Redeemed
+redeem tok = do
+  (code, h, text) <- R.referenceRedeem tok
+  if code /= 0
+    then throwIO (ReferenceError (refusalOf code) text)
+    else do
+      nm <- R.pickedText h 0
+      path <- R.pickedText h 1
+      return (Redeemed (PickedFile h nm (T.unpack path)) text)
+
+-- | Releases a reference from kaya's durable count (SR13).
+forget :: Text -> IO ()
+forget = R.referenceForget
+
 -- | One clip, offered in as many representations as the app fills in.
 data Clip = Clip
   { text :: Maybe Text,
@@ -1254,6 +1375,8 @@ appIdentity =
 -- chrome-closed and retires with it.
 data WindowAttr
   = WTitle Text
+  | -- | Take back the session scope the window was saved under (SR9).
+    WRestore Word64
   | WSize Double Double
   | WVetoClose Bool
   | -- | The CEILING on how many of this window's stack entries present
@@ -1324,6 +1447,7 @@ window :: Word64 -> [WindowAttr] -> Build ()
 window n = mapM_ apply
   where
     apply (WTitle t) = emitB (W.txSetWindowTitle n (T.unpack t))
+    apply (WRestore saved) = emitBIO (mempty <$ R.sessionRestore 1 saved n)
     apply (WSize w h) = do
       emitB (W.txSetWindowWidth n w)
       emitB (W.txSetWindowHeight n h)
@@ -1517,6 +1641,8 @@ selectSection n = emitB (W.txSelectSection 0 n)
 -- user drags it. A programmatic select or close fires none of them.
 data DocumentAttr
   = DTitle Text
+  | -- | Take back the session scope the document was saved under (SR9).
+    DRestore Word64
   | DTitleBound (Signal Text)
   | DTooltip Text
   | DDirty Bool
@@ -1543,6 +1669,7 @@ updateDocument :: Word64 -> [DocumentAttr] -> Build ()
 updateDocument n = mapM_ apply
   where
     apply (DTitle t) = emitB (W.txSetDocumentTitle n (T.unpack t))
+    apply (DRestore saved) = emitBIO (mempty <$ R.sessionRestore 2 saved n)
     apply (DTitleBound (Signal s)) = emitB (W.txBindDocumentTitle n s)
     apply (DTooltip t) = emitB (W.txSetDocumentTooltip n (T.unpack t))
     apply (DDirty v) = emitB (W.txSetDocumentDirty n v)

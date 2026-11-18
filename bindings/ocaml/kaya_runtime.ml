@@ -415,6 +415,176 @@ let pref_set_bool key value =
 let pref_remove key =
   kaya_pref_remove key (Unsigned.Size_t.of_int (String.length key))
 
+(* The session store, restored windows and durable references
+   (docs/restoration-plan.md SR3, SR9, SR11), over the C floor. *)
+let sz = Unsigned.Size_t.of_int
+let u32 = Unsigned.UInt32.of_int
+
+let kaya_session_get_string =
+  foreign ~from:lib "kaya_session_get_string"
+    (uint32_t @-> uint64_t @-> string @-> size_t @-> ptr char @-> size_t @-> ptr size_t
+    @-> returning int)
+let kaya_session_get_i64 =
+  foreign ~from:lib "kaya_session_get_i64"
+    (uint32_t @-> uint64_t @-> string @-> size_t @-> ptr int64_t @-> returning int)
+let kaya_session_get_f64 =
+  foreign ~from:lib "kaya_session_get_f64"
+    (uint32_t @-> uint64_t @-> string @-> size_t @-> ptr double @-> returning int)
+let kaya_session_get_bool =
+  foreign ~from:lib "kaya_session_get_bool"
+    (uint32_t @-> uint64_t @-> string @-> size_t @-> ptr uint8_t @-> returning int)
+let kaya_session_set_string =
+  foreign ~from:lib "kaya_session_set_string"
+    (uint32_t @-> uint64_t @-> string @-> size_t @-> string @-> size_t @-> returning void)
+let kaya_session_set_i64 =
+  foreign ~from:lib "kaya_session_set_i64"
+    (uint32_t @-> uint64_t @-> string @-> size_t @-> int64_t @-> returning void)
+let kaya_session_set_f64 =
+  foreign ~from:lib "kaya_session_set_f64"
+    (uint32_t @-> uint64_t @-> string @-> size_t @-> double @-> returning void)
+let kaya_session_set_bool =
+  foreign ~from:lib "kaya_session_set_bool"
+    (uint32_t @-> uint64_t @-> string @-> size_t @-> uint8_t @-> returning void)
+let kaya_session_remove =
+  foreign ~from:lib "kaya_session_remove"
+    (uint32_t @-> uint64_t @-> string @-> size_t @-> returning void)
+let kaya_session_restored =
+  foreign ~from:lib "kaya_session_restored" (void @-> returning uint32_t)
+let kaya_session_window_count =
+  foreign ~from:lib "kaya_session_window_count" (void @-> returning uint32_t)
+let kaya_session_window =
+  foreign ~from:lib "kaya_session_window"
+    (uint32_t @-> ptr uint64_t @-> ptr uint64_t @-> ptr uint64_t @-> ptr uint32_t
+    @-> ptr uint64_t @-> size_t @-> returning int64_t)
+let kaya_session_restore =
+  foreign ~from:lib "kaya_session_restore"
+    (uint32_t @-> uint64_t @-> uint64_t @-> returning void)
+let kaya_reference_mint =
+  foreign ~from:lib "kaya_reference_mint"
+    (uint64_t @-> ptr char @-> size_t @-> ptr size_t @-> returning uint32_t)
+let kaya_reference_redeem =
+  foreign ~from:lib "kaya_reference_redeem"
+    (string @-> size_t @-> ptr uint64_t @-> ptr char @-> size_t @-> ptr size_t
+    @-> returning uint32_t)
+let kaya_reference_forget =
+  foreign ~from:lib "kaya_reference_forget" (string @-> size_t @-> returning void)
+let kaya_picked_text =
+  foreign ~from:lib "kaya_picked_text"
+    (uint64_t @-> uint32_t @-> ptr char @-> size_t @-> ptr size_t @-> returning int)
+
+let session_get_string scope id key =
+  let n = sz (String.length key) in
+  let len = allocate size_t (sz 0) in
+  let none = Ctypes.from_voidp Ctypes.char Ctypes.null in
+  if kaya_session_get_string (u32 scope) (Unsigned.UInt64.of_int64 id) key n none (sz 0) len = 0
+  then None
+  else
+    let want = Unsigned.Size_t.to_int !@len in
+    if want = 0 then Some ""
+    else
+      let buf = CArray.make char want in
+      if kaya_session_get_string (u32 scope) (Unsigned.UInt64.of_int64 id) key n
+           (CArray.start buf) (sz want) len = 0
+      then None
+      else Some (String.init (min (Unsigned.Size_t.to_int !@len) want) (CArray.get buf))
+
+let session_get_i64 scope id key =
+  let out = allocate int64_t 0L in
+  if kaya_session_get_i64 (u32 scope) (Unsigned.UInt64.of_int64 id) key (sz (String.length key)) out = 0
+  then None else Some !@out
+
+let session_get_f64 scope id key =
+  let out = allocate double 0.0 in
+  if kaya_session_get_f64 (u32 scope) (Unsigned.UInt64.of_int64 id) key (sz (String.length key)) out = 0
+  then None else Some !@out
+
+let session_get_bool scope id key =
+  let out = allocate uint8_t Unsigned.UInt8.zero in
+  if kaya_session_get_bool (u32 scope) (Unsigned.UInt64.of_int64 id) key (sz (String.length key)) out = 0
+  then None else Some (Unsigned.UInt8.to_int !@out <> 0)
+
+let session_set_string scope id key value =
+  kaya_session_set_string (u32 scope) (Unsigned.UInt64.of_int64 id) key (sz (String.length key))
+    value (sz (String.length value))
+
+let session_set_i64 scope id key value =
+  kaya_session_set_i64 (u32 scope) (Unsigned.UInt64.of_int64 id) key (sz (String.length key)) value
+
+let session_set_f64 scope id key value =
+  kaya_session_set_f64 (u32 scope) (Unsigned.UInt64.of_int64 id) key (sz (String.length key)) value
+
+let session_set_bool scope id key value =
+  kaya_session_set_bool (u32 scope) (Unsigned.UInt64.of_int64 id) key (sz (String.length key))
+    (Unsigned.UInt8.of_int (if value then 1 else 0))
+
+let session_remove scope id key =
+  kaya_session_remove (u32 scope) (Unsigned.UInt64.of_int64 id) key (sz (String.length key))
+
+let session_restored () = Unsigned.UInt32.to_int (kaya_session_restored ())
+
+let session_restore scope saved now =
+  kaya_session_restore (u32 scope) (Unsigned.UInt64.of_int64 saved) (Unsigned.UInt64.of_int64 now)
+
+let session_windows () =
+  let count = Unsigned.UInt32.to_int (kaya_session_window_count ()) in
+  List.filter_map
+    (fun i ->
+      let window = allocate uint64_t Unsigned.UInt64.zero in
+      let active = allocate uint64_t Unsigned.UInt64.zero in
+      let section = allocate uint64_t Unsigned.UInt64.zero in
+      let depth = allocate uint32_t Unsigned.UInt32.zero in
+      let none = Ctypes.from_voidp uint64_t Ctypes.null in
+      let n = Int64.to_int (kaya_session_window (u32 i) window active section depth none (sz 0)) in
+      if n < 0 then None
+      else
+        let docs = CArray.make uint64_t (max n 1) in
+        let nil = Ctypes.from_voidp uint64_t Ctypes.null in
+        let nil32 = Ctypes.from_voidp uint32_t Ctypes.null in
+        ignore (kaya_session_window (u32 i) nil nil nil nil32 (CArray.start docs) (sz n));
+        Some
+          ( Unsigned.UInt64.to_int64 !@window,
+            List.init n (fun j -> Unsigned.UInt64.to_int64 (CArray.get docs j)),
+            Unsigned.UInt64.to_int64 !@active,
+            Unsigned.UInt64.to_int64 !@section,
+            Unsigned.UInt32.to_int !@depth ))
+    (List.init count Fun.id)
+
+(* The floor's answer-or-sentence shape read twice. *)
+let coded ask =
+  let len = allocate size_t (sz 0) in
+  let code = ask (Ctypes.from_voidp Ctypes.char Ctypes.null) (sz 0) len in
+  let want = Unsigned.Size_t.to_int !@len in
+  if want = 0 then (Unsigned.UInt32.to_int code, "")
+  else
+    let buf = CArray.make char want in
+    let code = ask (CArray.start buf) (sz want) len in
+    (Unsigned.UInt32.to_int code, String.init (min want (Unsigned.Size_t.to_int !@len)) (CArray.get buf))
+
+let reference_mint handle =
+  coded (fun out cap len -> kaya_reference_mint (Unsigned.UInt64.of_int64 handle) out cap len)
+
+let reference_redeem token =
+  let handle = allocate uint64_t Unsigned.UInt64.zero in
+  let code, text =
+    coded (fun out cap len ->
+        kaya_reference_redeem token (sz (String.length token)) handle out cap len)
+  in
+  (code, Unsigned.UInt64.to_int64 !@handle, text)
+
+let reference_forget token = kaya_reference_forget token (sz (String.length token))
+
+let picked_text handle field =
+  let len = allocate size_t (sz 0) in
+  let none = Ctypes.from_voidp Ctypes.char Ctypes.null in
+  if kaya_picked_text (Unsigned.UInt64.of_int64 handle) (u32 field) none (sz 0) len <> 1 then ""
+  else
+    let want = Unsigned.Size_t.to_int !@len in
+    if want = 0 then ""
+    else
+      let buf = CArray.make char want in
+      ignore (kaya_picked_text (Unsigned.UInt64.of_int64 handle) (u32 field) (CArray.start buf) (sz want) len);
+      String.init (min want (Unsigned.Size_t.to_int !@len)) (CArray.get buf)
+
 let kaya_occurrence_blob =
   foreign ~from:lib "kaya_occurrence_blob"
     (uint64_t @-> ptr size_t @-> returning (ptr char))
