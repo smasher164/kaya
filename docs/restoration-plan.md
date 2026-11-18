@@ -1,6 +1,6 @@
 # Session restoration and durable file references (design pass, 2026-11-17)
 
-Status: PROPOSED 2026-11-17, rulings open; review page
+Status: RULED 2026-11-17: every recommendation as written, with the independent review's fold-ins (F1 to F15); the build started on the maintainer's word the same night. Review page
 claude.ai/artifact/DxTd4WDaWRcBnQMRBqBQYK. The maintainer, 2026-11-17:
 "let's design session restoration now". This plan is the design pass for
 docs/deferred.md's session restoration entry (headed "core-owned, and
@@ -35,9 +35,12 @@ them apart:
    surface): it keeps a model in its own language and writes SIGNALS (the
    core-held values widgets bind to) derived from it.
 2. **Presentation state**: how far a list is scrolled, where the caret sits in
-   a text view, where a split's divider was dragged, a window's frame. The
-   app never models these; the native widget holds them, and in most cases
-   no occurrence (an event record kaya sends the app) ever reports them.
+   a text view, a window's frame. The app never models these; the native
+   widget holds them, and in most cases no occurrence (an event record kaya
+   sends the app) ever reports them. The one exception is a `rich`
+   textarea's selection, which occurrence kind 61 `text_selected` reports so
+   the app can light a format toolbar (spec.rs; docs/phone-format-plan.md
+   §3); the app reads that report and still does not model the caret.
 
 **What kaya's core actually holds.** The charge's premise is that the core
 owns the interface's state. That is half true, and the half that is not true
@@ -46,7 +49,9 @@ collection's records, the selected section of each window, each navigation
 stack, each window's documents and its active one, sheets and fullscreen
 (crates/kaya/src/scene.rs, `struct Scene`). It does NOT hold the text a user
 typed, the caret, any selection, any scroll offset, focus, or a window's frame
-after the user resized it: those are WIDGET-OWNED by doctrine. kaya's text
+after the user resized it: those are WIDGET-OWNED by doctrine (a rich
+textarea's selection is reported through `text_selected`, but the core keeps
+no copy of it). kaya's text
 widgets are UNCONTROLLED toward the app (the widget owns its text and the app
 folds `text_changed` into its own model, spec.rs `text_changed`), and "there
 are no widget mirror reads" (DESIGN.md, Templates). The undo recon found the
@@ -66,7 +71,11 @@ the caret, the typed text) are exactly what the core does not hold.
 2026-09-09): the four desktops save each window's frame under the reserved
 preference key `kaya.window.<id>.frame`, coalesced onto the toolkit's idle,
 and restore it before the first frame; `remember_frame(false)` opts a window
-out; the phones are inert. Its conflict rule is the precedent for SR4: the
+out; the phones are inert. Beside it, P8's SIDEBAR MEMORY (the same plan,
+built on the Mac 2026-10-25): the sidebar width the user dragged is saved
+under the permanent reserved key `kaya.window.<id>.sidebar` and restored at
+launch as the column's ideal width. Both are permanent preferences, and
+restoration leaves both as they are. Its conflict rule is the precedent for SR4: the
 remembered frame beats the declaration BY VALUE, and the first different value
 the app asks for is the app resizing itself, which applies and ends the
 memory.
@@ -105,8 +114,12 @@ Windows the path itself.
   defaults to the composable's POSITION in the composition
   (`currentCompositeKeyHash`), which is why moving a composable resets it;
   `rememberScrollState`, `rememberLazyListState` and `rememberTextFieldState`
-  are saveable by default (developer.android.com/develop/ui/compose/
-  state-saving). Identity is tree position unless a key is given.
+  are saveable by default (the `rememberSaveable` API reference,
+  developer.android.com/reference/kotlin/androidx/compose/runtime/saveable/
+  package-summary, and its source in androidx's
+  compose/runtime/runtime-saveable; the state-saving guide names only
+  `rememberLazyListState` and says nothing about keys). Identity is tree
+  position unless a key is given.
 - kaya on Android today. The scene model lives in the process; a later
   `onCreate` (rotation, night mode, locale) re-attaches the presentation and
   re-projects the model, invisible to guests (DESIGN.md, Platform backends,
@@ -130,9 +143,12 @@ Windows the path itself.
   save its state information using an NSUserActivity object"
   (`stateRestorationActivity(for:)`), and the scene reads it back in
   `scene(_:willConnectTo:options:)` (developer.apple.com/documentation/uikit/
-  restoring-your-app-s-state). The system "automatically deletes its preserved
-  state when the user force quits the app" from the app switcher, and "deletes
-  the preserved state if the app crashes at launch time" (same page).
+  restoring-your-app-s-state). The page frames the lifetime as debugging
+  advice: "When debugging the sample project, the system automatically
+  deletes its preserved state when the user force quits the app ... In
+  addition, the system deletes the preserved state if the app crashes at
+  launch time." The behavior is the system's; the guarantee is no stronger
+  than that sentence, and SR6 adopts the rule uniformly on its own account.
 - SwiftUI `@SceneStorage`: per scene, keyed by a string the app names, "its
   initial value is restored by the system if it was previously saved"; "The
   system makes no guarantees as to when and how often the data will be
@@ -159,8 +175,10 @@ Windows the path itself.
   (.../nsresponder/encoderestorablestate(with:)).
 - Whether restoration happens is the USER'S setting, "Close windows when
   quitting an application" (System Settings, Desktop & Dock), stored as the
-  global default `NSQuitAlwaysKeepsWindows`; Option-Command-Q inverts it for
-  one quit ("Quit and Close All Windows" / "Quit and Keep Windows"). Chromium
+  global default `NSQuitAlwaysKeepsWindows`; Option-Command-Q is said to
+  invert it for one quit ("Quit and Close All Windows" / "Quit and Keep
+  Windows"), which no Apple page fetched for this pass states, so §5 step 0
+  (a) measures whether AppKit exposes that choice to an app at all. Chromium
   reads the same key and treats an absent value as Lion's intrinsic default,
   YES (chromium .../chrome/browser/ui/cocoa/window_restore_utils.mm). On this
   host the key is absent (`defaults read -g NSQuitAlwaysKeepsWindows`, read
@@ -169,7 +187,14 @@ Windows the path itself.
 - kaya on macOS today. The windows are SwiftUI `WindowGroup` windows; kaya
   drops AppKit's own `NSWindow Frame` keys at launch and clears each window's
   autosave name (`kayaForgetAppKitFrames`, docs/traps.md, the shared-domain
-  frame entry), because its own window memory is the only one. kaya's mac
+  frame entry), because its own window memory is the only one. The aux
+  windows are `WindowGroup(for: UInt64.self)` (swift/KayaSwiftUIEntry.swift),
+  and Apple's `WindowGroup.init(for:content:)` says "SwiftUI automatically
+  persists and restores the value of this binding as part of the state
+  restoration process"; `Scene.restorationBehavior(_:)` defaults to
+  `automatic` and its `.disabled` is macOS 15+. Nothing in swift/ turned
+  this off before the build, so a clean quit could bring an aux window back
+  under an id the guest had not allocated (§5 step 0 (a), SR6). kaya's mac
   apps are not sandboxed (docs/probes/save-probe-mac.md), so a path reopens;
   a bookmark still earns its place because it follows a rename or a move.
 
@@ -278,8 +303,9 @@ apps that do it themselves.
 ## §3. The proposal, in brief
 
 1. kaya restores PRESENTATION STATE automatically for every widget that has an
-   `a11y_id`: scroll position, caret and selection, a split's divider, plus
-   the window frame it already restores. The app writes no code for these.
+   `a11y_id`: scroll position and caret and selection, beside the window frame
+   and the sidebar width it already remembers. The app writes no code for
+   these.
 2. The app restores its MODEL through a SESSION STORE: a typed key-value store
    like `prefs()`, with a session's lifetime instead of a setting's, scoped to
    the app, a window or a document, read synchronously before the first build
@@ -288,16 +314,16 @@ apps that do it themselves.
    and the open documents come back because the app put them back.
 3. Whether a launch restores follows the platform's own rule (a deliberate
    dismissal discards), and the app can ask which kind of launch it is.
-4. A picked file mints a DURABLE REFERENCE, a short text token the app stores
-   anywhere; redeeming it at a later launch yields an ordinary picked handle,
-   or a refusal whose sentence says why.
+4. A picked file mints a DURABLE REFERENCE, a bounded text token in a
+   kaya-owned envelope the app stores anywhere; redeeming it at a later launch
+   yields an ordinary picked handle, or a refusal whose sentence says why.
 
 ```
              app thread                       core                    backend
  launch ─▶  read session store ◀──── session file (SR14) ──────────┐
             build from model ───── transactions ───▶ mount ───────▶ native widgets
                                     after the first build:          │
-                                    restore presentation facets ───▶ scroll, caret, divider
+                                    restore presentation facets ───▶ scroll, caret
  running    session.set(k, v) ───▶ in-memory store ─┐               │
                                     facet reports ◀──────────────── settle (scroll end, caret)
                                     coalesced on idle ─▶ session file
@@ -306,26 +332,39 @@ apps that do it themselves.
 ## §4. The guards (invariant 3), each on a path a session walks into
 
 - **A facet table in spec.rs** naming, per kind, the presentation facets kaya
-  restores (§6 SR1's table); `tools/check-restore.py` (new, in the sweep)
-  holds every backend to saving and restoring each facet or calling
-  `depth_stub` naming it, the check-universal-props shape. A new restorable
-  kind without its arms fails the sweep naming the backend and the facet.
+  restores (§6 SR1's table; no divider row, F2);
+  a new gate in the sweep, `check-restore.py`, holds every backend to saving and restoring each facet
+  or calling `depth_stub` naming it, the check-universal-props shape (kinds
+  read from the generated wire file). A new restorable kind without its arms
+  fails the sweep naming the backend and the facet. Its watched negatives: a
+  facet row cut from the table, and one backend's arm cut, each seen red.
 - **The session store's walls at the floor**: an empty key, a key under
-  `kaya.`, a value past the size bound (SR14), and a set from a
-  `restoration(false)` app are refused by name in the binding's idiom before
-  the floor call and again at the floor, the prefs shape; a unit test drives
-  each and check-sugar-surface holds the sentence in nine bindings.
+  `kaya.`, and a value past the size bound (SR14) are refused by name in the
+  binding's idiom before the floor call and again at the floor, the prefs
+  shape; a unit test drives each and check-sugar-surface holds the sentence
+  in nine bindings. Under `restoration(false)` a set is NOT a wall: it
+  succeeds into memory and nothing is written (SR7), and a unit test shows the
+  file absent.
 - **A restore never runs before the first build**: the core applies restored
   facets only after the transaction that mounts the widget, and a unit test
   with a fake backend shows an app's own `scroll_to_row` or `select_range` in
-  its first build winning over the restored facet (SR4).
+  its first build winning over the restored facet (SR4), and a For whose rows
+  arrive in transaction two landing the restored key when it arrives (F7).
 - **The session file's own sweep**: a unit test over a corrupt file, a file
-  from another app id, an older format, an app restore version that moved,
-  and a crash-at-launch marker, each discarding with its own sentence, every
-  branch made to print.
+  from another app id, an older format, an app restore version that moved, a
+  crash-at-launch marker, a platform token naming another session id (SR6),
+  and a live writer (SR14), each discarding or standing aside with its own
+  sentence, every branch made to print.
 - **References' why-not** (SR12): each branch forced on the lane that can
-  reach it (a deleted file, a revoked grant, a foreign token, the cap), the
-  sentence read back by the scene; check-diagnostics holds the shape.
+  reach it, the sentence read back by the scene; check-diagnostics holds the
+  shape. A deleted file on every lane; a foreign token on every lane by a
+  hand-written string, since the envelope (SR11) makes foreign decidable
+  everywhere; the cap on every lane, ACROSS LAUNCHES (mint up to the cap in
+  act one, relaunch, mint one more, read the cap sentence: with SR13's durable
+  count this cannot pass vacuously); a revoked grant on Android through the
+  guest's own `releasePersistableUriPermission` under a fault knob, stated as
+  such (`pm revoke` does not touch URI grants), and by the unit test where no
+  lane can revoke.
 - **Secure fields**: the facet table carries no facet for `secure_field`, and
   check-restore refuses one; a unit test shows a secure field's caret and a
   `restorable(false)` subtree absent from the file (SR7).
@@ -333,13 +372,19 @@ apps that do it themselves.
   beside its existing doors in `RELAUNCH_DOOR`; check-steps' shape clause
   admits them, and a runner without them refuses the scene at launch naming
   the door (the precedent: every host refuses a scene it does not carry).
+- **The Mac's own restoration stays off**: a clean-quit relaunch leg on the
+  mac lane opens an aux window, quits through AppKit's terminate (not
+  `_exit`), relaunches and reads that no window came back that the guest did
+  not create (SR6, F5).
 
 ## §5. The build, depth then breadth
 
 0. **Measure first** (each a step-0 probe, recorded in docs/traps.md if it
-   surprises): (a) what `NSQuitAlwaysKeepsWindows` means for a fresh account
-   and whether a kaya `WindowGroup` window is already reopened by AppKit after
-   Quit-and-keep-windows (it must not be, or kaya's restore doubles it);
+   surprises): (a) what `NSQuitAlwaysKeepsWindows` means for a fresh account;
+   whether a kaya aux `WindowGroup` window is reopened by SwiftUI after a
+   clean quit today (the build turns it off either way, SR6); and whether
+   AppKit exposes the Option-Command-Q inversion to the app (SR6's macOS row
+   says what was found);
    (b) on the Android pool, that `am kill` of a backgrounded kaya app followed
    by a launch from Recents delivers a non-null `savedInstanceState`, and that
    `am force-stop` or a task removal delivers null (the two doors of SR15);
@@ -350,9 +395,9 @@ apps that do it themselves.
    the count `getPersistedUriPermissions` answers on the API 35 pool image.
 1. **Core**: the session store, the session file (SR14), the launch kind
    (SR6) and the facet model, with the unit tests of §4. Rust binding.
-2. **SwiftUI on the Mac**: scroll and caret facets, the flush points, the
-   restore after the first build; the `restore` scene (SR15) green in Rust on
-   the mac lane.
+2. **SwiftUI on the Mac**: every kaya window non-restorable (SR6), scroll and
+   caret facets, the flush points, the restore after the first build; the
+   `restore` scene (SR15) green in Rust on the mac lane.
 3. **References on the Mac** (SR11, SR12), then the editor's first cut
    (SR17): its open tabs come back, Open Recent lists what it redeemed.
 4. **Fan out**: Compose (the Bundle token and process death), iOS (the
@@ -371,9 +416,11 @@ apps that do it themselves.
 - (b) WIDGET-OWNED values the app folds into its model as they change: the
   text in a field (`text_changed`), a checkbox (`toggled`), a slider, an
   expander, a picked date, the selected section, the active document;
-- (c) PRESENTATION state that no occurrence reports and no app models: a
-  scroll offset, the caret and selection inside a text view, a split's
-  divider, a window's frame.
+- (c) PRESENTATION state that no app models: a scroll offset, the caret and
+  selection inside a text view, a window's frame. No occurrence reports these
+  but one: a `rich` textarea's selection, which `text_selected` reports so a
+  toolbar can follow it; the app reads the report and does not model the
+  caret, so it stays (c).
 
 **Options.**
 
@@ -407,14 +454,15 @@ table (§4, spec.rs) for the first build:
 | scroll, and a For's container | position | the top row's key and the offset into it for a For; points for a plain scroll |
 | textarea, entry, search, number_field | caret and selection | UTF-8 offsets, clamped to the text the app restored |
 | textarea | its own scroll | as a scroll |
-| a window with panes | divider positions | points, clamped by the pane ladder |
+| a window with a sidebar | its width | unchanged: P8's sidebar memory, `kaya.window.<id>.sidebar`, permanent |
 | window | frame | unchanged: window memory, `kaya.window.<id>.frame`, permanent |
 | secure_field | nothing, ever | SR7 |
 
 Selected tabs, sections, documents and navigation stacks are (b): the app
-restores them (SR9). The window frame keeps its own permanent lifetime,
-because a desktop app opens at its last frame even after a deliberate quit
-(AppKit's frame autosave does the same).
+restores them (SR9). The window frame and the sidebar width keep their own
+permanent lifetime, because a desktop app opens at its last frame and its
+last divider even after a deliberate quit (AppKit's frame autosave does the
+same); one store per value, so the session file carries neither (F2).
 
 ### SR2. What identifies a widget across launches
 
@@ -464,8 +512,10 @@ frame), or a SIGNAL MARKED RESTORABLE whose value kaya keeps.
   restored onto another phone is wrong), and it has no window or document
   scope.
 
-**Recommendation: B**, as `prefs()`'s twin: the same four types (string, i64,
-f64, bool) plus a durable reference (SR11) and bytes, a get that takes a
+**Recommendation: B**, as `prefs()`'s twin: exactly prefs' four types
+(string, i64, f64, bool) and nothing else; a durable reference (SR11) is a
+string, and there are no bytes (a large or binary value goes to the app's
+data directory with its key in the scope, SR17), a get that takes a
 default and answers it when the key is absent or holds another type, a set
 that cannot fail but for the walls of §4, `remove`, and reserved `kaya.` keys.
 Scoped three ways: the app (`session()`), a window (`window.session()`) and a
@@ -491,14 +541,34 @@ value.
 **Recommendation: B**, window memory's rule turned around for state the app
 does command: kaya applies a restored facet after the transaction that mounts
 the widget, and only if the app's first build did not command it itself (an
-app's `scroll_to_row`, `select_range` or `focus` wins). A row key the list no
-longer holds lands at the top (scroll_to S3's silent no-op), and a caret past
-the restored text clamps to its end. The app learns nothing it has to act on
-for (c). For its own values it reads the store, so the conflict is in its own
-code, where it belongs: a restored conversation id that no longer exists is
-the app's fallback to make. One read answers the launch: `restored()` is
-`fresh`, `resumed` or `recovered` (SR6), available before the first build in
-every binding, so an app can say "welcome back" or skip a splash.
+app's `scroll_to_row`, `select_range` or `focus` wins). A caret past the
+restored text clamps to its end. A restored selection on a rich textarea is
+reported through `text_selected` like any app-made selection, so the
+restored editor's format toolbar agrees with its caret (F1).
+
+A For's restored position is HELD, not dropped, when its row key is not in
+the list at mount: the hold ends at the first of (1) the key arriving (it
+then lands by scroll_to's S2 rule), (2) the app's own `scroll_to_row` on that
+container, (3) the user's first scroll on it, or (4) the end of the first
+transaction after the mount that inserts into that collection without the
+key, at which point the position is discarded and the list stays where the
+app's build put it (scroll_to S3's silent no-op). An app that loads its rows
+after the first build (chat, the music library) therefore gets its scroll
+back on the transaction that delivers them (F7).
+
+The app learns nothing it has to act on for (c). For its own values it reads
+the store, so the conflict is in its own code, where it belongs: a restored
+conversation id that no longer exists is the app's fallback to make. One read
+answers the launch: `restored()` is `fresh`, `resumed` or `recovered` (SR6),
+final before the first build in every binding. Where it becomes final, per
+platform (F9): Android at `onCreate`, from the Bundle in hand before
+`Kaya.attach`; iOS at `scene(_:willConnectTo:options:)`, from the connection
+options' activity; macOS, GTK and WinUI at process start, from kaya's own
+file and (on the Mac) `NSQuitAlwaysKeepsWindows`, with no AppKit restoration
+to wait for (SR6). The app thread's first build waits for that point; on the
+three desktops it is already past when the app thread starts, and on the
+phones the core holds the first build until the platform callback has
+answered.
 
 ### SR5. When state is saved
 
@@ -535,22 +605,43 @@ platform's rule, and on GTK and WinUI always restores. C. B, with an app
 switch for "always restore", the browser exception Android's own guide names.
 
 **Recommendation: B, and C's switch as an app declaration.** The session file
-stays kaya's (SR14); what the platform contributes is a yes or no. On Android
-the Bundle carries only a token naming the file's generation (a few bytes, so
-the Bundle's size limit never applies), and a launch with a null Bundle is
-fresh. On iOS the scene's restoration activity carries the same token. On
-macOS the token rides AppKit's restorable state of the primary window, so
-AppKit's own decision (the setting, Option-Command-Q) is the answer, and kaya
-creates no window from it (§5 step 0 (a)). On GTK and WinUI a clean exit
-leaves the token in place and a launch always resumes. Everywhere, a launch
-that dies before its first idle marks the file, and the next launch discards
-it as `recovered` (iOS's crash-at-launch rule, made uniform), so a state that
-crashes the app cannot crash it twice. The carve-out, stated the same way in
-every binding: "kaya restores when the platform says this launch continues
-the last one; where a platform has no such rule, every launch continues."
-`restore_always()` (an app declaration, pre-mount, the brand's walls) ignores
-the platform's no, for apps like a browser or an editor whose users expect
-their documents back after any quit.
+stays kaya's (SR14); what the platform contributes is a yes or no.
+
+The token is a SESSION ID, minted once when the process starts, written into
+the file's header on every flush, and handed to the platform's vehicle
+whenever the platform asks to save; it never changes within a process, so no
+ordering between the platform's save callback and kaya's flush can make the
+two disagree (F6: on a device running API 26 or 27 `onSaveInstanceState` runs
+before `onStop` whatever the app targets). At launch: no token is `fresh`; a
+token naming the file's session id is `resumed`; a token naming another id is
+`recovered`, with a sentence naming both ids (the file is from a launch the
+platform's copy never saw).
+
+- **Android**: the Bundle carries the session id (a few bytes, so the
+  Bundle's size limit never applies); a launch with a null Bundle is fresh.
+- **iOS**: the scene's restoration activity carries the session id, read in
+  `scene(_:willConnectTo:options:)`.
+- **macOS** (F5): kaya owns the state and defeats AppKit's copy, as it already
+  does for frames. Every kaya window is NON-RESTORABLE: `isRestorable = false`
+  where `kayaForgetAppKitFrames` already reaches the NSWindow, or
+  `.restorationBehavior(.disabled)` on macOS 15+, so neither AppKit nor
+  SwiftUI reopens a window, and SR9's `restored_windows()` is the only party
+  that recreates an aux window. The yes or no is read from the global default
+  `NSQuitAlwaysKeepsWindows` at the save point (absent or false: keep, the
+  Lion default Chromium assumes; true: the user asked windows closed on quit,
+  so the launch after is fresh). What step 0 (a) found about the
+  Option-Command-Q inversion is recorded here when it is measured.
+- **GTK and WinUI**: a clean exit leaves the token in place and a launch
+  always resumes.
+
+Everywhere, a launch that dies before its first idle marks the file, and the
+next launch discards it as `recovered` (iOS's crash-at-launch rule, made
+uniform), so a state that crashes the app cannot crash it twice. The
+carve-out, stated the same way in every binding: "kaya restores when the
+platform says this launch continues the last one; where a platform has no
+such rule, every launch continues." `restore_always()` (an app declaration,
+pre-mount, the brand's walls) ignores the platform's no, for apps like a
+browser or an editor whose users expect their documents back after any quit.
 
 ### SR7. What is never saved, and turning it off
 
@@ -558,8 +649,11 @@ their documents back after any quit.
 no override. A `restorable(false)` universal prop excludes a subtree's facets
 (a password reveal, a one-time code, a chat composer an app wants cleared).
 `restoration(false)` is an app declaration that turns the whole thing off:
-no file is written, the store's sets are refused by name, and window memory
-keeps its own `remember_frame` switch. The file is stored unencrypted in the
+no file is written, the store's sets succeed into memory and are never
+written (so shared code that calls `session.string("draft", "")` works in
+such an app, and the next launch reads its defaults; prefs' walls refuse
+only MALFORMED writes, and a set the app chose to discard is not one, F11),
+and window memory keeps its own `remember_frame` switch. The file is stored unencrypted in the
 app's private storage, and every binding's doc for the store says "do not
 put secrets in it", SceneStorage's own warning.
 
@@ -590,11 +684,24 @@ navigation depth) beside each surface's own session scope, and hands the app
 the shape at launch: `restored_windows()`, each with its documents and their
 scopes. The app recreates each surface from its scope's values (the editor's
 document scope holds the file's reference) and passes the scope back on
-creation (`add_document(id).restore(scope)`), which is how kaya knows which
-saved facets and frame belong to it. A scope the app does not take back is
-discarded at the first idle after the first build. The selected section and
-the active document are the app's to select (SR1 (b)), from the shape. Phones
-have one window; the shape there is its documents and section.
+creation, which is how kaya knows which saved facets and frame belong to it:
+
+- the PRIMARY window's scope is adopted without a call, since the primary has
+  no creation moment (DESIGN.md, Windows: the process owns it);
+- an aux window's scope is handed back through the window construct,
+  `create_window(id).restore(scope)`;
+- a document's through `add_document(id).restore(scope)`.
+
+Window ids are the app's own (guest-allocated, as window memory's
+`kaya.window.<id>.frame` already assumes), and the shape records them as the
+app chose them: an app that allocates its window ids deterministically gets
+its frames and facets back, and one whose id moved loses that window's state
+with one line on stderr naming the id, as SR2 does for widgets (F10).
+
+A scope the app does not take back is discarded at the first idle after the
+first build. The selected section and the active document are the app's to
+select (SR1 (b)), from the shape. Phones have one window; the shape there is
+its documents and section.
 
 ### SR10. The undo stack
 
@@ -614,8 +721,16 @@ stands between the app and the platform.
 stores wherever it likes, and kaya redeems it; C. hand the app the platform's
 own bytes (a bookmark blob, a URI) and let it redeem them itself.
 
-**Recommendation: B.** `picked.reference()` answers a short TEXT token (so it
-fits a preference, a database row or the session store); `redeem(token)`
+**Recommendation: B.** `picked.reference()` answers a TEXT token, bounded at
+8 KiB (so it fits a preference, a database row or the session store; a macOS
+bookmark is hundreds of bytes to several KiB before base64), in an envelope
+kaya owns: `kaya-ref1:<platform-tag>:<payload>:<check>`, where the tag names
+the platform that minted it (`mac`, `ios`, `android`, `gtk`, `win`), the
+payload is base64url of the platform's bytes, and the check is a short
+checksum over the rest. "Foreign" is then decidable on every platform (a
+wrong prefix, an unknown or other platform's tag, a bad checksum), a token
+synced from another platform is refused by name instead of being opened as a
+local path, and the `1` lets the format move later (F4). `redeem(token)`
 answers an ordinary picked handle, with `open`, `save` and `local_path`
 exactly as a dialog's, or a refusal (SR12); `forget(token)` releases what the
 platform counts. A list of recent files is app data, not kaya's. Lowering:
@@ -624,14 +739,14 @@ platform counts. A list of recent files is app data, not kaya's. Lowering:
 |---|---|---|
 | macOS | a bookmark (`bookmarkData`), security-scoped when the process is sandboxed | `URL(resolvingBookmarkData:)`; a stale bookmark is re-minted and the new token handed back with the handle |
 | iOS | a plain bookmark, made while the picked URL's scope is held | resolve, then start the scope on each open as today |
-| Android | `takePersistableUriPermission` with the flags the pick granted, the URI as the token | open through the resolver as today; `forget` releases the grant |
-| GTK | the path | the path |
-| WinUI | the path | the path |
+| Android | `takePersistableUriPermission` with the flags the pick granted; the URI is the payload | open through the resolver as today; `forget` releases the grant |
+| GTK | the path is the payload | the path |
+| WinUI | the path is the payload | the path |
 
 The safe save keeps its rule: Android's arm releases its grant at step 5
-"unless the app already held one", and a minted reference is that grant. A
-reference needs no handle release on the desktops; `forget` is a no-op there
-and still answers success, so app code is the same everywhere.
+"unless the app already held one", and a minted reference is that grant.
+`forget` means the same durable thing everywhere: it removes the token from
+the durable count (SR13), and on Android also releases the grant.
 
 ### SR12. A reference that no longer resolves
 
@@ -645,7 +760,8 @@ the file no longer exists (the path or the bookmark's file id is gone); the
 grant is gone (Android has no persisted permission for the URI, or iOS
 answers EPERM after the bookmark resolved); the provider does not answer (the
 resolver threw for an authority with no installed provider); the token is not
-one this app minted (a malformed or foreign token); and, at mint time, the
+a kaya reference for this platform (no `kaya-ref1:` prefix, a bad checksum,
+or another platform's tag, which the sentence names); and, at mint time, the
 cap (SR13). Where kaya cannot tell two of these apart (a revoked grant and a
 deleted document can look the same to Android's resolver) the sentence says
 so and prints what it saw. A failed redeem does not forget the token; the app
@@ -661,11 +777,29 @@ meets.
 own limit, answered by `reference_limit()`; C. no cap, and the 129th mint
 fails on old Android only.
 
-**Recommendation: A.** One semantics: a process holds at most 128 live
-references on every platform, kaya counts the ones it minted and not yet
-forgot, and the 129th mint fails naming the cap and `forget`. 128 is far past
-an Open Recent menu (10 to 20) and an editor's tabs. C is the divergence the
-invariants forbid.
+**Recommendation: A, counted over the DURABLE set** (F3). One semantics: an
+app holds at most 128 live references on every platform, ACROSS LAUNCHES,
+and the 129th mint fails naming the cap and `forget`. A per-process count
+cannot deliver that: Android's limit is on persisted grants, which belong to
+the package and outlive the process, so an app that mints 100 per launch
+would hold 0 by a process count and 200 by Android's.
+
+- **Android**: the OS is the ledger. The count is
+  `getPersistedUriPermissions().size` at mint time; a re-mint of a URI that
+  is already persisted is free (Android counts a URI once, and taking it
+  again only touches its persisted time); and while a safe save holds its own
+  temporary grant (safesave.rs `Grant::Taken`), that grant is not counted
+  against the app, so the cap test is `size - temporary < 128`.
+- **The other four**: kaya keeps a small ledger of minted tokens beside the
+  safe save's own notes (`kaya-safesave/grants/` is its precedent, a
+  cross-launch note of the same kind), one entry per distinct target; a
+  re-mint of the same target is free, `forget` removes the entry, and the cap
+  reads the ledger.
+
+128 is far past an Open Recent menu (10 to 20) and an editor's tabs. B
+(`reference_limit()`) is the honest fallback if a ledger were judged too
+much, as a platform carve-out stated in every binding; C is the divergence
+the invariants forbid.
 
 ### SR14. Where it lives, its format, its size
 
@@ -681,12 +815,21 @@ invariants forbid.
 | Windows | `%LOCALAPPDATA%\<id>\kaya-session\` |
 
 Under the harness it is scratch like the other two stores. The format is
-JSON: a header (format, app id, the app's restore version, generation, the
-first-idle mark), the shape (SR9), the facets by scope and id, and the app's
-values by scope and key, readable by a person debugging a restore. Bound:
-256 KiB for the file; a store set that would pass it is refused by name, and
-facets are trimmed oldest scope first. Android's Bundle limit does not apply, since only the token rides the
-Bundle.
+JSON: a header (format, app id, the app's restore version, the session id
+(SR6), the writer's pid and start time, the first-idle mark), the shape
+(SR9), the facets by scope and id, and the app's values by scope and key,
+readable by a person debugging a restore. Bound: 256 KiB for the file; a
+store set that would pass it is refused by name, and facets are trimmed
+oldest scope first. A durable reference stored as a value counts at its full
+envelope length (SR11's 8 KiB bound), so at most about 30 maximal tokens fit
+one file; an app holding more keeps them in its own data. Android's Bundle
+limit does not apply, since only the session id rides the Bundle.
+
+Two processes of one app (F12): a launch that finds a file whose writer pid
+is alive with the recorded start time does not resume it and writes nothing
+for its whole life; it starts fresh, `restored()` answers `fresh`, and one
+line on stderr names the live writer. This is the file sweep's live-writer
+branch (§4).
 
 ### SR15. The scene, the doors and the reads
 
@@ -704,13 +847,16 @@ The doors, named per runner in `RELAUNCH_DOOR`:
 
 - `relaunch resume`: the platform's continuation. Android: home, `am kill` of
   the backgrounded package (process death), then a launch from Recents. iOS:
-  background, `simctl terminate`, launch. macOS: a quit that keeps windows.
-  GTK and WinUI: a clean close and the plain launch.
+  background, `simctl terminate`, launch. macOS: a clean quit through
+  AppKit's terminate with the scratch domain's `NSQuitAlwaysKeepsWindows`
+  false. GTK and WinUI: a clean close and the plain launch.
 - `relaunch fresh`: the user's dismissal. Android: `am force-stop` or a task
   removal. iOS: the switcher's force quit if the driver can reach it, else a
-  token-clearing knob stated as such. macOS: Quit and Close All Windows. GTK
-  and WinUI: kaya's own `restoration` knob for the act, since no dismissal
-  exists to drive.
+  token-clearing knob stated as such. macOS: the harness sets the scratch
+  domain's `NSQuitAlwaysKeepsWindows` to true for the act and quits cleanly,
+  which is the user's own setting doing what it does (F5, F15). GTK and
+  WinUI: kaya's own `restoration` knob for the act, since no dismissal exists
+  to drive.
 
 New verbs, in both interpreters (check-verbs): `expect_restored
 <fresh|resumed|recovered>`, `expect_reference <name> <ok|missing|revoked|
@@ -760,3 +906,29 @@ Order: §5. The editor goes first because it needs both halves.
 Measured for this pass: §1.5 (GTK 4.24.0 on the lane exports no session API),
 §1.3 (`NSQuitAlwaysKeepsWindows` absent on this host). Everything else in §1
 is cited. To be measured before the build relies on it: §5 step 0 (a) to (d).
+
+## §8. What the independent review changed (2026-11-17)
+
+An independent review (findings F1 to F15) checked the plan's citations and
+code claims; the maintainer accepted every recommendation with its fold-ins.
+Each fold-in sits at the ruling it changes:
+
+- F1: a rich textarea's selection IS reported (`text_selected`); §0, SR1 (c),
+  and SR4's line that a restored selection is reported the same way.
+- F2: no divider facet; P8's permanent sidebar memory stands (§0, SR1's table).
+- F3: SR13's cap counts the durable set, across launches; §4's cap test.
+- F4: SR11's `kaya-ref1:` envelope, bounded at 8 KiB; SR12's foreign branch;
+  SR14 counts it.
+- F5: every kaya window non-restorable on the Mac, SR6's answer read from
+  `NSQuitAlwaysKeepsWindows`, SR9 the only party that recreates aux windows;
+  §5 step 0 (a) and SR15's Mac doors.
+- F6: the platform token is a session id stable for the process (SR6).
+- F7: a For's restored position is held until its key arrives (SR4).
+- F8: the store's types are prefs' four (SR3).
+- F9: where `restored()` becomes final, per platform (SR4).
+- F10: the primary's scope adopted without a call, an aux window's through
+  `create_window(id).restore(scope)`, window ids the app's (SR9).
+- F11: under `restoration(false)` a set succeeds into memory (SR7).
+- F12: the file carries its writer's pid and start time (SR14).
+- F13, F14: §1.1's and §1.2's citations.
+- F15: §4's guards.
