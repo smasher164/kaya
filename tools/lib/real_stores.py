@@ -4,12 +4,17 @@ none of them (docs/traps.md, a gate wrote the user's real session store).
 Every root an app's own store lives under (prefs, data, session, reference
 ledger) on the host this runs on, filtered to `dev.kaya*` entries; a
 `.selftest` preference suite is the harness's scratch by name and is left
-out. A snapshot is {path: (kind, size, mtime_ns)}; `moved` names what a run
-created, changed or removed.
+out. A snapshot is {path: (kind, size, mtime_ns)}, a preference plist's by
+its parsed content instead, since cfprefsd rewrites one whose content a run
+left as it found it (the mac lane's windowmem sentinel plants and removes a
+key by design; docs/traps.md, AppKit's frame autosave); `moved` names what a
+run created, changed or removed.
 """
 
+import hashlib
 import os
 import pathlib
+import plistlib
 import sys
 
 PREFIX = "dev.kaya"
@@ -37,6 +42,13 @@ def _entry(path):
     except OSError:
         return None
     kind = "dir" if path.is_dir() and not path.is_symlink() else "file"
+    if kind == "file" and path.suffix == ".plist":
+        try:
+            with open(path, "rb") as f:
+                content = repr(sorted(plistlib.load(f).items()))
+            return ("plist", hashlib.sha256(content.encode()).hexdigest(), 0)
+        except (OSError, plistlib.InvalidFileException, ValueError):
+            pass
     return (kind, 0 if kind == "dir" else st.st_size, 0 if kind == "dir" else st.st_mtime_ns)
 
 
