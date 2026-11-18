@@ -1874,6 +1874,10 @@ PREF_SENTENCES = {
     # which is what the eight did until the ruling, and what made the
     # observable differ from Rust's panic.
     "nodir": ("kaya: app_data_dir asked", "attach)"),
+    # The session store's walls are the preferences' (docs/restoration-plan.md
+    # SR3), in its own words.
+    "sreserved": ("kaya: session key", "own)"),
+    "sempty": ("kaya: a session key", "empty"),
 }
 
 # Rust composes the reserved sentence in prefs.rs (reserved_refusal) and
@@ -1903,6 +1907,28 @@ PREF_SENTENCE_FILES = {
     },
     "nodir": {
         "rust": "crates/kaya/src/app.rs",
+        "python": "bindings/python/kaya/__init__.py",
+        "go": "bindings/go/app.go",
+        "csharp": "bindings/csharp/KayaApp.cs",
+        "java": "bindings/java/dev/kaya/KayaApp.java",
+        "swift": "bindings/swift/KayaApp.swift",
+        "ocaml": "bindings/ocaml/kaya_app.ml",
+        "haskell": "bindings/haskell/KayaApp.hs",
+        "js": "bindings/js/kaya/index.ts",
+    },
+    "sreserved": {
+        "rust": "crates/kaya/src/session.rs",
+        "python": "bindings/python/kaya/__init__.py",
+        "go": "bindings/go/app.go",
+        "csharp": "bindings/csharp/KayaApp.cs",
+        "java": "bindings/java/dev/kaya/KayaApp.java",
+        "swift": "bindings/swift/KayaApp.swift",
+        "ocaml": "bindings/ocaml/kaya_app.ml",
+        "haskell": "bindings/haskell/KayaApp.hs",
+        "js": "bindings/js/kaya/index.ts",
+    },
+    "sempty": {
+        "rust": "crates/kaya/src/session.rs",
         "python": "bindings/python/kaya/__init__.py",
         "go": "bindings/go/app.go",
         "csharp": "bindings/csharp/KayaApp.cs",
@@ -1977,6 +2003,10 @@ PREF_SENTENCE_NEGATIVES = {
               (r"kaya: a preference key", "kaya: a pref key")),
     "nodir": ((r"before the platform handed", "before the platform"),
               (r"kaya: app_data_dir asked", "kaya: app_data_dir wanted")),
+    "sreserved": ((r"the kaya\. prefix is", "the kaya. is"),
+                  (r"kaya: session key", "kaya: sess key")),
+    "sempty": ((r"session key must not", "session key must"),
+               (r"kaya: a session key", "kaya: a sess key")),
 }
 _pref_said = []
 _pref_skipped = []
