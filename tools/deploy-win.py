@@ -2203,9 +2203,9 @@ def act2_answer(name, door, outfile, log):
 # user starts it, with nothing pending and no KAYA_* telling the process it is
 # a test — the marker act one left is the whole signal
 # (tools/guest/relaunch-launch.ps1 carries the rest).
-def plain_door(name, scene, log):
+def plain_door(name, scene, log, exe=None):
     decl = app_identity.load(ROOT)
-    exe = f"{lane.RELAUNCH_EXE.get(scene, scene)}.exe"
+    exe = exe or f"{lane.RELAUNCH_EXE.get(scene, scene)}.exe"
     outfile = f"out_{name}-act2.txt"
     run_ssh(f"del C:\\kaya\\{outfile} 2>nul & schtasks /create /tn "
             f'kaya_{name}_act2 /tr "C:\\kaya\\relaunch-launch.cmd {name} '
@@ -2259,7 +2259,7 @@ def second_act(name, out, log):
     # the wrong door here waits out its ceiling naming no cause.
     asked = [ln.strip() for ln in out.splitlines()
              if ln.strip().startswith("KAYA_RELAUNCH:")]
-    if door in ("launch", "link") and f"KAYA_RELAUNCH: door {door}" not in out:
+    if door in ("launch", "link", *lane.POOLED_DOORS) and f"KAYA_RELAUNCH: door {door}" not in out:
         print(f"{name}: FAIL — act one never printed `KAYA_RELAUNCH: door "
               f"{door}`, so this lane's {door} door is not the one the scene "
               f"asked for. What it printed: "
@@ -2267,6 +2267,22 @@ def second_act(name, out, log):
         return False
     if door == "launch":
         return plain_door(name, scene, log)
+    # ACT ONE HAS EXITED before the door opens: a process still terminating
+    # holds the session lock, and act two then starts fresh by design
+    # (docs/traps.md, act one's kernel-held exit and the session lock).
+    if door in lane.POOLED_DOORS and "EXIT=" not in out:
+        waited = run_ssh_out(f"powershell -NoProfile -ExecutionPolicy Bypass -File "
+                             f"C:\\kaya\\wait-exit.ps1 out_{name}.txt {ACT_ONE_EXIT_S} -ExitOnly",
+                             log=log) or ""
+        if "EXIT=" not in waited:
+            print(f"{name}: FAIL — act one's process was still terminating "
+                  f"{ACT_ONE_EXIT_S}s after its verdict, so act two would find "
+                  f"its session lock held and start fresh", file=log)
+            return False
+        print(f"{name}: act one's process exited after its verdict; the door opens now",
+              file=log)
+    if door in lane.POOLED_DOORS:
+        return plain_door(name, scene, log, lane.act2_launcher(name))
     if door == "link":
         # THE URL COMES OFF ACT ONE'S OWN LINE, never re-parsed out of the
         # scene: the harness printed what it was given, so the door opens the
@@ -2306,6 +2322,7 @@ def second_act(name, out, log):
 
 
 WAIT_EXIT_GUEST_S = 290
+ACT_ONE_EXIT_S = 120
 
 
 def run_one_suite(name, slot, log):

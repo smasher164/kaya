@@ -146,6 +146,21 @@ def names(win):
     leg's inner one."""
     out = [win.launcher(leg) for leg in win.legs()]
     out += [win.packaged_inner(leg) for leg in win.legs() if leg in win.PACKAGED_LEGS]
+    out += [win.act2_launcher(leg) for leg in win.legs()
+            if win.RELAUNCH_DOOR.get(win.scene_lang(leg)[0]) in win.POOLED_DOORS]
+    return out
+
+
+def _act2(win, leg):
+    """The leg's own command for its second act: the state home kept (act
+    one's harness tree is what act two continues), no scene named, and the
+    output left to the door, which keeps it."""
+    out = []
+    for line in _guest(win, leg):
+        if line in STATE_HOME or line.startswith(("rmdir ", "set KAYA_SELFTEST=", "set KAYA_VERB_TRACE=", "echo EXIT=")):
+            continue
+        suffix = f" > {_out(leg)} 2>&1"
+        out.append(line[:-len(suffix)] if line.endswith(suffix) else line)
     return out
 
 
@@ -154,6 +169,8 @@ def text(win, name):
     LF-only file past a 512-byte boundary)."""
     if name.startswith("pkg_"):
         lines = _packaged_inner(win, name[len("pkg_"):-len(".cmd")])
+    elif name.startswith("act2_"):
+        lines = _act2(win, name[len("act2_"):-len(".cmd")])
     else:
         leg = name[len("run_"):-len(".cmd")]
         if leg not in set(win.legs()):

@@ -8337,6 +8337,22 @@ impl Scene {
         crate::session::report_facet(crate::session::Scope::Window(window.0), &id, saved);
     }
 
+    /// Each named For container and its copies' roots, for a backend that
+    /// finds the top row by geometry (SR1's row form).
+    pub(crate) fn named_for_copies(&self) -> Vec<(WidgetId, Vec<WidgetId>)> {
+        let mut out: HashMap<WidgetId, Vec<WidgetId>> = HashMap::new();
+        for ((collection, path, _), stamp) in &self.stamps {
+            let Some(site) = self.for_sites.get(&(*collection, path.clone())) else { continue };
+            if self.facet_owner(site.container).is_none() {
+                continue;
+            }
+            if let Some(root) = stamp.roots.first() {
+                out.entry(site.container).or_default().push(*root);
+            }
+        }
+        out.into_iter().collect()
+    }
+
     /// The surfaces as the session file records them (SR9).
     fn session_shape(&self) -> crate::session::Shape {
         let mut windows: Vec<WindowId> = self.windows.iter().copied().collect();

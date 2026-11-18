@@ -847,6 +847,19 @@ pub(crate) fn save_point() {
     idle();
 }
 
+/// The `_exit` save point (SR5): writes what changed, and neither marks the
+/// first idle nor loads a store this process never touched.
+pub(crate) fn exit_flush() {
+    let mut guard = match STORE.try_lock() {
+        Ok(g) => g,
+        Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return,
+    };
+    if let Some(store) = guard.as_mut() {
+        flush_locked(store);
+    }
+}
+
 /// ACT ONE'S RESET: the scratch session goes with the other scratch stores.
 pub(crate) fn clear_selftest_scratch() {
     if !crate::prefs::selftest() {

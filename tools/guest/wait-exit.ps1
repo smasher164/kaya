@@ -4,7 +4,7 @@
 # fully terminates, and a terminating process can be KERNEL-HELD ~60s
 # past its verdict (docs/traps.md "exit() is not final on Windows"), so
 # the verdict gets a short grace and the wait leaves under KAYA_LINGER.
-param([string]$File, [int]$Seconds = 290)
+param([string]$File, [int]$Seconds = 290, [switch]$ExitOnly)
 $path = "C:\kaya\$File"
 $deadline = (Get-Date).AddSeconds($Seconds)
 $verdictSeen = $null
@@ -17,7 +17,7 @@ while ((Get-Date) -lt $deadline) {
         if (-not $verdictSeen -and (Select-String -Quiet -SimpleMatch -Pattern 'KAYA_SELFTEST:' -Path $path)) {
             $verdictSeen = (Get-Date)
         }
-        if ($verdictSeen -and ((Get-Date) - $verdictSeen).TotalSeconds -gt 6) {
+        if (-not $ExitOnly -and $verdictSeen -and ((Get-Date) - $verdictSeen).TotalSeconds -gt 6) {
             $linger = $true
             break
         }

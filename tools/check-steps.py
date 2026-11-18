@@ -3571,7 +3571,8 @@ def relaunch_lane_problems(lane_mod):
         if not door.strip():
             bad.append(f"tools/lib/lanes/win.py: {scene!r}'s door has no name")
         for leg in lane_mod.legs():
-            if lane_mod.scene_lang(leg)[0] == scene and not lane_mod.alone(leg):
+            if lane_mod.scene_lang(leg)[0] == scene and not lane_mod.alone(leg) \
+                    and door not in lane_mod.POOLED_DOORS:
                 bad.append(
                     f"tools/lib/lanes/win.py: {leg} runs a scene with a "
                     f"relaunch door and is POOLED — the door reaches "
@@ -3867,7 +3868,7 @@ if not js_launchers([], _node_version_s):
     selftest_fail("an EMPTY JS launcher census passed")
 out = js_launchers(
     [(n, win_launchers.text(win_lane, n).encode("ascii")) for n in win_launchers.names(win_lane)
-     if n.endswith("_js.cmd") or n == "run_js.cmd"],
+     if n.startswith("run_") and n.endswith("_js.cmd") or n == "run_js.cmd"],
     _node_version_s)
 if out:
     print("check-steps: a JS launcher strays from the one shape the lane "
@@ -5221,7 +5222,7 @@ out = go_desktop_scenes(
       read_rel("tools/linux/run-suites.sh")),
      ("tools/guest", "cmd-dir",
       [(f"tools/lib/win_launchers.py {n}", win_launchers.text(win_lane, n))
-       for n in win_launchers.names(win_lane) if n.endswith("_go.cmd")])])
+       for n in win_launchers.names(win_lane) if n.startswith("run_") and n.endswith("_go.cmd")])])
 if out:
     print("check-steps: a desktop Go leg selects a scene the one Go "
           "binary does not carry (guests/go/cmd/scenes.go's table):",

@@ -21,7 +21,19 @@ package kaya
 // long, so this declaration is the one in winbase.h.
 unsigned long __stdcall GetCurrentThreadId(void);
 static uint64_t kaya_go_thread_id(void) { return (uint64_t)GetCurrentThreadId(); }
+#include <stdlib.h>
+unsigned long __stdcall GetEnvironmentVariableA(const char *name, char *buffer, unsigned long size);
+// The process block, read each call: the CRT's copy behind getenv never
+// sees the core's SetEnvironmentVariable. Malloc'd; the caller frees.
+static char *kaya_go_block_getenv(const char *name) {
+	unsigned long n = GetEnvironmentVariableA(name, NULL, 0);
+	if (n == 0) return NULL;
+	char *out = malloc(n);
+	if (out != NULL && GetEnvironmentVariableA(name, out, n) >= n) { free(out); out = NULL; }
+	return out;
+}
 #else
+static char *kaya_go_block_getenv(const char *name) { (void)name; return NULL; }
 #include <pthread.h>
 static uint64_t kaya_go_thread_id(void) { return (uint64_t)(uintptr_t)pthread_self(); }
 #endif
@@ -103,6 +115,15 @@ func Env(name string) string {
 func LookupEnv(name string) (string, bool) {
 	key := C.CString(name)
 	defer C.free(unsafe.Pointer(key))
+	// docs/traps.md, a relaunch leg's second act met its first still exiting.
+	if runtime.GOOS == "windows" {
+		value := C.kaya_go_block_getenv(key)
+		if value == nil {
+			return "", false
+		}
+		defer C.free(unsafe.Pointer(value))
+		return C.GoString(value), true
+	}
 	// getenv returns a pointer INTO the host's environ, live and
 	// borrowed; GoString copies before anything can rewrite it.
 	value := C.getenv(key)

@@ -27,9 +27,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 import door_record
+
+TEE_GRACE_S = 2
 
 WORK = pathlib.Path("/work")
 INSTALL_DESKTOP = WORK / "tools/linux/install-desktop.py"
@@ -37,10 +40,25 @@ ACT2_EXEC = WORK / "tools/linux/act2-exec.sh"
 LAUNCH_ENTRY = WORK / "tools/linux/launch-entry.py"
 MARKER = "marker"
 VERDICT = "act2.verdict"
-# The door this leg pushes, and the name act one prints for it. ONE
-# SPELLING: tools/linux/run-suites.sh carries `RELAUNCH_DOOR_<SCENE>=`
-# with the same word, and check-steps.py reads that line.
+# The doors this leg pushes, both the app's entry: GTK has no rule that
+# tells a continuation from a dismissal (docs/restoration-plan.md SR15).
+# ONE SPELLING: tools/linux/run-suites.sh exports `RELAUNCH_DOOR_<SCENE>=`
+# with the word act one prints, check-steps.py reads that line, and this
+# leg reads the same variable for the scene it runs.
 DOOR = "launch"
+DOORS = (DOOR, "resume")
+
+
+def scene_door(env):
+    """The door run-suites.sh named for this leg's scene, or why none."""
+    scene = env.get("KAYA_SELFTEST", "")
+    name = f"RELAUNCH_DOOR_{scene.upper()}"
+    door = env.get(name)
+    if door in DOORS:
+        return door, None
+    return None, (f"FAILED — {name} is {door!r}, not one of {DOORS}: "
+                  f"run-suites.sh names the door each relaunch scene's "
+                  f"act one prints, and this leg pushes no other")
 # The environment act two may not inherit: the scene name is the marker's
 # to name, and a stale act-two directory would be adopted from the wrong
 # run.
@@ -181,11 +199,26 @@ def tee(argv, env):
         argv, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, errors="replace", bufsize=1)
     lines = []
-    for line in process.stdout:
-        lines.append(line)
-        sys.stdout.write(line)
-        sys.stdout.flush()
-    return process.wait(), "".join(lines)
+
+    def pump():
+        for line in process.stdout:
+            lines.append(line)
+            sys.stdout.write(line)
+            sys.stdout.flush()
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+    rc = process.wait()
+    # ACT ONE ENDS WHEN ITS PROCESS DOES, not at EOF: under a11y-leg.sh a
+    # process act one started can keep the pipe open, and the leg then
+    # waited out its 180 s with act one green (2026-11-18, every
+    # restore leg on the linux lane).
+    reader.join(TEE_GRACE_S)
+    if reader.is_alive():
+        say(f"act one exited {rc}, and its output pipe was still open "
+            f"{TEE_GRACE_S}s later (a process it started holds it); "
+            f"carrying on with what it printed")
+    return rc, "".join(lines)
 
 
 def door_findings(act_one_output, wanted):
@@ -223,7 +256,8 @@ def act_one_then_door(argv, env, app_id, entry, home, bus):
             f"not driven — a door pushed after a failed first act would "
             f"measure nothing.")
         return act_one_rc
-    bad = door_findings(act_one_output, DOOR)
+    door, why = scene_door(env)
+    bad = [why] if why else door_findings(act_one_output, door)
     for line in bad:
         say(line)
     if bad:
@@ -364,12 +398,25 @@ def self_test():
                        for f in got):
                 say(f"SELF-TEST FAILED — N6 accepted {label}: {got!r}")
                 failures += 1
+        # N7 — the scene's door, read from run-suites.sh's export.
+        for label, env, want in (
+                ("the export", {"KAYA_SELFTEST": "restore",
+                                "RELAUNCH_DOOR_RESTORE": "resume"}, "resume"),
+                ("no export", {"KAYA_SELFTEST": "restore"}, None),
+                ("a door this leg cannot push",
+                 {"KAYA_SELFTEST": "tasks",
+                  "RELAUNCH_DOOR_TASKS": "portal-action"}, None)):
+            door, why = scene_door(env)
+            print(f"persist-leg: self-test N7 — {label}: door {door!r}")
+            if door != want or (want is None and "not one of" not in why):
+                say(f"SELF-TEST FAILED — N7 {label}: {door!r} {why!r}")
+                failures += 1
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
     if failures:
         say(f"SELF-TEST FAILED — {failures} clause(s)")
         return 1
-    print("persist-leg: self-test — 6 clause(s), every refusal watched "
+    print("persist-leg: self-test — 7 clause(s), every refusal watched "
           "firing")
     return 0
 

@@ -390,6 +390,7 @@ pub fn run(app_main: impl FnOnce(AppCtx) + Send + 'static) -> ! {
 /// Node-API". What is flushed is this crate's own stdio.
 pub(crate) fn exit_hard(code: i32) -> ! {
     use std::io::Write;
+    session::exit_flush();
     let _ = std::io::stderr().flush();
     let _ = std::io::stdout().flush();
     #[cfg(windows)]

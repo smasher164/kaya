@@ -60,6 +60,8 @@ SCENES = [
     "grounds", "shapes", "cards", "tracks", "dock",
     # Views over views (docs/layering-plan.md LY13).
     "layers",
+    # Session restoration (docs/restoration-plan.md SR15).
+    "restore", "restoredocs", "references",
 ]
 
 # Scenes this lane declares off rather than wires (tools/check-steps.py
@@ -72,10 +74,7 @@ OFF_SCENES = {"chatkeyboard": "Windows has no software keyboard on this lane (do
               "editorkeyboard": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)",
               "windowmem": "TwoPaneView and NavigationView have no sidebar divider a user can drag (docs/tasks-s4-plan.md P8)",
               "saferestore": "a rename cannot leave a backup, so there is no second act to run (docs/rich-document-plan.md §4.1)",
-              "auxquit": "AppKit's window restoration is the Mac's alone (docs/traps.md, SwiftUI reopens an aux window after a quit)",
-              "restore": "the Mac first, depth then breadth; the fan-out wires it (docs/restoration-plan.md §5)",
-              "references": "the Mac first, depth then breadth; the fan-out wires it (docs/restoration-plan.md §5)",
-              "restoredocs": "the Mac first, depth then breadth; the fan-out wires it (docs/restoration-plan.md §5)"}
+              "auxquit": "AppKit's window restoration is the Mac's alone (docs/traps.md, SwiftUI reopens an aux window after a quit)"}
 
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
 # exclusive.py): the drag family, already alone inside this lane for the
@@ -177,7 +176,14 @@ def packaged_inner(leg):
 # door needs relaunch-com.ps1's user-environment trick because a LocalServer32
 # is started by the COM service instead).
 RELAUNCH_DOOR = {"tasks": "com-activator", "taskspersist": "launch",
-                 "links": "link"}
+                 "links": "link",
+                 # WinUI has no rule that tells a continuation from a
+                 # dismissal (docs/restoration-plan.md SR15): the plain door,
+                 # through each leg's act2_<leg>.cmd (tools/lib/win_launchers.py).
+                 "restore": "resume", "restoredocs": "resume", "references": "resume"}
+# The doors that start the leg's own act-two launcher by path, so a pooled
+# neighbour cannot answer them (check-steps' relaunch clause).
+POOLED_DOORS = {"resume"}
 # The door scripts the runner drives (tools/guest/, shipped by the deploy),
 # one per door.
 RELAUNCH_DOOR_SCRIPT = "relaunch-com.ps1"
@@ -312,6 +318,9 @@ ORDER = [
      # A self-view over a player (docs/layering-plan.md LY7).
      "layersvideo_rust",
      "rust", "python", "js", "go", "csharp", "java",
+     # SESSION RESTORATION (docs/restoration-plan.md SR15), pooled:
+     # POOLED_DOORS.
+     "restore_rust", "restore_python", "restore_js", "restore_go", "restore_csharp", "restore_java", "restoredocs_rust", "restoredocs_python", "restoredocs_js", "restoredocs_go", "restoredocs_csharp", "restoredocs_java",
      "entry_rust", "entry_python", "entry_js", "entry_go", "entry_csharp", "entry_java",
      "gallery_rust", "gallery_python", "gallery_js", "gallery_go", "gallery_csharp", "gallery_java",
      "todos_rust", "todos_python", "todos_js", "todos_go", "todos_csharp", "todos_java",
@@ -838,6 +847,26 @@ ORDER = [
     [
      "filedialog_java",
     ],
+    # A durable reference's pick (docs/restoration-plan.md SR11): the
+    # filedialog rule, one leg per drain.
+    [
+     "references_rust",
+    ],
+    [
+     "references_python",
+    ],
+    [
+     "references_js",
+    ],
+    [
+     "references_go",
+    ],
+    [
+     "references_csharp",
+    ],
+    [
+     "references_java",
+    ],
     # A clip picked through the Shell's dialog and played (docs/media-plan.md
     # §2): the filedialog rule, one leg per drain.
     [
@@ -1024,6 +1053,12 @@ def scene_lang(leg):
 def launcher(leg):
     """The checked-in guest launcher a leg runs (tools/guest/)."""
     return f"run_{leg}.cmd"
+
+
+def act2_launcher(leg):
+    """The launcher a POOLED_DOORS leg's second act starts: the leg's own
+    command with nothing that names a scene."""
+    return f"act2_{leg}.cmd"
 
 
 # A scene that selects a SCRIPT over another scene's guest (the mac lane's

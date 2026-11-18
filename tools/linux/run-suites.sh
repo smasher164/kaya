@@ -67,7 +67,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu hiderows commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet doctabs submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock codesurface fontpick farend layers"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu hiderows commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet doctabs submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock codesurface fontpick farend layers restore restoredocs references"
 # Scenes this lane declares off rather than wires (tools/check-steps.py
 # reads this line): the phone keyboard scripts, since a desktop has no
 # software keyboard (docs/safe-area-plan.md A13); windowmem, since libadwaita's
@@ -75,8 +75,7 @@ SCENES="background stall milestone2 entry search gallery todos reorder feed grow
 # saferestore: a rename cannot leave a backup, so there is no second act
 # to run (docs/rich-document-plan.md §4.1). auxquit: AppKit's window
 # restoration is the Mac's alone (docs/traps.md, SwiftUI reopens an aux window after a quit).
-# restore: the Mac first, depth then breadth (docs/restoration-plan.md §5).
-OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland editorkeyboard windowmem saferestore auxquit restore references restoredocs"
+OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland editorkeyboard windowmem saferestore auxquit"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md
@@ -2194,6 +2193,66 @@ for proto in x11 wayland; do
     run "$proto" scrollto-haskell env KAYA_SELFTEST=scrollto "$(hs_bin scrollto)"
     run "$proto" scrollto-java env KAYA_SELFTEST=scrollto KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
+    # SESSION RESTORATION (docs/restoration-plan.md SR15): GTK has no rule
+    # that tells a continuation from a dismissal, so `relaunch resume` is the
+    # app's entry, persist-leg.py's door.
+    export RELAUNCH_DOOR_RESTORE=resume
+    export RELAUNCH_DOOR_RESTOREDOCS=resume
+    export RELAUNCH_DOOR_REFERENCES=resume
+    run "$proto" restore-rust env KAYA_SELFTEST=restore \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/restore"
+    run "$proto" restore-python env KAYA_SELFTEST=restore KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh python3 /work/guests/python/restore.py
+    run "$proto" restore-js env KAYA_SELFTEST=restore KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh node /work/guests/js/restore.ts
+    run "$proto" restore-go env KAYA_SELFTEST=restore \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" restore-csharp env KAYA_SELFTEST=restore KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" restore-ocaml env KAYA_SELFTEST=restore KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh /work/_build-linux/default/guests/ocaml/restore.exe
+    run "$proto" restore-haskell env KAYA_SELFTEST=restore \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh "$(hs_bin restore)"
+    run "$proto" restore-java env KAYA_SELFTEST=restore KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" restore-c env KAYA_SELFTEST=restore \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh /tmp/c-guests/restore
+    run "$proto" restoredocs-rust env KAYA_SELFTEST=restoredocs \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/restoredocs"
+    run "$proto" restoredocs-python env KAYA_SELFTEST=restoredocs KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh python3 /work/guests/python/restoredocs.py
+    run "$proto" restoredocs-js env KAYA_SELFTEST=restoredocs KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh node /work/guests/js/restoredocs.ts
+    run "$proto" restoredocs-go env KAYA_SELFTEST=restoredocs \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" restoredocs-csharp env KAYA_SELFTEST=restoredocs KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" restoredocs-ocaml env KAYA_SELFTEST=restoredocs KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh /work/_build-linux/default/guests/ocaml/restoredocs.exe
+    run "$proto" restoredocs-haskell env KAYA_SELFTEST=restoredocs \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh "$(hs_bin restoredocs)"
+    run "$proto" restoredocs-java env KAYA_SELFTEST=restoredocs KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" restoredocs-c env KAYA_SELFTEST=restoredocs \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh /tmp/c-guests/restoredocs
+    run "$proto" references-rust env KAYA_SELFTEST=references \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/references"
+    run "$proto" references-python env KAYA_SELFTEST=references KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh python3 /work/guests/python/references.py
+    run "$proto" references-js env KAYA_SELFTEST=references KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh node /work/guests/js/references.ts
+    run "$proto" references-go env KAYA_SELFTEST=references \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" references-csharp env KAYA_SELFTEST=references KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" references-ocaml env KAYA_SELFTEST=references KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh /work/_build-linux/default/guests/ocaml/references.exe
+    run "$proto" references-haskell env KAYA_SELFTEST=references \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh "$(hs_bin references)"
+    run "$proto" references-java env KAYA_SELFTEST=references KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" references-c env KAYA_SELFTEST=references \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh /tmp/c-guests/references
     # FULLSCREEN (docs/fullscreen-plan.md §5), on the protocols the lane
     # table admits, with this lane's header-bar steps appended (§9).
     if scene_runs_on fullscreen "$proto"; then

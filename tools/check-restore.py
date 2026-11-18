@@ -29,16 +29,16 @@ CORE = {
 REPORTS = {
     (SWIFTUI, "caret"): "KayaHost.sessionCaret(",
     (SWIFTUI, "row"): "KayaHost.sessionTopRow(",
+    (GTK, "caret"): "core.scene.report_caret(",
+    (GTK, "row"): "core.scene.report_top_row(",
+    (WINUI, "caret"): "core.scene.report_caret(",
+    (WINUI, "row"): "core.scene.report_top_row(",
 }
 
 # (backend, facet) -> why it does not report yet. Each row is open work.
 DEFERRED = {
     (COMPOSE, "caret"): "the fan-out (docs/restoration-plan.md §5 step 4)",
     (COMPOSE, "row"): "the fan-out (docs/restoration-plan.md §5 step 4)",
-    (GTK, "caret"): "the fan-out (docs/restoration-plan.md §5 step 4)",
-    (GTK, "row"): "the fan-out (docs/restoration-plan.md §5 step 4)",
-    (WINUI, "caret"): "the fan-out (docs/restoration-plan.md §5 step 4)",
-    (WINUI, "row"): "the fan-out (docs/restoration-plan.md §5 step 4)",
 }
 
 BACKENDS = (SWIFTUI, COMPOSE, GTK, WINUI)
@@ -84,7 +84,7 @@ def census(files):
 files = {p: g.read(p) for p in (SPEC, SESSION, SCENE, *BACKENDS)}
 rows = table(files[SPEC]) or []
 g.counted("facet rows", rows, 2)
-g.counted("reporting arms", [k for k in REPORTS if REPORTS[k] in files[k[0]]], 2)
+g.counted("reporting arms", [k for k in REPORTS if REPORTS[k] in files[k[0]]], 6)
 for line in census(files):
     g.finding(line)
 

@@ -4,6 +4,34 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A relaunch leg's second act met its first still exiting (measured 2026-11-18)
+
+Two ways a `relaunch resume` leg read act one green and act two wrong,
+both on the restoration scenes' first filtered runs off the Mac:
+
+- **Windows: the kernel-held exit holds the session lock.** After a file
+  dialog, act one's process lingers past its verdict (wait-exit.ps1's
+  `KAYA_LINGER`), and the plain door started act two while it lived. Act
+  two's session claim then took the live-writer branch by design ("another
+  live process of this app holds the session file: this launch starts
+  fresh") and the references scene read "no reference" (references_rust and
+  references_csharp; the Python, JS and Java legs exited in time). Guard:
+  deploy-win's second_act waits for act one's `EXIT=` (wait-exit.ps1
+  -ExitOnly, ACT_ONE_EXIT_S) before a POOLED_DOORS door and fails naming
+  the held lock if it never comes.
+- **Windows Go read act two's scene from the CRT's copy.** The Go binding
+  read the environment through `C.getenv`, and on Windows the CRT keeps a
+  copy the core's SetEnvironmentVariable never reaches, so act two (no
+  KAYA_SELFTEST, the scene adopted from the marker) ran milestone2.
+  `kaya.LookupEnv` reads the process block through GetEnvironmentVariableA
+  on Windows (C#'s Env already did the same; check-go-env refuses
+  `syscall.Getenv` with os.Getenv, since Go's own view is empty on Android).
+- **Linux: act one's pipe outlived act one.** persist-leg.py read act one
+  to EOF, and under a11y-leg.sh a process act one started kept the pipe
+  open, so every leg waited out its 180 s with `ACT 1 OK` printed and the
+  guest gone. tee now returns at the process's exit and gives the reader
+  TEE_GRACE_S, saying so when the pipe stayed open.
+
 ## A gate wrote the user's real session store (measured 2026-11-18)
 
 Two gate sweeps on 2026-11-18 created

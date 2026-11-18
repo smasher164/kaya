@@ -2248,6 +2248,7 @@ fn drain_transactions() {
             // HWND to exist (docs/dnd-plan.md D8; probe 2).
             sync_reorder_rows(core);
             arm_ole_route(core);
+            schedule_session_idle();
             // AND THE PRESENTATION, last: a window has no XamlRoot until
             // something is mounted, so the first drain is where the scale
             // and the appearance become askable at all, and it is what
@@ -17628,6 +17629,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 WidgetKind::Scroll => {
                     let viewer = ScrollViewer::new()?;
                     set_scroll_axis(&viewer, false)?;
+                    // A scroll moves a layout pass, not a ViewChanged
+                    // (this backend's bindings project none): SR5's report.
+                    viewer.LayoutUpdated(&EventHandler::<windows_core::IInspectable>::new(|_, _| {
+                        schedule_session_idle();
+                        Ok(())
+                    }))?;
                     core.scrolls.push(viewer.clone());
                     NativeWidget::Scroll(viewer)
                 }
@@ -17813,6 +17820,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // late (docs/rich-text-plan.md §4, the WinUI arm).
                     let selection_field = field.clone();
                     field.SelectionChanged(&RoutedEventHandler::new(move |_, _| {
+                        SESSION_CARETS.with_borrow_mut(|c| c.insert(composing_id));
+                        schedule_session_idle();
                         if !rich_is_on(composing_id) {
                             return Ok(());
                         }
@@ -22306,6 +22315,80 @@ thread_local! {
 /// 2026-09-09, docs/tasks-s4-plan.md P4). The queue is FIFO inside one
 /// priority and every harness step is a Normal-priority hop, so a write
 /// enqueued from the resize runs BEFORE the step that would exit.
+thread_local! {
+    /// Textareas whose selection moved since the last session idle (SR5).
+    static SESSION_CARETS: RefCell<std::collections::BTreeSet<u64>> = RefCell::default();
+    static SESSION_IDLE_QUEUED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// docs/restoration-plan.md SR5: one session idle per pump turn, at the
+/// ordinary priority for schedule_frame_save's reason.
+fn schedule_session_idle() {
+    if SESSION_IDLE_QUEUED.with(|q| q.replace(true)) {
+        return;
+    }
+    let Some(dispatcher) = DISPATCHER.get() else {
+        SESSION_IDLE_QUEUED.with(|q| q.set(false));
+        return;
+    };
+    let handler = DispatcherQueueHandler::new(|| {
+        SESSION_IDLE_QUEUED.with(|q| q.set(false));
+        if CORE.with(|slot| slot.try_borrow_mut().is_err()) {
+            schedule_session_idle();
+            return Ok(());
+        }
+        CORE.with_borrow_mut(|core| {
+            if let Some(core) = core.as_mut() {
+                report_session_facets(core);
+            }
+        });
+        crate::session::idle();
+        Ok(())
+    });
+    if dispatcher.0.TryEnqueue(&handler).is_err() {
+        SESSION_IDLE_QUEUED.with(|q| q.set(false));
+    }
+}
+
+/// SR1's two facets as this backend sees them: each moved textarea's
+/// selection, and the top row of each named For inside a vertical scroll.
+fn report_session_facets(core: &mut CoreState) {
+    for id in SESSION_CARETS.with_borrow_mut(std::mem::take) {
+        let Some(NativeWidget::Textarea(field)) = core.widgets.get(&WidgetId(id)) else { continue };
+        let Ok(text) = Editable::Textarea(field.clone()).text() else { continue };
+        let text = lf(text);
+        let Ok(selection) = field.TextDocument().and_then(|d| d.Selection()) else { continue };
+        let (Ok(from), Ok(to)) = (selection.StartPosition(), selection.EndPosition()) else { continue };
+        if let (Some(start), Some(stop)) = (byte_offset(&text, from), byte_offset(&text, to)) {
+            core.scene.report_caret(WidgetId(id), start as u64, stop as u64);
+        }
+    }
+    for (container, roots) in core.scene.named_for_copies() {
+        let mut top: Option<(f64, WidgetId)> = None;
+        for root in roots {
+            let Some(widget) = core.widgets.get(&root) else { continue };
+            let Ok(element) = widget.identity_element() else { continue };
+            // NOT row_top_in_content: its UpdateLayout would raise the
+            // LayoutUpdated that scheduled this idle.
+            let Ok(Some(viewer)) = scroll_ancestor(&element) else { continue };
+            if viewer_sideways(&viewer).unwrap_or(true) {
+                continue;
+            }
+            let Some(content) = viewer.Content().ok().and_then(|c| windows_core::Interface::cast::<UIElement>(&c).ok()) else { continue };
+            let Some(at) = element.TransformToVisual(&content).ok().and_then(|t| t.TransformPoint(Point { X: 0.0, Y: 0.0 }).ok()) else { continue };
+            let Some(extent) = windows_core::Interface::cast::<FrameworkElement>(&element).ok().and_then(|fe| fe.ActualHeight().ok()) else { continue };
+            let lead = f64::from(at.Y);
+            let Ok((offset, _, _, _)) = scroll_along(&viewer, false) else { continue };
+            if lead + extent > offset + 2.0 && top.is_none_or(|(s, _)| lead < s) {
+                top = Some((lead, root));
+            }
+        }
+        if let Some((_, copy)) = top {
+            core.scene.report_top_row(container, copy);
+        }
+    }
+}
+
 fn schedule_frame_save(window: u64) {
     FRAME_DUE.with_borrow_mut(|due| due.insert(window));
     if FRAME_QUEUED.with(|q| q.replace(true)) {
@@ -22923,6 +23006,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
     mirror_frame(&window)?;
 
     let closed = bindings::Windows::Foundation::TypedEventHandler::new(|_, _| {
+        // docs/restoration-plan.md SR5: a window close is a save point.
+        crate::session::save_point();
         request_exit(0);
         Ok(())
     });

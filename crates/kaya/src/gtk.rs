@@ -2056,6 +2056,72 @@ fn note_composing(id: u64, live: bool) {
     });
 }
 
+thread_local! {
+    /// Textareas whose marks moved since the last session idle (SR5).
+    static SESSION_CARETS: RefCell<std::collections::BTreeSet<u64>> = RefCell::default();
+    static SESSION_IDLE_PENDING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// docs/restoration-plan.md SR5: one session idle per loop turn, at the
+/// default idle priority, which runs after GTK's layout.
+fn schedule_session_idle() {
+    if SESSION_IDLE_PENDING.with(|p| p.replace(true)) {
+        return;
+    }
+    glib::idle_add_local_once(session_idle);
+}
+
+fn session_idle() {
+    if CORE.with(|slot| slot.try_borrow_mut().is_err()) {
+        glib::timeout_add_local_once(std::time::Duration::from_millis(10), session_idle);
+        return;
+    }
+    SESSION_IDLE_PENDING.with(|p| p.set(false));
+    CORE.with_borrow_mut(|core| {
+        let Some(core) = core.as_mut() else { return };
+        report_session_facets(core);
+    });
+    crate::session::idle();
+}
+
+/// SR1's two facets as this backend sees them: each moved textarea's
+/// selection, and the top row of each named For inside a vertical scroll.
+fn report_session_facets(core: &mut CoreState) {
+    use gtk4::prelude::{TextBufferExt, TextViewExt, WidgetExt};
+    for id in SESSION_CARETS.with_borrow_mut(std::mem::take) {
+        let Some(NativeWidget::Textarea(_, view)) = core.widgets.get(&WidgetId(id)) else { continue };
+        let b = view.buffer();
+        let raw = b.text(&b.start_iter(), &b.end_iter(), false).to_string();
+        let (from, to) = match b.selection_bounds() {
+            Some((a, z)) => (a.offset(), z.offset()),
+            None => {
+                let it = b.iter_at_mark(&b.get_insert());
+                (it.offset(), it.offset())
+            }
+        };
+        core.scene.report_caret(WidgetId(id), guest_byte_of(&raw, from), guest_byte_of(&raw, to));
+    }
+    for (container, roots) in core.scene.named_for_copies() {
+        let mut top: Option<(f64, WidgetId)> = None;
+        for root in roots {
+            let Some(widget) = core.widgets.get(&root).map(|w| w.control()) else { continue };
+            if !widget.is_mapped() {
+                continue;
+            }
+            let Some((start, extent, along)) = row_top_in_content(&widget) else { continue };
+            if along.mirrored || scroll_ancestor(&widget).is_some_and(|s| scroll_horizontal(&s)) {
+                continue;
+            }
+            if start + extent > along.adj.value() + 2.0 && top.is_none_or(|(s, _)| start < s) {
+                top = Some((start, root));
+            }
+        }
+        if let Some((_, copy)) = top {
+            core.scene.report_top_row(container, copy);
+        }
+    }
+}
+
 /// Where this rich textarea's selection is now, in guest bytes (R5's
 /// transform is the core's). Deferred: `mark-set` fires inside the
 /// `select_range` apply.
@@ -7572,6 +7638,7 @@ fn drain_transactions() {
             skin_refresh(core);
             refresh_vacancy(core);
             refresh_list_rows(core);
+            schedule_session_idle();
         });
     });
 }
@@ -7688,6 +7755,8 @@ fn wire_close(
                 window: WindowId(id),
             });
         }
+        // docs/restoration-plan.md SR5: a window close is a save point.
+        crate::session::save_point();
         glib::Propagation::Proceed
     });
 }
@@ -16402,6 +16471,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // clipped lines (measured 2026-08-30).
                     set_container_vertical(scrolled.upcast_ref::<gtk4::Widget>(), true);
                     set_scroll_kind(scrolled.upcast_ref::<gtk4::Widget>());
+                    scrolled.vadjustment().connect_value_changed(|_| schedule_session_idle());
                     core.scrolls.push(scrolled.clone());
                     NativeWidget::Scroll(scrolled)
                 }
@@ -16605,8 +16675,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                             if !matches!(
                                 name.as_deref(),
                                 Some("insert") | Some("selection_bound")
-                            ) || !rich.borrow().contains(&wid)
-                            {
+                            ) {
+                                return;
+                            }
+                            SESSION_CARETS.with_borrow_mut(|c| c.insert(wid));
+                            schedule_session_idle();
+                            if !rich.borrow().contains(&wid) {
                                 return;
                             }
                             let raw = b
