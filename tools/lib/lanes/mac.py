@@ -82,7 +82,9 @@ DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "not
                 # docs/restoration-plan.md §5 step 2, rust-only at depth.
                 "restore",
                 # docs/restoration-plan.md §5 step 3, rust-only at depth.
-                "references"]
+                "references",
+                # docs/restoration-plan.md SR9, rust-only at depth.
+                "restoredocs"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -458,6 +460,7 @@ ORDER = [
     ("drain",),
     ("restore", ("rust",)),
     ("references", ("rust",)),
+    ("restoredocs", ("rust",)),
     ("drain",),
     # APP LINKS (docs/app-links-plan.md L5): the tasks guest a third
     # time, warm through NSWorkspace and cold through `open`. Alone
@@ -1343,6 +1346,7 @@ RELAUNCH_DOOR = {"tasks": "launch-notification", "taskspersist": "launch",
                  "auxquit": "resume",
                  "restore": "resume",
                  "references": "resume",
+                 "restoredocs": "resume",
                  # THE LINK DOOR (docs/app-links-plan.md L5): `open` hands
                  # the URL to LaunchServices, which starts the bundle and
                  # delivers it as an Apple event 21 ms in.

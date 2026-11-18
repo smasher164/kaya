@@ -1004,7 +1004,6 @@ pub fn document_session(document: WindowId) -> Session {
     Session { scope: crate::session::Scope::Document(document.0) }
 }
 
-/// Which launch this is (SR6): final before the first build.
 /// A redeemed reference: the file, and the token to keep, which is a new one
 /// when the platform re-minted it (docs/restoration-plan.md SR11).
 #[derive(Debug, Clone, PartialEq)]
@@ -1025,8 +1024,37 @@ pub fn forget(token: &str) {
     crate::capi::forget_reference(token)
 }
 
+/// Which launch this is (SR6): final before the first build.
 pub fn restored() -> Restored {
     crate::session::restored()
+}
+
+/// One window as the last launch left it (docs/restoration-plan.md SR9).
+/// The app recreates it from its scope's values and hands the id back
+/// through [`WindowRef::restore`] / [`DocumentRef::restore`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestoredWindow {
+    pub id: WindowId,
+    pub documents: Vec<WindowId>,
+    pub active_document: Option<WindowId>,
+    pub section: Option<WindowId>,
+    pub depth: u32,
+}
+
+/// The windows the last launch left, the primary first; empty on a fresh
+/// launch. A scope not taken back is discarded at the first idle after the
+/// first build.
+pub fn restored_windows() -> Vec<RestoredWindow> {
+    crate::session::restored_shape()
+        .into_iter()
+        .map(|w| RestoredWindow {
+            id: WindowId(w.window),
+            documents: w.documents.into_iter().map(WindowId).collect(),
+            active_document: w.active.map(WindowId),
+            section: w.section.map(WindowId),
+            depth: w.depth,
+        })
+        .collect()
 }
 
 pub use crate::session::Restored;
@@ -8523,6 +8551,16 @@ impl<'t, 'a> WindowRef<'t, 'a> {
 }
 
 impl WindowRef<'_, '_> {
+    /// Take back the session scope this window was saved under (SR9); an id
+    /// that moved loses it, with one line naming both.
+    pub fn restore(self, saved: WindowId) -> Self {
+        let now = crate::session::Scope::Window(self.window.0);
+        if let Err(why) = crate::session::adopt(crate::session::Scope::Window(saved.0), now) {
+            eprintln!("{why}");
+        }
+        self
+    }
+
     /// The surface's title (title bar / switcher label / task label).
     pub fn title(self, title: &str) -> Self {
         self.tx
@@ -8721,6 +8759,15 @@ pub struct DocumentRef<'t, 'a> {
 }
 
 impl DocumentRef<'_, '_> {
+    /// Take back the session scope this document was saved under (SR9).
+    pub fn restore(self, saved: WindowId) -> Self {
+        let now = crate::session::Scope::Document(self.document.0);
+        if let Err(why) = crate::session::adopt(crate::session::Scope::Document(saved.0), now) {
+            eprintln!("{why}");
+        }
+        self
+    }
+
     /// The tab's label, the phone list's row, and the chrome title while
     /// this document is active.
     pub fn title(self, title: impl Into<LiveSource<StrKind>>) -> Self {

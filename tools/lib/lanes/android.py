@@ -580,7 +580,7 @@ IME_SCENES = ["ranges", "richtext"]
 # by design (the system owns surfaces; DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem", "auxquit"]
 # docs/restoration-plan.md §5: the Mac first, then the fan-out wires it here.
-UNWIRED_SCENES = ["restore", "references"]
+UNWIRED_SCENES = ["restore", "references", "restoredocs"]
 
 
 def scene_of(leg):

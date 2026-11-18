@@ -5401,7 +5401,9 @@ impl Scene {
                     for document in self.documents.remove(&window).unwrap_or_default() {
                         self.document_of.remove(&document);
                         self.mounted_windows.remove(&document);
+                        crate::session::discard_scope(crate::session::Scope::Document(document.0));
                     }
+                    crate::session::discard_scope(crate::session::Scope::Window(window.0));
                     self.active_document.remove(&window);
                     self.region_of.retain(|region, w| {
                         if *w == window {
@@ -7493,6 +7495,7 @@ impl Scene {
         self.absorb_number_writes(&out);
         self.absorb_text_writes(&out);
         self.restore_facets(&commanded, &mut out);
+        crate::session::report_shape(self.session_shape());
 
         let step = group.map(|cap| self.bank_group(cap, &dirty, &rollback, &mut out));
         self.settle_toasts(toast_steps, step, &mut out);
@@ -8334,6 +8337,23 @@ impl Scene {
         crate::session::report_facet(crate::session::Scope::Window(window.0), &id, saved);
     }
 
+    /// The surfaces as the session file records them (SR9).
+    fn session_shape(&self) -> crate::session::Shape {
+        let mut windows: Vec<WindowId> = self.windows.iter().copied().collect();
+        windows.push(crate::protocol::DEFAULT_WINDOW);
+        windows.sort_by_key(|w| w.0);
+        windows
+            .into_iter()
+            .map(|w| crate::session::WindowShape {
+                window: w.0,
+                documents: self.documents.get(&w).map(|d| d.iter().map(|d| d.0).collect()).unwrap_or_default(),
+                active: self.active_document.get(&w).map(|d| d.0),
+                section: self.selected_section.get(&w).map(|d| d.0),
+                depth: self.nav_stacks.get(&w).map_or(0, |s| s.len() as u32),
+            })
+            .collect()
+    }
+
     /// SR4: after the batch that mounts a widget, its saved facet applies
     /// through the app's own ops unless this batch commanded the widget.
     fn restore_facets(&mut self, commanded: &std::collections::HashSet<WidgetId>, out: &mut Vec<ApplyOp>) {
@@ -8355,6 +8375,14 @@ impl Scene {
         let pending = self.facet_pending.take().unwrap_or_default();
         let mut keep = Vec::new();
         for mut facet in pending {
+            match crate::session::facet_gate(facet.window.0) {
+                crate::session::Gate::Go => {}
+                crate::session::Gate::Wait => {
+                    keep.push(facet);
+                    continue;
+                }
+                crate::session::Gate::Drop => continue,
+            }
             let hits: Vec<WidgetId> = self
                 .a11y_ids
                 .iter()
@@ -9557,6 +9585,7 @@ impl Scene {
             "kaya: user selected {section:?} which is not a section of {window:?}"
         );
         self.selected_section.insert(window, section);
+        crate::session::report_shape(self.session_shape());
     }
 
     fn mirror_window_prop(&mut self, window: WindowId, prop: WindowProp, value: &Value) {
@@ -9628,6 +9657,7 @@ impl Scene {
             }
         }
         self.mounted_windows.remove(&document);
+        crate::session::discard_scope(crate::session::Scope::Document(document.0));
         window
     }
 
@@ -9638,6 +9668,7 @@ impl Scene {
             "kaya: user selected {document:?} which is not a document of {window:?}"
         );
         self.active_document.insert(window, document);
+        crate::session::report_shape(self.session_shape());
     }
 
     /// The user reordered a document or dragged it into another existing
@@ -9671,6 +9702,7 @@ impl Scene {
         if from != window {
             self.active_document.insert(window, document);
         }
+        crate::session::report_shape(self.session_shape());
     }
 
     /// The user tore documents out of `source` into a native window the
@@ -9689,12 +9721,14 @@ impl Scene {
         if let Some(first) = documents.first() {
             self.active_document.insert(window, *first);
         }
+        crate::session::report_shape(self.session_shape());
         window
     }
 
     /// An unarmed document closed through the user's act (post-fact).
     pub(crate) fn user_closed_document(&mut self, document: WindowId) {
         self.forget_document(document);
+        crate::session::report_shape(self.session_shape());
     }
 
     #[cfg(test)]
@@ -10234,6 +10268,7 @@ impl Scene {
             "kaya: user pop of {entry:?} but the top of {window:?}'s stack is {top:?}"
         );
         self.mounted_windows.remove(&entry);
+        crate::session::report_shape(self.session_shape());
     }
 
     /// Forget a sheet and every sheet chained over it: the trees go the

@@ -79,12 +79,26 @@ pub(crate) struct Saved {
 /// Facets by scope, then by a11y_id (SR2).
 pub(crate) type Facets = BTreeMap<String, BTreeMap<String, Saved>>;
 
+/// One window as the last launch left it (SR9): its documents in order, the
+/// active one, the selected section and the navigation depth.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct WindowShape {
+    pub(crate) window: u64,
+    pub(crate) documents: Vec<u64>,
+    pub(crate) active: Option<u64>,
+    pub(crate) section: Option<u64>,
+    pub(crate) depth: u32,
+}
+
+pub(crate) type Shape = Vec<WindowShape>;
+
 /// The file as read back, and the launch it makes (§4, the file's sweep).
 #[derive(Debug, PartialEq)]
 pub(crate) struct Swept {
     pub(crate) restored: Restored,
     pub(crate) values: Values,
     pub(crate) facets: Facets,
+    pub(crate) shape: Shape,
     /// The one line the sweep prints, or none for an ordinary launch.
     pub(crate) why: Option<String>,
 }
@@ -104,7 +118,7 @@ pub(crate) fn bound_refusal(key: &str) -> String {
 /// The sweep, pure: the file's text, this app's id and restore version, and
 /// the platform's word.
 pub(crate) fn sweep(text: Option<&str>, app_id: &str, restore_version: i64, token: &Token) -> Swept {
-    let fresh = |why: Option<String>| Swept { restored: Restored::Fresh, values: Values::new(), facets: Facets::new(), why };
+    let fresh = |why: Option<String>| Swept { restored: Restored::Fresh, values: Values::new(), facets: Facets::new(), shape: Shape::new(), why };
     let Some(text) = text else {
         return fresh(None);
     };
@@ -131,6 +145,7 @@ pub(crate) fn sweep(text: Option<&str>, app_id: &str, restore_version: i64, toke
             restored: Restored::Recovered,
             values: Values::new(),
             facets: Facets::new(),
+            shape: Shape::new(),
             why: Some(format!(
                 "kaya: the last launch (session {file_session}) ended before its first idle, \
                  so its state is discarded rather than restored into a second crash"
@@ -146,6 +161,7 @@ pub(crate) fn sweep(text: Option<&str>, app_id: &str, restore_version: i64, toke
                 restored: Restored::Recovered,
                 values: Values::new(),
                 facets: Facets::new(),
+                shape: Shape::new(),
                 why: Some(format!(
                     "kaya: the platform's token names session {id}, and the session file holds \
                      session {file_session}: the file is from a launch the platform's copy never saw"
@@ -159,6 +175,7 @@ pub(crate) fn sweep(text: Option<&str>, app_id: &str, restore_version: i64, toke
             restored: Restored::Resumed,
             values: Values::new(),
             facets: decode_facets(doc.get("facets")),
+            shape: decode_shape(doc.get("shape")),
             why: Some(format!(
                 "kaya: the app's restore version moved from {file_version} to {restore_version}: \
                  its session values are discarded"
@@ -169,8 +186,43 @@ pub(crate) fn sweep(text: Option<&str>, app_id: &str, restore_version: i64, toke
         restored: Restored::Resumed,
         values: decode_values(doc.get("values")),
         facets: decode_facets(doc.get("facets")),
+        shape: decode_shape(doc.get("shape")),
         why: None,
     }
+}
+
+fn decode_shape(v: Option<&serde_json::Value>) -> Shape {
+    let ids = |v: Option<&serde_json::Value>| -> Vec<u64> {
+        v.and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|d| d.as_u64()).collect()).unwrap_or_default()
+    };
+    let Some(windows) = v.and_then(|v| v.as_array()) else { return Shape::new() };
+    windows
+        .iter()
+        .filter_map(|w| {
+            Some(WindowShape {
+                window: w.get("window")?.as_u64()?,
+                documents: ids(w.get("documents")),
+                active: w.get("active").and_then(|a| a.as_u64()),
+                section: w.get("section").and_then(|a| a.as_u64()),
+                depth: w.get("depth").and_then(|a| a.as_u64()).unwrap_or(0) as u32,
+            })
+        })
+        .collect()
+}
+
+fn encode_shape(shape: &Shape) -> serde_json::Value {
+    shape
+        .iter()
+        .map(|w| {
+            serde_json::json!({
+                "window": w.window,
+                "documents": w.documents,
+                "active": w.active,
+                "section": w.section,
+                "depth": w.depth,
+            })
+        })
+        .collect()
 }
 
 fn decode_facets(v: Option<&serde_json::Value>) -> Facets {
@@ -257,7 +309,7 @@ fn encode_value(value: &PrefValue) -> serde_json::Value {
 }
 
 /// The header and values as the file holds them.
-pub(crate) fn encode(app_id: &str, restore_version: i64, session: &str, first_idle: bool, values: &Values, facets: &Facets) -> String {
+pub(crate) fn encode(app_id: &str, restore_version: i64, session: &str, first_idle: bool, values: &Values, facets: &Facets, shape: &Shape) -> String {
     let mut scopes = serde_json::Map::new();
     for (scope, entries) in values {
         if entries.is_empty() {
@@ -278,6 +330,7 @@ pub(crate) fn encode(app_id: &str, restore_version: i64, session: &str, first_id
         "first_idle": first_idle,
         "values": serde_json::Value::Object(scopes),
         "facets": encode_facets(facets),
+        "shape": encode_shape(shape),
     });
     serde_json::to_string_pretty(&doc).unwrap_or_default()
 }
@@ -290,6 +343,16 @@ struct Store {
     /// The facets the file brought, handed to the scene once (SR4).
     restorable: Option<Facets>,
     restored: Restored,
+    /// The current shape, reported by the scene at each batch (SR9).
+    shape: Shape,
+    /// The shape the file brought, handed to the app as restored_windows().
+    restored_shape: Shape,
+    /// Window and document scopes the app took back (SR9), and those it
+    /// wrote this launch; any other restored surface scope goes at settle.
+    adopted: std::collections::BTreeSet<String>,
+    written: std::collections::BTreeSet<String>,
+    /// Past the first idle after the first build: untaken scopes are gone.
+    settled: bool,
     session: String,
     app_id: String,
     restore_version: i64,
@@ -452,6 +515,11 @@ fn load_with(declared: Declared, token: Token, app_id: String, dir: Option<PathB
         facets: Facets::new(),
         restorable: None,
         restored: Restored::Fresh,
+        shape: Shape::new(),
+        restored_shape: Shape::new(),
+        adopted: Default::default(),
+        written: Default::default(),
+        settled: false,
         session,
         app_id: app_id.clone(),
         restore_version: declared.restore_version,
@@ -486,6 +554,8 @@ fn load_with(declared: Declared, token: Token, app_id: String, dir: Option<PathB
     store.values = swept.values;
     store.restorable = Some(swept.facets.clone());
     store.facets = swept.facets;
+    store.restored_shape = swept.shape.clone();
+    store.shape = swept.shape;
     // THE CRASH-AT-LAUNCH MARK (SR6): written now, cleared at the first idle.
     store.dirty = true;
     flush_locked(&mut store);
@@ -522,7 +592,7 @@ fn flush_locked(store: &mut Store) {
         return;
     }
     let Some(dir) = store.dir.clone() else { return };
-    let text = encode(&store.app_id, store.restore_version, &store.session, store.first_idle, &store.values, &store.facets);
+    let text = encode(&store.app_id, store.restore_version, &store.session, store.first_idle, &store.values, &store.facets, &store.shape);
     if let Err(e) = write_atomic(&dir, &text) {
         say(&format!("kaya: the session file could not be written to {}: {e}", dir.display()));
         return;
@@ -562,7 +632,7 @@ pub(crate) fn set(scope: Scope, key: &str, value: PrefValue) -> Result<(), Strin
     }
     with(|s| {
         let prior = s.values.entry(scope.key()).or_default().insert(key.to_owned(), value);
-        let size = encode(&s.app_id, s.restore_version, &s.session, true, &s.values, &s.facets).len();
+        let size = encode(&s.app_id, s.restore_version, &s.session, true, &s.values, &s.facets, &s.shape).len();
         if size > BOUND {
             let entries = s.values.entry(scope.key()).or_default();
             match prior {
@@ -571,6 +641,7 @@ pub(crate) fn set(scope: Scope, key: &str, value: PrefValue) -> Result<(), Strin
             };
             return Err(bound_refusal(key));
         }
+        s.written.insert(scope.key());
         s.dirty = true;
         Ok(())
     })
@@ -592,13 +663,102 @@ pub(crate) fn remove(scope: Scope, key: &str) -> Result<(), String> {
 }
 
 /// A surface's scope goes with the surface (SR9).
-#[allow(dead_code)]
 pub(crate) fn discard_scope(scope: Scope) {
+    with(|s| discard_locked(s, &scope.key()));
+}
+
+fn discard_locked(s: &mut Store, key: &str) {
+    let values = s.values.remove(key).is_some();
+    let facets = s.facets.remove(key).is_some();
+    if values || facets {
+        s.dirty = true;
+    }
+}
+
+/// The shape the last launch left (SR9), for the app to recreate from.
+pub(crate) fn restored_shape() -> Shape {
+    with(|s| s.restored_shape.clone())
+}
+
+/// The scene's shape after each batch (SR9); written at the next idle.
+pub(crate) fn report_shape(shape: Shape) {
     with(|s| {
-        if s.values.remove(&scope.key()).is_some() {
+        if s.shape != shape {
+            s.shape = shape;
             s.dirty = true;
         }
     });
+}
+
+/// `create_window(id).restore(saved)` and `add_document(id).restore(saved)`
+/// (SR9, F10): the scope comes back only under the id it was saved with.
+/// `Err` is the one line the core prints when it does not.
+pub(crate) fn adopt(saved: Scope, now: Scope) -> Result<(), String> {
+    with(|s| adopt_locked(s, saved, now))
+}
+
+fn adopt_locked(s: &mut Store, saved: Scope, now: Scope) -> Result<(), String> {
+    let (what, from, to) = match (saved, now) {
+        (Scope::Window(a), Scope::Window(b)) => ("window", a, b),
+        (Scope::Document(a), Scope::Document(b)) => ("document", a, b),
+        _ => return Err(format!("kaya: restore({}) on a {}: a scope comes back on its own kind of surface", saved.key(), now.key())),
+    };
+    if from != to {
+        return Err(format!(
+            "kaya: {what} {from} was restored as {what} {to}: its saved state is not carried, \
+             since window and document ids are the app's (docs/restoration-plan.md SR9)"
+        ));
+    }
+    if s.settled {
+        return Err(format!(
+            "kaya: {what} {from}'s saved scope was discarded at the first idle after the first \
+             build, before this restore took it back (docs/restoration-plan.md SR9)"
+        ));
+    }
+    s.adopted.insert(saved.key());
+    Ok(())
+}
+
+/// Whether a window's saved facets may apply yet (SR9): the primary's at
+/// once, an aux window's once the app has taken its scope back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Gate {
+    Go,
+    Wait,
+    Drop,
+}
+
+pub(crate) fn facet_gate(window: u64) -> Gate {
+    with(|s| gate_locked(s, window))
+}
+
+fn gate_locked(s: &Store, window: u64) -> Gate {
+    let key = Scope::Window(window).key();
+    if window == 0 || s.adopted.contains(&key) {
+        Gate::Go
+    } else if s.settled {
+        Gate::Drop
+    } else {
+        Gate::Wait
+    }
+}
+
+/// SR9's settle: a restored surface scope the app neither took back nor
+/// wrote is discarded. The primary window's scope is adopted without a call.
+fn settle_locked(s: &mut Store) {
+    let primary = Scope::Window(0).key();
+    let surface = |k: &String| k.starts_with("window.") || k.starts_with("document.");
+    let untaken: std::collections::BTreeSet<String> = s
+        .values
+        .keys()
+        .chain(s.facets.keys())
+        .filter(|k| surface(k) && **k != primary && !s.adopted.contains(*k) && !s.written.contains(*k))
+        .cloned()
+        .collect();
+    for key in untaken {
+        discard_locked(s, &key);
+    }
+    s.settled = true;
 }
 
 /// The facets the file brought, once: the scene restores them after the
@@ -616,7 +776,7 @@ pub(crate) fn report_facet(scope: Scope, id: &str, saved: Saved) {
             return;
         }
         let prior = entries.insert(id.to_owned(), saved);
-        let size = encode(&s.app_id, s.restore_version, &s.session, true, &s.values, &s.facets).len();
+        let size = encode(&s.app_id, s.restore_version, &s.session, true, &s.values, &s.facets, &s.shape).len();
         if size > BOUND {
             let entries = s.facets.entry(scope.key()).or_default();
             match prior {
@@ -654,6 +814,9 @@ pub(crate) fn idle() {
             s.first_idle = true;
             s.dirty = true;
         }
+        if built && !s.settled {
+            settle_locked(s);
+        }
         flush_locked(s);
     });
 }
@@ -686,7 +849,7 @@ mod tests {
         let mut values = Values::new();
         values.entry("app".into()).or_default().insert("draft".into(), PrefValue::Str("half typed".into()));
         values.entry("window.1".into()).or_default().insert("zoom".into(), PrefValue::F64(1.5));
-        let text = encode(APP, version, session, first_idle, &values, &Facets::new());
+        let text = encode(APP, version, session, first_idle, &values, &Facets::new(), &Shape::new());
         text
     }
 
@@ -817,7 +980,7 @@ mod tests {
         app.insert("i".into(), PrefValue::I64(-42));
         app.insert("f".into(), PrefValue::F64(0.25));
         app.insert("b".into(), PrefValue::Bool(false));
-        let text = encode(APP, 0, "s1", true, &values, &Facets::new());
+        let text = encode(APP, 0, "s1", true, &values, &Facets::new(), &Shape::new());
         assert_eq!(sweep(Some(&text), APP, 0, &Token::NoRule).values, values);
     }
 
@@ -830,10 +993,65 @@ mod tests {
         w.insert("doc".into(), Saved { kind: "textarea".into(), facet: Facet::Caret { start: 2, stop: 6 } });
         w.insert("rows".into(), Saved { kind: "column".into(), facet: Facet::Row { key: crate::protocol::Value::Str("m10".into()) } });
         w.insert("ids".into(), Saved { kind: "column".into(), facet: Facet::Row { key: crate::protocol::Value::I64(-3) } });
-        let text = encode(APP, 0, "s1", true, &Values::new(), &facets);
+        let text = encode(APP, 0, "s1", true, &Values::new(), &facets, &Shape::new());
         assert_eq!(sweep(Some(&text), APP, 0, &Token::NoRule).facets, facets);
         assert_eq!(sweep(Some(&text), APP, 1, &Token::NoRule).facets, facets);
         assert!(sweep(Some(&text), APP, 0, &Token::Absent).facets.is_empty());
         assert!(sweep(Some(&text), APP, 0, &Token::Session("s9".into())).facets.is_empty());
+    }
+
+    fn shaped() -> Shape {
+        vec![
+            WindowShape { window: 0, documents: vec![7, 9], active: Some(9), section: Some(3), depth: 1 },
+            WindowShape { window: 4, documents: vec![], active: None, section: None, depth: 0 },
+        ]
+    }
+
+    #[test]
+    fn the_shape_round_trips_and_is_discarded_with_a_fresh_launch() {
+        let text = encode(APP, 0, "s1", true, &Values::new(), &Facets::new(), &shaped());
+        assert_eq!(sweep(Some(&text), APP, 0, &Token::NoRule).shape, shaped());
+        assert_eq!(sweep(Some(&text), APP, 1, &Token::NoRule).shape, shaped());
+        assert!(sweep(Some(&text), APP, 0, &Token::Absent).shape.is_empty());
+    }
+
+    fn store_with_scopes() -> Store {
+        let mut store = load_with(Declared { enabled: false, restore_version: 0, always: false }, Token::NoRule, APP.into(), None);
+        for scope in ["app", "window.0", "window.4", "window.5", "document.7", "document.9"] {
+            store.values.entry(scope.into()).or_default().insert("k".into(), PrefValue::I64(1));
+        }
+        store.facets.entry("window.5".into()).or_default().insert(
+            "doc".into(),
+            Saved { kind: "textarea".into(), facet: Facet::Caret { start: 1, stop: 1 } },
+        );
+        store.restored_shape = shaped();
+        store
+    }
+
+    // SR9, F10: the primary is adopted without a call, a taken scope stays, a
+    // moved id loses its state with a line, and the rest go at the settle.
+    #[test]
+    fn untaken_scopes_go_at_the_settle_and_a_moved_id_is_named() {
+        let mut s = store_with_scopes();
+        assert_eq!(gate_locked(&s, 0), Gate::Go);
+        assert_eq!(gate_locked(&s, 5), Gate::Wait);
+        adopt_locked(&mut s, Scope::Window(4), Scope::Window(4)).expect("same id is taken back");
+        adopt_locked(&mut s, Scope::Document(9), Scope::Document(9)).expect("same id is taken back");
+        let moved = adopt_locked(&mut s, Scope::Window(5), Scope::Window(6)).expect_err("a moved id");
+        assert!(moved.contains("window 5 was restored as window 6"), "{moved}");
+        println!("{moved}");
+        let kind = adopt_locked(&mut s, Scope::Window(5), Scope::Document(5)).expect_err("another kind");
+        assert!(kind.contains("on its own kind of surface"), "{kind}");
+        println!("{kind}");
+        s.written.insert("document.7".into());
+        settle_locked(&mut s);
+        let left: Vec<&String> = s.values.keys().collect();
+        assert_eq!(left, ["app", "document.7", "document.9", "window.0", "window.4"]);
+        assert!(s.facets.is_empty(), "window 5's facets went with its scope");
+        assert_eq!(gate_locked(&s, 4), Gate::Go);
+        assert_eq!(gate_locked(&s, 5), Gate::Drop);
+        let late = adopt_locked(&mut s, Scope::Window(5), Scope::Window(5)).expect_err("too late");
+        assert!(late.contains("discarded at the first idle after the first build"), "{late}");
+        println!("{late}");
     }
 }

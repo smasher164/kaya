@@ -1,0 +1,20 @@
+# THE RESTORED SHAPE (docs/restoration-plan.md SR9): the documents the last
+# launch left come back in order with the active one, each from its own
+# session scope, and a closed document's scope went with it.
+expect_title "a"
+expect_restored fresh
+expect_documents "a|b|c"
+select_document "b"
+expect_document "b"
+set_text entry@body-b "b's draft"
+close_document "c"
+expect_documents "a|b"
+
+relaunch resume
+
+expect_restored resumed
+expect_documents "a|b"
+expect_document "b"
+expect_title "b"
+expect entry@body-b "b's draft"
+expect entry@body-a ""

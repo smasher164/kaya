@@ -422,6 +422,10 @@ name = "references"
 path = "../../guests/rust/references.rs"
 
 [[example]]
+name = "restoredocs"
+path = "../../guests/rust/restoredocs.rs"
+
+[[example]]
 name = "auxquit"
 path = "../../guests/rust/auxquit.rs"
 

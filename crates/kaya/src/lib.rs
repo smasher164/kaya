@@ -154,7 +154,7 @@ pub use app::{
     // (docs/tasks-s4-plan.md P1, P3).
     Prefs, app_data_dir, prefs,
     // docs/restoration-plan.md SR3, SR6: the session store.
-    Session, Restored, document_session, restored, session, window_session,
+    Session, Restored, RestoredWindow, document_session, restored, restored_windows, session, window_session,
     // docs/restoration-plan.md SR11 to SR13: durable file references.
     Redeemed, forget, redeem,
     Field, ForScope, Inset, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,

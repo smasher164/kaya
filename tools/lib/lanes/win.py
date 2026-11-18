@@ -74,7 +74,8 @@ OFF_SCENES = {"chatkeyboard": "Windows has no software keyboard on this lane (do
               "saferestore": "a rename cannot leave a backup, so there is no second act to run (docs/rich-document-plan.md §4.1)",
               "auxquit": "AppKit's window restoration is the Mac's alone (docs/traps.md, SwiftUI reopens an aux window after a quit)",
               "restore": "the Mac first, depth then breadth; the fan-out wires it (docs/restoration-plan.md §5)",
-              "references": "the Mac first, depth then breadth; the fan-out wires it (docs/restoration-plan.md §5)"}
+              "references": "the Mac first, depth then breadth; the fan-out wires it (docs/restoration-plan.md §5)",
+              "restoredocs": "the Mac first, depth then breadth; the fan-out wires it (docs/restoration-plan.md §5)"}
 
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
 # exclusive.py): the drag family, already alone inside this lane for the
