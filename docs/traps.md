@@ -4,6 +4,30 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The open panel's last directory in the real domain (measured 2026-11-18)
+
+Matrix #9 on 7d23cbf2 ended with the real-store wall naming
+~/Library/Preferences/dev.kaya.aurora.notes.plist by its parsed content
+(tools/lib/real_stores.py compares a plist by content since e7be9759, so
+this is a changed value, not a rewrite). The changed key is
+`NSOSPLastRootDirectory`, the open panel's bookmark of its last directory;
+its bytes name `…/nix-shell.<id>/kaya-photos-<pid>`, the directory only
+chat.steps' photo attach makes (`file_dialog_goto $TMP/kaya-photos-$PID`),
+and the file's time fell inside the mac lane. A 50 ms `defaults export`
+poller over a hand run of the mac chat-go leg (`tools/run-leg.py chat go
+--build`) read the domain's content change at the panel's close
+(16:53:51). The write does not pass through `-[NSUserDefaults
+setObject:forKey:]` in the app's process: a scene-run swizzle of it that
+refused `NSOSP*`/`NSNavPanel*` keys never fired and the domain changed
+anyway (the panel is an out-of-process service), so that refusal was
+removed rather than kept as a guard that holds nothing. So every full
+matrix whose mac lane runs chat-go writes the user's real panel memory,
+and the wall reds the verdict. Not fixed yet; the options: the mac runner
+saves the real domain's `NSOSP*`/`NSNavPanel*` values before a leg that
+drives an open panel and writes them back after (the windowmem sentinel's
+shape: the content ends unchanged); or scene runs on the Mac under a
+scratch bundle identity.
+
 ## The previous source's position heard after a source change (measured 2026-11-18)
 
 Matrix #8 on 37c971e2 failed music_dock-python-x11 once: the `previous`
