@@ -2201,6 +2201,8 @@ data MediaState = MediaState
     readings :: IORef (Map.Map Word64 PlayerReading),
     playerTracks :: IORef (Map.Map Word64 Tracks),
     cues :: IORef (Map.Map Word64 Text),
+    -- The `source` of each player's last player_changed heard (stalePlayer).
+    heardSources :: IORef (Map.Map Word64 Word32),
     -- Per (player, occurrence name): the newest registration wins.
     playerHandlers :: IORef (Map.Map (Word64, Text) (MediaOcc -> IO ())),
     widgetVisibility :: IORef (Map.Map Word64 (Double -> IO ())),

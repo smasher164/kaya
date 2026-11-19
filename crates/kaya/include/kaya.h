@@ -3910,6 +3910,14 @@ void kaya_occurrence_blob_release(uint64_t handle);
 void kaya_submit(const uint8_t *records, uintptr_t len);
 
 /**
+ * How many source changes the app's submitted transactions have made to
+ * `player`: a player_changed whose `source` is below it, and every other
+ * occurrence of that player until one is not, belongs to a source the app
+ * has replaced, and the binding drops it (docs/media-plan.md §2 rule 7).
+ */
+uint32_t kaya_player_sources(uint64_t player);
+
+/**
  * Function-floor consumption: block until the next occurrence and hand back
  * one complete record — header included, the ring's own bytes — or
  * `KAYA_OCCURRENCE_SHUTDOWN` / `KAYA_OCCURRENCE_WOKEN`. One app thread, not

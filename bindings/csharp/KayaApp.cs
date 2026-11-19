@@ -1782,7 +1782,7 @@ sealed record HistoryWalked(ulong Id, List<object> Keys, UndoStep Step, bool Red
 // The media occurrences (docs/media-plan.md): Id is the PLAYER, the
 // session's the app's one.
 sealed record PlayerMoved(ulong Id, List<object> Keys, PlayerState State, MediaFailure? Failure,
-    ulong DurationMs, uint Width, uint Height, string Detail) : Occurrence(Id, Keys);
+    ulong DurationMs, uint Width, uint Height, uint Source, string Detail) : Occurrence(Id, Keys);
 
 sealed record PlayerAt(ulong Id, List<object> Keys, ulong PositionMs, bool Seeked)
     : Occurrence(Id, Keys);
@@ -3734,6 +3734,8 @@ sealed class KayaApp
     /// guests/csharp/MediaCheck.cs both come through here.
     internal void DispatchMedia(Occurrence? occurrence)
     {
+        if (StalePlayer(occurrence))
+            return;
         switch (occurrence)
         {
             case PlayerMoved moved:
@@ -3771,6 +3773,31 @@ sealed class KayaApp
                 DispatchReader(occurrence);
                 break;
         }
+    }
+
+    [System.Runtime.InteropServices.DllImport("kaya")]
+    static extern uint kaya_player_sources(ulong player);
+
+    /// kaya_player_sources, a field so MediaCheck can stand in for it.
+    internal static Func<ulong, uint> PlayerSources = kaya_player_sources;
+
+    readonly Dictionary<ulong, uint> heardSources = new();
+
+    /// An occurrence of a source the app has replaced (docs/media-plan.md §2
+    /// rule 7).
+    bool StalePlayer(Occurrence? occurrence)
+    {
+        switch (occurrence)
+        {
+            case PlayerMoved moved:
+                if (moved.Source < PlayerSources(moved.Id))
+                    return true;
+                heardSources[moved.Id] = moved.Source;
+                return false;
+            case PlayerAt or TracksListed or CueChanged:
+                return heardSources.GetValueOrDefault(occurrence.Id) < PlayerSources(occurrence.Id);
+        }
+        return false;
     }
 
     /// The reader's answers. A read the app gave up on is heard only at its
@@ -4064,11 +4091,12 @@ sealed class KayaApp
     /// detail.
     static PlayerMoved PlayerMovedOf(ulong player, List<object> keys, List<object>? payload)
     {
-        var tail = FlatTail("player_changed", payload, 6);
+        var tail = FlatTail("player_changed", payload, 7);
         var failure = (uint)Int(tail[1]);
         return new PlayerMoved(player, keys, (PlayerState)(uint)Int(tail[0]),
             failure == KayaWire.MediaFailureNone ? null : (MediaFailure)failure,
-            (ulong)Int(tail[2]), (uint)Int(tail[3]), (uint)Int(tail[4]), tail[5] as string ?? "");
+            (ulong)Int(tail[2]), (uint)Int(tail[3]), (uint)Int(tail[4]), (uint)Int(tail[5]),
+            tail[6] as string ?? "");
     }
 
     /// player_tracks' tail: the two selections counting from 1 (0 none),

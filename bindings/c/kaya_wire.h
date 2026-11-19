@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x3f0f96117842a9eeULL
+#define KAYA_SPEC_HASH 0x5924388addd89793ULL
 #define KAYA_VERSION "0.0.0"
 
 
@@ -4399,6 +4399,15 @@ static inline int kaya_parse_player_changed(const uint8_t *rec, uint64_t *id,
         (*n_vals)++;
         at += 4;
     }
+    {
+        uint32_t raw; /* source */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    at += 4;
     at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
     (*n_vals)++;
     (void)at;

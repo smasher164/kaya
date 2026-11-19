@@ -7779,7 +7779,7 @@ class Player:
     __slots__ = ("id", "_state", "_failure", "_detail", "_position_ms",
                  "_duration_ms", "_width", "_height", "_tracks", "_cue",
                  "_on_state", "_on_ended", "_on_failed", "_on_seek_completed",
-                 "_on_position", "_on_tracks", "_on_cue")
+                 "_on_position", "_on_tracks", "_on_cue", "_heard_source")
 
     def __init__(self, ident: int) -> None:
         self.id: int = ident
@@ -7799,6 +7799,7 @@ class Player:
         self._on_position: Callable[[int], object] | None = None
         self._on_tracks: Callable[[Tracks], object] | None = None
         self._on_cue: Callable[[str], object] | None = None
+        self._heard_source = 0
 
     @property
     def state(self) -> PlayerState:
@@ -7907,9 +7908,20 @@ class Player:
         """Stop and forget the player; a view showing it goes blank."""
         _records().append(wire.tx_release_player(self.id))
 
+    def _stale(self, kind: int, payload: Any) -> bool:
+        """An occurrence of a source the app has replaced
+        (docs/media-plan.md §2 rule 7)."""
+        submitted = runtime.player_sources(self.id)
+        if kind == wire.OCC_PLAYER_CHANGED:
+            if int(payload[5]) < submitted:
+                return True
+            self._heard_source = int(payload[5])
+            return False
+        return self._heard_source < submitted
+
     def _absorb(self, kind: int, payload: Any) -> None:
         if kind == wire.OCC_PLAYER_CHANGED:
-            state, failure, duration, width, height, detail = payload
+            state, failure, duration, width, height, _, detail = payload
             self._state = PlayerState(state)
             self._failure = None if failure == wire.MEDIA_FAILURE_NONE \
                 else MediaFailure(failure)
@@ -9931,7 +9943,7 @@ class App:
                 if kind in (wire.OCC_PLAYER_POSITION, wire.OCC_SEEK_COMPLETED):
                     ident, payload = payload, ident
                 seat = self._players.get(int(ident))
-                if seat is None:
+                if seat is None or seat._stale(kind, payload):
                     continue
                 seat._absorb(kind, payload)
                 for fn, args in seat._handlers(kind):

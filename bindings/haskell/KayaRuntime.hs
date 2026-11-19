@@ -32,6 +32,7 @@ module KayaRuntime
     directionBit,
     textScaleRaw,
     canPlayRaw,
+    playerSourcesRef,
     readerPeaksRaw,
     imagePixelsRaw,
     captureOnFrame,
@@ -587,6 +588,15 @@ directionBit = c_kaya_direction
 
 textScaleRaw :: IO Double
 textScaleRaw = c_kaya_text_scale
+
+foreign import ccall unsafe "kaya_player_sources"
+  c_kaya_player_sources :: Word64 -> IO Word32
+
+-- | kaya_player_sources (docs/media-plan.md §2 rule 7); a ref so the checks
+-- can stand in for it.
+playerSourcesRef :: IORef (Word64 -> IO Word32)
+playerSourcesRef = unsafePerformIO (newIORef c_kaya_player_sources)
+{-# NOINLINE playerSourcesRef #-}
 
 -- | kaya_can_play (docs/media-plan.md §8 ruling 1).
 canPlayRaw :: Text -> Text -> IO Bool

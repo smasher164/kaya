@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x3f0f96117842a9ee
+	SpecHash uint64 = 0x5924388addd89793
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -5523,6 +5523,9 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
 		at += 4
 		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
 		at += 4
 		{
 			var v any

@@ -53,7 +53,7 @@ static class MediaCheck
     }
 
     static byte[] Changed(ulong player, uint state, uint failure, ulong duration, uint width,
-        uint height, string detail) => Record(KayaWire.OccKindPlayerChanged, w =>
+        uint height, string detail, uint source = 0) => Record(KayaWire.OccKindPlayerChanged, w =>
         {
             w.Write(player);
             w.Write(state);
@@ -61,6 +61,8 @@ static class MediaCheck
             w.Write(duration);
             w.Write(width);
             w.Write(height);
+            w.Write(source);
+            w.Write(0u);
             Str(w, detail);
         });
 
@@ -130,6 +132,27 @@ static class MediaCheck
         Check(string.Join("|", seen) == want,
             $"the handlers heard \"{string.Join("|", seen)}\", wanted \"{want}\"");
         Console.WriteLine("media-check: the mirror leads the handlers; failed hears the closed reason");
+
+        // A SOURCE THE APP HAS REPLACED IS NOT HEARD (docs/media-plan.md §2
+        // rule 7): its second source change submitted, the first source's
+        // late position and state drop and the second's are heard.
+        var real = KayaApp.PlayerSources;
+        KayaApp.PlayerSources = _ => 2;
+        try
+        {
+            seen.Clear();
+            app.DispatchMedia(KayaApp.DecodeRecord(Ms(KayaWire.OccKindPlayerPosition, p.Id, 4016)));
+            app.DispatchMedia(KayaApp.DecodeRecord(Changed(p.Id, KayaWire.PlayerStatePaused, 0, 0, 0, 0, "", 1)));
+            app.DispatchMedia(KayaApp.DecodeRecord(Changed(p.Id, KayaWire.PlayerStateLoading, 0, 0, 0, 0, "", 2)));
+            app.DispatchMedia(KayaApp.DecodeRecord(Ms(KayaWire.OccKindPlayerPosition, p.Id, 0)));
+        }
+        finally
+        {
+            KayaApp.PlayerSources = real;
+        }
+        Check(string.Join("|", seen) == "loading 0 0|at 0 0",
+            $"a replaced source was heard: \"{string.Join("|", seen)}\"");
+        Console.WriteLine("media-check: a replaced source's late position and state are dropped");
 
         // A STAMPED VIDEO'S PLAYER FIELD reaches PROP_PLAYER from the row.
         app.Build(tx =>

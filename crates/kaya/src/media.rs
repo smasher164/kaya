@@ -23,6 +23,112 @@ pub(crate) const TIMEOUT_MS: u64 = 30_000;
 /// close to the bound counts as past it.
 pub(crate) const TIMEOUT_SLACK_MS: u64 = 250;
 
+/// Counts each player's source changes in a submitted transaction, the
+/// number its binding compares player_changed's `source` against.
+pub(crate) fn count_sources(submitted: &mut HashMap<u64, u32>, tx: &[crate::protocol::TxOp]) {
+    for op in tx {
+        if let crate::protocol::TxOp::SetPlayerProp { player, prop: PlayerProp::Source, .. } = op {
+            *submitted.entry(player.0).or_default() += 1;
+        }
+    }
+}
+
+/// The flight recorder's account of a source change in flight: what of the
+/// player's previous source the app has yet to hear when it submits the
+/// change, and what is published between the submit and the apply
+/// (docs/traps.md, the previous source's position heard after a source
+/// change).
+#[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+static SOURCES_IN_FLIGHT: std::sync::Mutex<std::collections::BTreeMap<u64, u32>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+#[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+fn player_occurrence(kind: u16, a: u64, b: u64) -> Option<(u64, String)> {
+    use crate::ring as r;
+    match kind {
+        r::REC_PLAYER_CHANGED => Some((a, format!("player_changed state {}", b & 0xffff_ffff))),
+        r::REC_PLAYER_POSITION => Some((a, format!("player_position {b} ms"))),
+        r::REC_SEEK_COMPLETED => Some((a, format!("seek_completed {b} ms"))),
+        r::REC_PLAYER_TRACKS => Some((a, "player_tracks".to_owned())),
+        r::REC_CAPTION_CUE => Some((a, "caption_cue".to_owned())),
+        _ => None,
+    }
+}
+
+/// At the submit: `unread` is the ring's unread region, or None on the mpsc
+/// transport, whose queue cannot be read before the app takes it.
+#[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+pub(crate) fn source_submitted(tx: &[crate::protocol::TxOp], unread: Option<&[(u16, u64, u64)]>) {
+    if !crate::vtrace::on() {
+        return;
+    }
+    for op in tx {
+        let crate::protocol::TxOp::SetPlayerProp { player, prop: PlayerProp::Source, .. } = op else {
+            continue;
+        };
+        *SOURCES_IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner()).entry(player.0).or_default() += 1;
+        let Some(unread) = unread else {
+            crate::vtrace::note(
+                "player_source",
+                format_args!("player {} source change submitted; the mpsc transport's unread occurrences cannot be read", player.0),
+            );
+            continue;
+        };
+        let waiting: Vec<String> = unread
+            .iter()
+            .filter_map(|&(kind, a, b)| player_occurrence(kind, a, b))
+            .filter(|(p, _)| *p == player.0)
+            .map(|(_, what)| what)
+            .collect();
+        crate::vtrace::note(
+            "player_source",
+            format_args!(
+                "player {} source change submitted; {} of the player's occurrences wait unread in the ring{}{}",
+                player.0,
+                waiting.len(),
+                if waiting.is_empty() { "" } else { ": " },
+                waiting.join(", ")
+            ),
+        );
+    }
+}
+
+#[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+fn source_applied(player: u64) {
+    let mut flight = SOURCES_IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(n) = flight.get_mut(&player) {
+        *n -= 1;
+        if *n == 0 {
+            flight.remove(&player);
+        }
+        crate::vtrace::note("player_source", format_args!("player {player} source change applied"));
+    }
+}
+
+#[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+pub(crate) fn published(occurrences: &[Occurrence]) {
+    let flight = SOURCES_IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+    if flight.is_empty() {
+        return;
+    }
+    for occ in occurrences {
+        let (player, what) = match occ {
+            Occurrence::PlayerChanged { player, state, .. } => (player, format!("player_changed {state:?}")),
+            Occurrence::PlayerPosition { player, position_ms } => (player, format!("player_position {position_ms} ms")),
+            Occurrence::SeekCompleted { player, position_ms } => (player, format!("seek_completed {position_ms} ms")),
+            Occurrence::PlayerTracks { player, .. } => (player, "player_tracks".to_owned()),
+            Occurrence::CaptionCue { player, .. } => (player, "caption_cue".to_owned()),
+            _ => continue,
+        };
+        if flight.contains_key(&player.0) {
+            crate::vtrace::note(
+                "player_source",
+                format_args!("player {} {what} published after its source change was submitted, before it was applied", player.0),
+            );
+        }
+    }
+}
+
 /// What a backend reports about one player, in its platform's own terms.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Report {
@@ -77,6 +183,8 @@ struct Player {
     /// What the app last heard: the listing, and the current cue.
     published_tracks: PlayerTracks,
     cue: String,
+    /// The app's source changes applied, player_changed's `source`.
+    source: u32,
 }
 
 #[cfg(feature = "harness")]
@@ -111,6 +219,7 @@ impl Player {
             sidecar_fetch: None,
             published_tracks: PlayerTracks::default(),
             cue: String::new(),
+            source: 0,
         }
     }
 
@@ -256,6 +365,9 @@ impl Media {
         let p = self.live_mut(player, "set_player_prop");
         match (prop, value) {
             (PlayerProp::Source, value @ (Value::Str(_) | Value::I64(_))) => {
+                #[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+                source_applied(player.0);
+                p.source += 1;
                 let resolved = match value {
                     Value::I64(handle) => resolve_picked(&format!("player {}", player.0), handle),
                     Value::Str(source) => resolve_source(&source),
@@ -713,6 +825,7 @@ fn changed(player: PlayerId, p: &Player) -> Occurrence {
         duration_ms: p.duration_ms,
         width: p.size.0,
         height: p.size.1,
+        source: p.source,
         detail: p.detail.clone(),
     }
 }

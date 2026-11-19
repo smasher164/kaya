@@ -209,6 +209,8 @@ final class KayaMediaState {
     var readings: [UInt64: KayaPlayerReading] = [:]
     var tracks: [UInt64: KayaTracks] = [:]
     var cues: [UInt64: String] = [:]
+    /// The `source` of the last player_changed heard (kayaStalePlayer).
+    var heardSources: [UInt64: UInt32] = [:]
     var onState: [UInt64: (KayaAppTx, KayaPlayerState) throws -> Void] = [:]
     var onEnded: [UInt64: (KayaAppTx) throws -> Void] = [:]
     var onFailed: [UInt64: (KayaAppTx, KayaMediaFailure, String) throws -> Void] = [:]
@@ -332,6 +334,26 @@ extension KayaApp {
         media.onSession = handler
     }
 
+    /// An occurrence of a source the app has replaced (docs/media-plan.md §2
+    /// rule 7).
+    func kayaStalePlayer(_ kind: UInt16, _ id: UInt64, _ payload: KayaValue?, _ tail: [KayaValue]) -> Bool {
+        switch kind {
+        case UInt16(KAYA_OCCURRENCE_PLAYER_CHANGED):
+            let source = UInt32(kayaInt(tail[5]))
+            if source < kaya_player_sources(id) { return true }
+            media.heardSources[id] = source
+            return false
+        case UInt16(KAYA_OCCURRENCE_PLAYER_POSITION), UInt16(KAYA_OCCURRENCE_SEEK_COMPLETED):
+            guard case .i64(let raw) = payload else { return false }
+            let player = UInt64(bitPattern: raw)
+            return media.heardSources[player, default: 0] < kaya_player_sources(player)
+        case UInt16(KAYA_OCCURRENCE_PLAYER_TRACKS), UInt16(KAYA_OCCURRENCE_CAPTION_CUE):
+            return media.heardSources[id, default: 0] < kaya_player_sources(id)
+        default:
+            return false
+        }
+    }
+
     /// The ring loop's media arm: the mirror is folded BEFORE any handler
     /// runs, so a handler reads the readings its occurrence brought.
     /// Answers false for a record that is not the media family's.
@@ -339,11 +361,12 @@ extension KayaApp {
         _ kind: UInt16, _ id: UInt64, _ keys: [KayaValue], _ payload: KayaValue?,
         _ tail: [KayaValue], _ run: (@escaping (KayaAppTx) throws -> Void) -> Void
     ) -> Bool {
+        if kayaStalePlayer(kind, id, payload, tail) { return true }
         switch kind {
         case UInt16(KAYA_OCCURRENCE_PLAYER_CHANGED):
             let state = KayaPlayerState.fromWire(UInt32(kayaInt(tail[0])))
             let failure = KayaMediaFailure.fromWire(UInt32(kayaInt(tail[1])))
-            let detail = kayaStr(tail[5])
+            let detail = kayaStr(tail[6])
             var r = media.readings[id] ?? KayaPlayerReading()
             r.state = state
             r.failure = failure

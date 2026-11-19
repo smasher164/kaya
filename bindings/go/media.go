@@ -105,6 +105,32 @@ type playerMirror struct {
 	onPos   func(*Tx, uint64)
 	onTrack func(*Tx, PlayerTracks)
 	onCue   func(*Tx, string)
+	// The `source` of the last player_changed heard (stale's rule).
+	heardSource uint32
+}
+
+// playerSources is kaya_player_sources, a variable so a test can stand in.
+var playerSources = func(player uint64) uint32 { return uint32(C.kaya_player_sources(C.uint64_t(player))) }
+
+// stale reports an occurrence of a source the app has replaced
+// (docs/media-plan.md §2 rule 7).
+func (a *App) stale(kind uint16, id uint64, payload any) bool {
+	switch kind {
+	case occPlayerChanged:
+		tail, _ := payload.([]any)
+		source := uint32(tailInt(tail, 5))
+		if source < playerSources(id) {
+			return true
+		}
+		a.mirror(id).heardSource = source
+		return false
+	case occPlayerPosition, occSeekCompleted:
+		player, _ := payload.(uint64)
+		return a.mirror(player).heardSource < playerSources(player)
+	case occPlayerTracks, occCaptionCue:
+		return a.mirror(id).heardSource < playerSources(id)
+	}
+	return false
 }
 
 type mediaState struct {
@@ -471,6 +497,9 @@ func tailStrings(tail []any, at int) ([]string, int) {
 // runs the handlers in one transaction. Its own method because Serve's
 // switch has no seam a test can reach (App.linkOpened's reason).
 func (a *App) mediaOccurred(kind uint16, id uint64, keys []any, payload any) {
+	if a.stale(kind, id, payload) {
+		return
+	}
 	switch kind {
 	case occPlayerChanged:
 		tail, _ := payload.([]any)
@@ -481,7 +510,7 @@ func (a *App) mediaOccurred(kind uint16, id uint64, keys []any, payload any) {
 		r.DurationMs = uint64(tailInt(tail, 2))
 		r.Width = uint32(tailInt(tail, 3))
 		r.Height = uint32(tailInt(tail, 4))
-		detail, _ := tail[5].(string)
+		detail, _ := tail[6].(string)
 		if r.State == PlayerStateLoading || r.State == PlayerStateIdle {
 			r.PositionMs = 0
 		}

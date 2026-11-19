@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x3f0f96117842a9eeL
+let spec_hash = 0x5924388addd89793L
 let version = "0.0.0"
 
 let value_bool = 1
@@ -4252,6 +4252,9 @@ let parse_occurrence byte =
       out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
       at := !at + 4;
       out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
       at := !at + 4;
       (let v, next = parse_value byte !at in
        out := v :: !out;

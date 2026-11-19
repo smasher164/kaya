@@ -2360,7 +2360,7 @@ if (isMainThread) {
     new DataView(head.buffer).setUint32(0, vals.length, true);
     return [head, ...vals.map((s) => valueBytes(s))];
   };
-  const packChanged = (player: number, state: number, failure: number, duration: number, w: number, h: number, detail: string): Uint8Array =>
+  const packChanged = (player: number, state: number, failure: number, duration: number, w: number, h: number, detail: string, source = 0): Uint8Array =>
     frame(wire.OCC_PLAYER_CHANGED, (v) => {
       v.setBigUint64(8, BigInt(player), true);
       v.setUint32(16, state, true);
@@ -2368,7 +2368,8 @@ if (isMainThread) {
       v.setBigUint64(24, BigInt(duration), true);
       v.setUint32(32, w, true);
       v.setUint32(36, h, true);
-    }, 32, [valueBytes(detail)]);
+      v.setUint32(40, source, true);
+    }, 40, [valueBytes(detail)]);
   const packTracks = (player: number, aSel: number, cSel: number, audio: string[], captions: string[]): Uint8Array =>
     frame(wire.OCC_PLAYER_TRACKS, (v) => {
       v.setBigUint64(8, BigInt(player), true);
@@ -2395,7 +2396,7 @@ if (isMainThread) {
   };
   check("player_changed decodes through the generated decoder, every field",
     decoded(packChanged(7, wire.PLAYER_STATE_FAILED, wire.MEDIA_FAILURE_NETWORK, 2000, 160, 90, "refused"))
-      === JSON.stringify([wire.OCC_PLAYER_CHANGED, 7, [], [wire.PLAYER_STATE_FAILED, wire.MEDIA_FAILURE_NETWORK, 2000, 160, 90, "refused"]]));
+      === JSON.stringify([wire.OCC_PLAYER_CHANGED, 7, [], [wire.PLAYER_STATE_FAILED, wire.MEDIA_FAILURE_NETWORK, 2000, 160, 90, 0, "refused"]]));
   check("player_tracks decodes both lists and both selections",
     decoded(packTracks(7, 2, 0, ["en", "fr"], ["en"])) === JSON.stringify([wire.OCC_PLAYER_TRACKS, 7, [], [2, 0, 2, "en", "fr", 1, "en"]]));
   check("session_action decodes its action and at_ms",
@@ -2483,6 +2484,24 @@ if (isMainThread) {
   check("the cue reaches onCue and the reading", mdSaw(["cue", "first cue"]) && mdPlayer.cue === "first cue");
   check("a session action reaches onAction as the closed action", mdSaw(["session", "next", 0]));
   check("a stamped video's visibility passes the copy's row first", mdSaw(["shown", 3, 0.5]));
+  // A source the app has replaced is not heard (docs/media-plan.md §2 rule
+  // 7): its second source change submitted, the first source's late
+  // position and state drop and the second's are heard.
+  const realSources = runtime.sources.player;
+  runtime.sources.player = () => 2;
+  mdSeen.length = 0;
+  try {
+    for (const b of [
+      packMs(wire.OCC_PLAYER_POSITION, mdPlayer.id, 4016),
+      packChanged(mdPlayer.id, wire.PLAYER_STATE_PAUSED, 0, 0, 0, 0, "", 1),
+      packChanged(mdPlayer.id, wire.PLAYER_STATE_LOADING, 0, 0, 0, 0, "", 2),
+      packMs(wire.OCC_PLAYER_POSITION, mdPlayer.id, 0),
+    ]) fire(wire.parse_occurrence(b));
+  } finally {
+    runtime.sources.player = realSources;
+  }
+  check("a replaced source's late position and state are dropped; the new one's heard",
+    JSON.stringify(mdSeen) === JSON.stringify([["state", "loading", 0], ["position", 0]]));
 
   // ------------------------------------------------------------ reader
   // (docs/media-plan.md §8 ruling 4.) AFTER A CANCEL OR A CLOSE THE APP

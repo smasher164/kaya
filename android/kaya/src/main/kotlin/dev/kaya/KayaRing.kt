@@ -148,6 +148,7 @@ object KayaRing {
 
     @JvmStatic external fun tr(key: ByteArray, args: ByteArray, nargs: Int): ByteArray?
     @JvmStatic external fun canPlay(mime: ByteArray, codecs: ByteArray): Boolean
+    @JvmStatic external fun playerSources(player: Long): Int
     @JvmStatic external fun imageDominant(bytes: ByteArray): Int
     @JvmStatic external fun imagePalette(bytes: ByteArray, n: Int): DoubleArray?
     @JvmStatic external fun kdocRead(bytes: ByteArray): ByteArray

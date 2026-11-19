@@ -50,7 +50,41 @@ func playerChangedRec(player uint64, state PlayerState, failure MediaFailure, du
 	b = binary.LittleEndian.AppendUint64(b, duration)
 	b = binary.LittleEndian.AppendUint32(b, w)
 	b = binary.LittleEndian.AppendUint32(b, h)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = binary.LittleEndian.AppendUint32(b, 0)
 	return occRecord(occPlayerChanged, strValue(b, detail))
+}
+
+func sourceChangedRec(player uint64, state PlayerState, source uint32) []byte {
+	b := binary.LittleEndian.AppendUint64(nil, player)
+	b = binary.LittleEndian.AppendUint32(b, uint32(state))
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = binary.LittleEndian.AppendUint64(b, 0)
+	b = binary.LittleEndian.AppendUint64(b, 0)
+	b = binary.LittleEndian.AppendUint32(b, source)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	return occRecord(occPlayerChanged, strValue(b, ""))
+}
+
+func TestAReplacedSourceIsNotHeard(t *testing.T) {
+	real := playerSources
+	playerSources = func(uint64) uint32 { return 2 }
+	defer func() { playerSources = real }()
+	app := NewApp()
+	var p Player
+	var heard []string
+	app.Build(func(tx *Tx) {
+		p = tx.Player().Muted(true).
+			OnState(func(_ *Tx, s PlayerState) { heard = append(heard, "state "+s.String()) }).
+			OnPosition(func(_ *Tx, ms uint64) { heard = append(heard, fmt.Sprint("position ", ms)) }).ID()
+	})
+	deliver(t, app, pairRec(occPlayerPosition, p.id, 4016))
+	deliver(t, app, sourceChangedRec(p.id, PlayerStatePaused, 1))
+	deliver(t, app, sourceChangedRec(p.id, PlayerStateLoading, 2))
+	deliver(t, app, pairRec(occPlayerPosition, p.id, 0))
+	if want := []string{"state loading", "position 0"}; !reflect.DeepEqual(heard, want) {
+		t.Fatalf("heard %v, want %v: a replaced source's position and state are dropped", heard, want)
+	}
 }
 
 func pairRec(kind uint16, player, ms uint64) []byte {

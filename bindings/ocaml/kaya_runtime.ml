@@ -143,6 +143,12 @@ let kaya_can_play =
   foreign ~from:lib "kaya_can_play"
     (string @-> size_t @-> string @-> size_t @-> returning uint8_t)
 let kaya_catalog = foreign ~from:lib "kaya_catalog" (string @-> returning void)
+let kaya_player_sources = foreign ~from:lib "kaya_player_sources" (uint64_t @-> returning uint32_t)
+
+(* kaya_player_sources (docs/media-plan.md §2 rule 7); a ref so the checks
+   can stand in for it. *)
+let player_sources =
+  ref (fun pid -> Unsigned.UInt32.to_int (kaya_player_sources (Unsigned.UInt64.of_int64 pid)))
 let kaya_reader_peaks =
   foreign ~from:lib "kaya_reader_peaks"
     (uint64_t @-> uint64_t @-> ptr int16_t @-> size_t @-> returning size_t)

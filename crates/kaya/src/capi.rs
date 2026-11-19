@@ -3753,9 +3753,26 @@ pub unsafe extern "C" fn kaya_submit(records: *const u8, len: usize) {
         drop(table);
         wire::decode_transaction_with_blobs(buf, &|h| pending.get(&h).cloned())
     };
+    #[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+    if crate::vtrace::on() {
+        crate::media::source_submitted(&tx, Some(&state().ring.unread_heads()));
+    }
+    crate::media::count_sources(&mut SOURCES_SUBMITTED.lock().unwrap_or_else(|e| e.into_inner()), &tx);
     if state().tx_tx.send(tx).is_ok() {
         crate::backend::ring_doorbell();
     }
+}
+
+static SOURCES_SUBMITTED: std::sync::LazyLock<Mutex<std::collections::HashMap<u64, u32>>> =
+    std::sync::LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
+
+/// How many source changes the app's submitted transactions have made to
+/// `player`: a player_changed whose `source` is below it, and every other
+/// occurrence of that player until one is not, belongs to a source the app
+/// has replaced, and the binding drops it (docs/media-plan.md §2 rule 7).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_player_sources(player: u64) -> u32 {
+    SOURCES_SUBMITTED.lock().unwrap_or_else(|e| e.into_inner()).get(&player).copied().unwrap_or(0)
 }
 
 /// Returned by `kaya_next_occurrence` when the core has shut down.
@@ -8530,6 +8547,8 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
     if occurrences.is_empty() {
         return;
     }
+    #[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+    crate::media::published(&occurrences);
     if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
         for occ in occurrences {
             sink.send(occ);

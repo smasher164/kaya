@@ -928,6 +928,7 @@ pub(crate) fn player_changed_body(
     failure: Option<crate::protocol::MediaFailure>,
     duration_ms: u64,
     size: (u32, u32),
+    source: u32,
     detail: &str,
 ) -> Vec<u8> {
     let mut b = Vec::new();
@@ -937,6 +938,8 @@ pub(crate) fn player_changed_body(
     b.extend_from_slice(&duration_ms.to_le_bytes());
     b.extend_from_slice(&size.0.to_le_bytes());
     b.extend_from_slice(&size.1.to_le_bytes());
+    b.extend_from_slice(&source.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
     let mut blobs = Vec::new();
     write_value(&mut b, &Value::Str(detail.to_owned()), &mut blobs);
     b

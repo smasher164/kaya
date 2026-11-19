@@ -6893,9 +6893,36 @@ mediaOccurrence app kind ident keys payload tail_
             Just why -> Left (why, d)
         _ -> return ()
       return True
+  | kind `elem` [W.occKindPlayerChanged, W.occKindPlayerPosition, W.occKindSeekCompleted, W.occKindPlayerTracks, W.occKindCaptionCue] = do
+      -- An occurrence of a source the app has replaced (docs/media-plan.md
+      -- §2 rule 7) is dropped here.
+      sources <- readIORef R.playerSourcesRef
+      heard <- readIORef m.heardSources
+      let heardOf p = Map.findWithDefault 0 p heard
+      stale <-
+        if kind == W.occKindPlayerChanged
+          then case tail_ of
+            _ : _ : _ : _ : _ : W.VI64 src : _ -> do
+              submitted <- sources ident
+              if fromIntegral src < submitted
+                then return True
+                else modifyIORef' m.heardSources (Map.insert ident (fromIntegral src)) >> return False
+            _ -> return False
+          else if kind == W.occKindPlayerPosition || kind == W.occKindSeekCompleted
+            then case payload of
+              Just (W.VI64 pid) -> (heardOf (fromIntegral pid) <) <$> sources (fromIntegral pid)
+              _ -> return False
+            else (heardOf ident <) <$> sources ident
+      if stale then return True else playerOccurrence app kind ident payload tail_
+  | otherwise = otherMediaOccurrence app kind ident keys payload tail_
+  where
+    m = app.appMedia
+
+playerOccurrence :: App -> Word16 -> Word64 -> Maybe W.Value -> [W.Value] -> IO Bool
+playerOccurrence app kind ident payload tail_
   | kind == W.occKindPlayerChanged = do
       case tail_ of
-        W.VI64 st : W.VI64 fl : W.VI64 dur : W.VI64 w : W.VI64 h : detail : _ -> do
+        W.VI64 st : W.VI64 fl : W.VI64 dur : W.VI64 w : W.VI64 h : _ : detail : _ -> do
           let s = playerStateOfWire (fromIntegral st)
               why = mediaFailureOfWire (fromIntegral fl)
           old <- Map.findWithDefault initialReading ident <$> readIORef m.readings
@@ -6934,6 +6961,16 @@ mediaOccurrence app kind ident keys payload tail_
       modifyIORef' m.cues (Map.insert ident text)
       fire ident (MediaCue text)
       return True
+  | otherwise = return False
+  where
+    m = app.appMedia
+    fire p occ = do
+      hs <- readIORef m.playerHandlers
+      let found = [h | name <- ["state", "ended", "failed", "seek_completed", "position", "tracks", "cue"], Just h <- [Map.lookup (p, name) hs]]
+      if null found then return () else dispatch (mapM_ ($ occ) found)
+
+otherMediaOccurrence :: App -> Word16 -> Word64 -> [W.Value] -> Maybe W.Value -> [W.Value] -> IO Bool
+otherMediaOccurrence app kind ident keys payload tail_
   | kind == W.occKindVideoVisibility = do
       case payload of
         Just (W.VF64 shown) -> case keys of
@@ -6991,10 +7028,6 @@ mediaOccurrence app kind ident keys payload tail_
   | otherwise = return False
   where
     m = app.appMedia
-    fire p occ = do
-      hs <- readIORef m.playerHandlers
-      let found = [h | name <- ["state", "ended", "failed", "seek_completed", "position", "tracks", "cue"], Just h <- [Map.lookup (p, name) hs]]
-      if null found then return () else dispatch (mapM_ ($ occ) found)
 
 -- | Turn the decoder's kind-and-parts into the sum, or Nothing. EMPTY
 -- IS THE UNIVERSAL NO: Nothing covers a denied prompt, an unfocused
@@ -7116,6 +7149,7 @@ newApp =
             <*> newIORef Map.empty
             <*> newIORef Map.empty
             <*> newIORef Map.empty
+            <*> newIORef Map.empty -- heardSources
             <*> newIORef Map.empty
             <*> newIORef Map.empty
             <*> newIORef Map.empty

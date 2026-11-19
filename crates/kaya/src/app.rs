@@ -1640,6 +1640,9 @@ pub struct AppCtx {
     /// binding's mirror of each one's readings.
     next_player: Cell<u64>,
     players: RefCell<HashMap<u64, PlayerReading>>,
+    /// Per player: the source changes committed, and the `source` of the
+    /// last player_changed heard (app/media.rs's stale_player).
+    player_sources: RefCell<HashMap<u64, (u32, u32)>>,
     /// Each player's tracks and current cue (docs/media-plan.md §3).
     player_tracks: RefCell<HashMap<u64, (crate::protocol::PlayerTracks, String)>>,
     /// docs/media-plan.md §8: readers, reads and images, each its own id
@@ -1696,6 +1699,7 @@ impl AppCtx {
             document_binds: RefCell::new(HashMap::new()),
             next_player: Cell::new(1),
             players: RefCell::new(HashMap::new()),
+            player_sources: RefCell::new(HashMap::new()),
             player_tracks: RefCell::new(HashMap::new()),
             next_reader: Cell::new(1),
             next_read: Cell::new(1),
@@ -1752,6 +1756,9 @@ impl AppCtx {
                         continue;
                     }
                     if self.absorb_read(&occ) {
+                        continue;
+                    }
+                    if self.stale_player(&occ) {
                         continue;
                     }
                     // An undo moved core state with no transaction, so the
@@ -5484,6 +5491,9 @@ impl<'a> Tx<'a> {
         } else {
             ops.append(&mut self.ops);
         }
+        #[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+        crate::media::source_submitted(&ops, None);
+        self.ctx.count_sources(&ops);
         if self.ctx.transactions.send(ops).is_ok() {
             #[cfg(any(
                 target_os = "macos",

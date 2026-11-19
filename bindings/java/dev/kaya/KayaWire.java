@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x3f0f96117842a9eeL;
+    public static final long SPEC_HASH = 0x5924388addd89793L;
     public static final String VERSION = "0.0.0";
 
     public static final int VALUE_BOOL = 1;
@@ -4358,6 +4358,9 @@ public final class KayaWire {
             tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
             at[0] += 4;
             tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
             at[0] += 4;
             tail.add(parseValue(rec, b, at));
             return new Occ(kind, id, java.util.List.of(), tail);

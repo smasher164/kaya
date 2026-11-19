@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x3f0f96117842a9een;
+export const SPEC_HASH = 0x5924388addd89793n;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -3734,6 +3734,9 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
     tail.push(read_u32(buf, at));
     at += 4;
     tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
     at += 4;
     {
       let value: Decoded;

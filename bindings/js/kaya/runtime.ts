@@ -69,6 +69,7 @@ type Floor = {
   direction(): number;
   textScale(): number;
   canPlay(mime: string, codecs: string): boolean;
+  playerSources(player: number): number;
   // The reader's two pulls (docs/media-plan.md §8 ruling 4): a ring
   // record cannot carry peaks or pixels. kaya_reader_peaks answers a
   // finished read's i16, pair-major; kaya_image_pixels an image's
@@ -413,6 +414,10 @@ export function direction(): number {
 export function textScale(): number {
   return lib.textScale();
 }
+
+/** kaya_player_sources (docs/media-plan.md §2 rule 7); a binding so the
+ * checks can stand in for it. */
+export const sources = { player: (player: number): number => lib.playerSources(player) };
 
 export function canPlay(mime: string, codecs: string): boolean {
   return lib.canPlay(mime, codecs);

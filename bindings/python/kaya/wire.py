@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x3f0f96117842a9ee
+SPEC_HASH = 0x5924388addd89793
 VERSION = "0.0.0"
 
 VALUE_BOOL = 1
@@ -2858,6 +2858,9 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         tail.append(struct.unpack_from("<I", buf, at)[0])
         at += 4
         tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
         at += 4
         value, at = parse_value(buf, at)
         tail.append(value)

@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x3f0f96117842a9ee
+specHash = 0x5924388addd89793
 kayaVersion :: String
 kayaVersion = "0.0.0"
 
@@ -4004,8 +4004,11 @@ parseOccurrence redeem rec = do
           let at4 = at3 + 4
           w4 <- peekByteOff rec at4 :: IO Word32
           let at5 = at4 + 4
-          (v5, _) <- parseValue rec at5
-          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)], [VI64 (fromIntegral w2)], [VI64 (fromIntegral w3)], [VI64 (fromIntegral w4)], [v5]]))
+          w5 <- peekByteOff rec at5 :: IO Word32
+          let at6 = at5 + 4
+          let at7 = at6 + 4
+          (v7, _) <- parseValue rec at7
+          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)], [VI64 (fromIntegral w2)], [VI64 (fromIntegral w3)], [VI64 (fromIntegral w4)], [VI64 (fromIntegral w5)], [v7]]))
       else if kind == occKindSessionAction
         then do
           -- A flat record: its fields in order, into the tail.

@@ -101,6 +101,39 @@ impl super::AppCtx {
         self.player_tracks.borrow().get(&player.0).map(|(_, c)| c.clone()).unwrap_or_default()
     }
 
+    pub(super) fn count_sources(&self, ops: &[crate::protocol::TxOp]) {
+        let mut counted = std::collections::HashMap::new();
+        crate::media::count_sources(&mut counted, ops);
+        let mut sources = self.player_sources.borrow_mut();
+        for (player, n) in counted {
+            sources.entry(player).or_default().0 += n;
+        }
+    }
+
+    /// An occurrence of a source the app has replaced (docs/media-plan.md §2
+    /// rule 7): a player_changed below the committed count, or any other
+    /// player occurrence before the current source's first player_changed.
+    pub(super) fn stale_player(&self, occ: &Occurrence) -> bool {
+        let mut sources = self.player_sources.borrow_mut();
+        match occ {
+            Occurrence::PlayerChanged { player, source, .. } => {
+                let entry = sources.entry(player.0).or_default();
+                if *source < entry.0 {
+                    return true;
+                }
+                entry.1 = *source;
+                false
+            }
+            Occurrence::PlayerPosition { player, .. }
+            | Occurrence::SeekCompleted { player, .. }
+            | Occurrence::PlayerTracks { player, .. }
+            | Occurrence::CaptionCue { player, .. } => {
+                sources.get(&player.0).is_some_and(|(committed, heard)| heard < committed)
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn absorb_player(&self, occ: &Occurrence) {
         match occ {
             Occurrence::PlayerTracks { player, tracks } => {
@@ -903,6 +936,50 @@ mod tests {
         assert_eq!(msgs.next(&ctx), Some(Msg::Done(ReadOutcome::Cancelled)));
         ctx.apply(|_| {});
         assert_eq!(released(&batches.recv().unwrap()), vec![1]);
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum Heard {
+        State(PlayerState),
+        Position(u64),
+    }
+
+    fn changed(player: PlayerId, state: PlayerState, source: u32) -> Occurrence {
+        Occurrence::PlayerChanged {
+            player,
+            state,
+            failure: None,
+            duration_ms: 0,
+            width: 0,
+            height: 0,
+            source,
+            detail: String::new(),
+        }
+    }
+
+    /// A SOURCE THE APP HAS REPLACED IS NOT HEARD (docs/media-plan.md §2
+    /// rule 7): its second source change committed, the first source's
+    /// late position and state drop and the second's are heard.
+    #[test]
+    fn a_replaced_source_is_not_heard() {
+        let (ctx, batches, send) = context();
+        let msgs = Messages::<Heard>::new();
+        let p = ctx.apply(|tx| tx.player().source(&MediaSource::asset("media/tone.mp3")).id());
+        msgs.on_player_state(p, Heard::State);
+        msgs.on_position(p, Heard::Position);
+        batches.recv().unwrap();
+        ctx.apply(|tx| tx.player_source(p, &MediaSource::asset("media/tone.wav")));
+        batches.recv().unwrap();
+        for occ in [
+            Occurrence::PlayerPosition { player: p, position_ms: 4016 },
+            changed(p, PlayerState::Paused, 1),
+            changed(p, PlayerState::Loading, 2),
+            Occurrence::PlayerPosition { player: p, position_ms: 0 },
+        ] {
+            send.send(Inbox::Occ(occ)).unwrap();
+        }
+        assert_eq!(msgs.next(&ctx), Some(Heard::State(PlayerState::Loading)));
+        assert_eq!(msgs.next(&ctx), Some(Heard::Position(0)));
     }
 
     /// Closing a reader gives up its read in flight the same way.

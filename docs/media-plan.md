@@ -126,6 +126,16 @@ to it).
    focus and becoming-noisy handling are the two ExoPlayer builder calls,
    both on; what the other platforms do on a headphone unplug is measured
    before a rule is written for it.
+7. **A replaced source is not heard** (built 2026-11-18). Once the app has
+   submitted a source change, it hears nothing more of the source it
+   replaced: `player_changed` carries `source`, the count of source changes
+   the core has applied to that player, `kaya_player_sources` answers the
+   count the app's transactions have submitted, and every binding drops a
+   `player_changed` whose `source` is below it and every other player
+   occurrence (position, seek_completed, tracks, cue) until the current
+   source's first `player_changed` arrives. A tick published before the
+   change was applied otherwise reached the app after it (docs/traps.md,
+   the previous source's position heard after a source change).
 
 Every lane asserts a player's state, position within a tolerance,
 duration, media size and occurrences; what else a scene may assert is

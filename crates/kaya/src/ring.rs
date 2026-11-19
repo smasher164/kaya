@@ -434,6 +434,35 @@ impl OccRing {
         records
     }
 
+    /// The unread records' kinds with their first two body qwords, for the
+    /// flight recorder (media.rs's source_submitted). pending_records' walk
+    /// and its caveat.
+    #[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+    pub(crate) fn unread_heads(&self) -> Vec<(u16, u64, u64)> {
+        let (mut at, tail) = self.cursors();
+        let mut out = Vec::new();
+        let mut budget = u64::from(self.capacity() / HEADER_SIZE);
+        while at != tail && budget > 0 {
+            budget -= 1;
+            let header = self.read_header(at);
+            if header.size < HEADER_SIZE || header.size > self.capacity() {
+                break;
+            }
+            if header.kind != REC_PAD {
+                let word = |n: u32| {
+                    if header.size >= HEADER_SIZE + 8 * (n + 1) {
+                        self.read_qword(at.wrapping_add(HEADER_SIZE + 8 * n))
+                    } else {
+                        0
+                    }
+                };
+                out.push((header.kind, word(0), word(1)));
+            }
+            at = at.wrapping_add(header.size);
+        }
+        out
+    }
+
     /// Raw layout for direct consumers, io_uring-offsets style. The
     /// pointers stay valid as long as the ring is alive.
     pub fn raw(&self) -> (*mut u8, u32, *mut u32, *mut u32) {

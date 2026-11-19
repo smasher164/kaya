@@ -1188,10 +1188,12 @@ let () =
         Buffer.add_int64_le b 2000L;
         Buffer.add_int32_le b 160l;
         Buffer.add_int32_le b 90l;
+        Buffer.add_int32_le b 0l;
+        Buffer.add_int32_le b 0l;
         Kaya_wire.encode_value b (Str "gone"))
   in
   (match changed with
-  | _, 7L, [], None, [ I64 6L; I64 3L; I64 2000L; I64 160L; I64 90L; Str "gone" ] -> ()
+  | _, 7L, [], None, [ I64 6L; I64 3L; I64 2000L; I64 160L; I64 90L; I64 0L; Str "gone" ] -> ()
   | _, id, _, _, tail ->
       fail "player_changed decoded as id %Ld tail [%s]" id
         (String.concat "; " (List.map show_wire_value tail)));
@@ -1247,6 +1249,40 @@ let () =
   if t.audio <> [ "en"; "fr" ] || t.audio_selected <> Some 1 || t.captions <> [ "en" ]
      || t.caption_selected <> None
   then fail "the mirror did not take player_tracks";
+  (* A source the app has replaced is not heard (docs/media-plan.md §2 rule
+     7): its second source change submitted, the first source's late
+     position and state drop and the second's are heard. *)
+  let changed_src state src =
+    record Kaya_wire.occ_kind_player_changed (fun b ->
+        Buffer.add_int64_le b 7L;
+        Buffer.add_int32_le b (Int32.of_int state);
+        Buffer.add_int32_le b 0l;
+        Buffer.add_int64_le b 0L;
+        Buffer.add_int32_le b 0l;
+        Buffer.add_int32_le b 0l;
+        Buffer.add_int32_le b (Int32.of_int src);
+        Buffer.add_int32_le b 0l;
+        Kaya_wire.encode_value b (Str ""))
+  in
+  let real_sources = !Kaya_runtime.player_sources in
+  Kaya_runtime.player_sources := (fun _ -> 2);
+  Fun.protect
+    ~finally:(fun () -> Kaya_runtime.player_sources := real_sources)
+    (fun () ->
+      feed (Kaya_wire.occ_kind_player_position, 4016L, [], Some (I64 (pack_player p)), []);
+      let k, _, keys, payload, tail = changed_src Kaya_wire.player_state_paused 1 in
+      feed (k, pack_player p, keys, payload, tail);
+      let r = player_reading media_app p in
+      if r.position_ms <> 1234 || r.state <> Player_state.Failed then
+        fail "a replaced source was heard: the mirror reads %s at %d" (Player_state.name r.state)
+          r.position_ms;
+      let k, _, keys, payload, tail = changed_src Kaya_wire.player_state_loading 2 in
+      feed (k, pack_player p, keys, payload, tail);
+      feed (Kaya_wire.occ_kind_player_position, 5L, [], Some (I64 (pack_player p)), []);
+      let r = player_reading media_app p in
+      if r.position_ms <> 5 || r.state <> Player_state.Loading then
+        fail "the current source was not heard: the mirror reads %s at %d"
+          (Player_state.name r.state) r.position_ms);
   (* A stamped video's player comes from the row's own field. *)
   let rows = build media_app (fun () -> collection ()) in
   build media_app (fun () ->

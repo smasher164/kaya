@@ -199,6 +199,7 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("direction", direction),
         ("textScale", text_scale),
         ("canPlay", can_play),
+        ("playerSources", player_sources),
         ("readerPeaks", reader_peaks),
         ("imagePixels", image_pixels),
         ("imageDominant", image_dominant),
@@ -652,6 +653,13 @@ unsafe extern "C" fn text_scale(env: Env, _info: CbInfo) -> Value {
 }
 
 /// `canPlay(mime, codecs)`: kaya_can_play (docs/media-plan.md §8 ruling 1).
+/// `playerSources(player)`: kaya_player_sources (docs/media-plan.md §2 rule 7).
+unsafe extern "C" fn player_sources(env: Env, info: CbInfo) -> Value {
+    let [p] = unsafe { args::<1>(env, info) };
+    let player = try_or_throw!(env, unsafe { u64_arg(env, p, "playerSources player") });
+    unsafe { number(env, f64::from(capi::kaya_player_sources(player))) }
+}
+
 unsafe extern "C" fn can_play(env: Env, info: CbInfo) -> Value {
     let [m, c] = unsafe { args::<2>(env, info) };
     let mime = try_or_throw!(env, unsafe { string_arg(env, m, "canPlay mime") });

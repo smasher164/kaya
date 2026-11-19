@@ -4267,6 +4267,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 f("duration_ms", FieldTy::U64),
                 f("width", FieldTy::U32),
                 f("height", FieldTy::U32),
+                f("source", FieldTy::U32),
+                f("reserved", FieldTy::U32),
                 f("detail", FieldTy::Value),
             ],
             payload: None,
@@ -4276,7 +4278,12 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   is failed, and `detail` the platform's own sentence as a \
                   Str, which no scene compares (docs/media-plan.md §7a). The \
                   bindings hand `ended` and `failed` to the app as their own \
-                  occurrences.",
+                  occurrences. `source` counts the source changes applied to \
+                  the player: a binding hears nothing of a source its app has \
+                  replaced, dropping a player_changed whose `source` is below \
+                  kaya_player_sources and every other player occurrence until \
+                  the current source's first player_changed (docs/media-plan.md \
+                  §2 rule 7).",
         },
         Record {
             kind: 40,

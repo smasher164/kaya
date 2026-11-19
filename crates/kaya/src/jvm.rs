@@ -172,6 +172,7 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
             NativeMethod { name: "tr".into(), sig: "([B[BI)[B".into(), fn_ptr: ring_tr as *mut _ },
             // The capability query (docs/media-plan.md §8 ruling 1).
             NativeMethod { name: "canPlay".into(), sig: "([B[B)Z".into(), fn_ptr: ring_can_play as *mut _ },
+            NativeMethod { name: "playerSources".into(), sig: "(J)I".into(), fn_ptr: ring_player_sources as *mut _ },
             // The one quantizer (docs/styling-pass-plan.md Y2).
             NativeMethod { name: "imageDominant".into(), sig: "([B)I".into(), fn_ptr: ring_image_dominant as *mut _ },
             NativeMethod { name: "imagePalette".into(), sig: "([BI)[D".into(), fn_ptr: ring_image_palette as *mut _ },
@@ -623,6 +624,10 @@ extern "system" fn ring_image_pixels<'a>(env: JNIEnv<'a>, _c: JClass<'a>, image:
     unsafe { crate::capi::kaya_image_pixels(image as u64, buf.as_mut_ptr(), n, &mut w, &mut h) };
     env.set_int_array_region(&size, 0, &[w as i32, h as i32]).expect("kaya: writing the size failed");
     env.byte_array_from_slice(&buf).expect("kaya: allocating the pixels failed")
+}
+
+extern "system" fn ring_player_sources(_env: JNIEnv, _class: JClass, player: jlong) -> jint {
+    crate::capi::kaya_player_sources(player as u64) as jint
 }
 
 extern "system" fn ring_can_play<'a>(

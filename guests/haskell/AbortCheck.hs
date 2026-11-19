@@ -17,6 +17,7 @@ import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Char8 as BC
 import qualified Data.ByteString.Lazy as BL
 import Data.IORef (atomicModifyIORef', modifyIORef', newIORef, readIORef, writeIORef)
+import qualified KayaRuntime as R
 import Data.List (isInfixOf)
 import Data.Word (Word8)
 import Foreign.Ptr (castPtr)
@@ -410,8 +411,8 @@ main = do
   changed@(_, cId, _, _, cTail) <-
     decode W.occKindPlayerChanged
       ( u64 7 <> u32 (fromIntegral W.playerStateFailed) <> u32 (fromIntegral W.mediaFailureNotFound)
-          <> u64 2000 <> u32 160 <> u32 90 <> str "gone" )
-  check (cId == 7 && cTail == [VI64 6, VI64 3, VI64 2000, VI64 160, VI64 90, VStr "gone"])
+          <> u64 2000 <> u32 160 <> u32 90 <> u32 0 <> u32 0 <> str "gone" )
+  check (cId == 7 && cTail == [VI64 6, VI64 3, VI64 2000, VI64 160, VI64 90, VI64 0, VStr "gone"])
     ("player_changed decoded as id " ++ show cId ++ " tail " ++ show cTail)
   listing@(_, lId, _, _, lTail) <-
     decode W.occKindPlayerTracks (u64 7 <> u32 2 <> u32 0 <> strs ["en", "fr"] <> strs ["en"])
@@ -440,6 +441,24 @@ main = do
   t <- playerTracks mediaApp p
   check (t.audio == ["en", "fr"] && t.audioSelected == Just 1 && t.captions == ["en"] && t.captionSelected == Nothing)
     ("the mirror did not take player_tracks: " ++ show t)
+  -- A source the app has replaced is not heard (docs/media-plan.md §2 rule
+  -- 7): its second source change submitted, the first source's late
+  -- position and state drop and the second's are heard.
+  realSources <- readIORef R.playerSourcesRef
+  writeIORef R.playerSourcesRef (\_ -> return 2)
+  let changedSrc st src = decode W.occKindPlayerChanged
+        (u64 7 <> u32 (fromIntegral st) <> u32 0 <> u64 0 <> u32 0 <> u32 0 <> u32 src <> u32 0 <> str "")
+  _ <- mediaOccurrence mediaApp W.occKindPlayerPosition 4016 [] (Just (VI64 (fromIntegral pid))) []
+  changedSrc W.playerStatePaused 1 >>= feed
+  stale <- playerReading mediaApp p
+  changedSrc W.playerStateLoading 2 >>= feed
+  _ <- mediaOccurrence mediaApp W.occKindPlayerPosition 5 [] (Just (VI64 (fromIntegral pid))) []
+  fresh <- playerReading mediaApp p
+  writeIORef R.playerSourcesRef realSources
+  check (stale.positionMs == 1234 && stale.state == PlayerFailed)
+    ("a replaced source was heard: " ++ show stale)
+  check (fresh.positionMs == 5 && fresh.state == PlayerLoading)
+    ("the current source was not heard: " ++ show fresh)
   -- A stamped video's player comes from the row's own field.
   clips <- buildTx mediaApp (collectionOf @CheckClip)
   staged <- BL.toStrict . toLazyByteString . snd <$> stageTx mediaApp (forEach (recordHandle clips) (video (field @"ccPlayer" @CheckClip)))

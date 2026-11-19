@@ -13664,14 +13664,47 @@ public final class KayaApp {
      * tools/kaya-bindgen's flat class (player_changed, player_tracks,
      * session_action); position and seek_completed are the surface-pair
      * class, the position keying and the player riding. */
+    /** kaya_player_sources, a field so MediaCheck can stand in for it. */
+    static java.util.function.LongToIntFunction playerSources = KayaRing::playerSources;
+
+    private final Map<Long, Integer> heardSources = new HashMap<>();
+
+    /** An occurrence of a source the app has replaced (docs/media-plan.md
+     * §2 rule 7). */
+    private boolean stalePlayer(KayaWire.Occ occ) {
+        switch (occ.kind) {
+            case KayaWire.OCC_KIND_PLAYER_CHANGED -> {
+                int source = (int) flatLong((List<?>) occ.payload, 5);
+                if (source < playerSources.applyAsInt(occ.id)) {
+                    return true;
+                }
+                heardSources.put(occ.id, source);
+                return false;
+            }
+            case KayaWire.OCC_KIND_PLAYER_POSITION, KayaWire.OCC_KIND_SEEK_COMPLETED -> {
+                long player = (Long) occ.payload;
+                return heardSources.getOrDefault(player, 0) < playerSources.applyAsInt(player);
+            }
+            case KayaWire.OCC_KIND_PLAYER_TRACKS, KayaWire.OCC_KIND_CAPTION_CUE -> {
+                return heardSources.getOrDefault(occ.id, 0) < playerSources.applyAsInt(occ.id);
+            }
+            default -> {
+                return false;
+            }
+        }
+    }
+
     void mediaOccurrence(KayaWire.Occ occ) {
+        if (stalePlayer(occ)) {
+            return;
+        }
         switch (occ.kind) {
             case KayaWire.OCC_KIND_PLAYER_CHANGED -> {
                 long player = occ.id;
                 List<?> tail = (List<?>) occ.payload;
                 PlayerState state = PlayerState.fromWire(flatLong(tail, 0));
                 Optional<MediaFailure> failure = MediaFailure.fromWire(flatLong(tail, 1));
-                String detail = tail.get(5) instanceof String s ? s : "";
+                String detail = tail.get(6) instanceof String s ? s : "";
                 PlayerReading was = playerReadings.getOrDefault(player, PlayerReading.IDLE);
                 long position = state == PlayerState.LOADING || state == PlayerState.IDLE
                         ? 0 : was.positionMs();

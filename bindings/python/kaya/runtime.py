@@ -236,6 +236,8 @@ _lib.kaya_fmt_currency.restype = ctypes.c_size_t
 _lib.kaya_locale.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
 _lib.kaya_locale.restype = ctypes.c_size_t
 _lib.kaya_direction.restype = ctypes.c_uint32
+_lib.kaya_player_sources.argtypes = [ctypes.c_uint64]
+_lib.kaya_player_sources.restype = ctypes.c_uint32
 _lib.kaya_text_scale.restype = ctypes.c_double
 _lib.kaya_can_play.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
                                ctypes.c_char_p, ctypes.c_size_t]
@@ -616,6 +618,10 @@ def locale_line() -> str:
     """kaya_locale's one line: tag, hour cycle, first weekday, calendar,
     numbering, space-separated."""
     return _filled("kaya_locale", lambda o, c: _lib.kaya_locale(o, c))
+
+
+def player_sources(player: int) -> int:
+    return _lib.kaya_player_sources(player)
 
 
 def direction() -> int:

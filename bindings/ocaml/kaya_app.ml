@@ -1444,6 +1444,7 @@ type media = {
   readings : (int64, Player_reading.t) Hashtbl.t;
   player_tracks : (int64, Tracks.t) Hashtbl.t;
   cues : (int64, string) Hashtbl.t;
+  heard_sources : (int64, int) Hashtbl.t;
   (* Per (player, occurrence name): the newest registration wins, the
      widgets' rule. *)
   player_handlers : (int64 * string, media_occ -> unit) Hashtbl.t;
@@ -1736,6 +1737,7 @@ let create () =
         readings = Hashtbl.create 8;
         player_tracks = Hashtbl.create 8;
         cues = Hashtbl.create 8;
+        heard_sources = Hashtbl.create 8;
         player_handlers = Hashtbl.create 8;
         widget_visibility = Hashtbl.create 8;
         node_visibility = Hashtbl.create 8;
@@ -8203,10 +8205,33 @@ let media_occurrence app kind id keys payload tail =
   end
   else
   let reading pid = Option.value (Hashtbl.find_opt m.readings pid) ~default:Player_reading.initial in
-  if kind = Kaya_wire.occ_kind_player_changed then begin
+  (* An occurrence of a source the app has replaced (docs/media-plan.md §2
+     rule 7). *)
+  let stale =
+    let heard pid = Option.value (Hashtbl.find_opt m.heard_sources pid) ~default:0 in
+    if kind = Kaya_wire.occ_kind_player_changed then
+      match tail with
+      | _ :: _ :: _ :: _ :: _ :: Kaya_wire.I64 src :: _ ->
+          let src = Int64.to_int src in
+          if src < !Kaya_runtime.player_sources id then true
+          else (
+            Hashtbl.replace m.heard_sources id src;
+            false)
+      | _ -> false
+    else if kind = Kaya_wire.occ_kind_player_position || kind = Kaya_wire.occ_kind_seek_completed
+    then
+      match payload with
+      | Some (Kaya_wire.I64 pid) -> heard pid < !Kaya_runtime.player_sources pid
+      | _ -> false
+    else if kind = Kaya_wire.occ_kind_player_tracks || kind = Kaya_wire.occ_kind_caption_cue then
+      heard id < !Kaya_runtime.player_sources id
+    else false
+  in
+  if stale then true
+  else if kind = Kaya_wire.occ_kind_player_changed then begin
     (match tail with
     | Kaya_wire.I64 st :: Kaya_wire.I64 fl :: Kaya_wire.I64 dur :: Kaya_wire.I64 w
-      :: Kaya_wire.I64 h :: detail :: _ ->
+      :: Kaya_wire.I64 h :: _ :: detail :: _ ->
         let state = Player_state.of_wire (Int64.to_int st) in
         let failure = Media_failure.of_wire (Int64.to_int fl) in
         let r = reading id in

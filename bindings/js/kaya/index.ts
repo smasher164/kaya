@@ -6667,6 +6667,7 @@ export class Player {
   private _height = 0;
   private _tracks: Tracks = { audio: [], captions: [], audioSelected: null, captionSelected: null };
   private _cue = "";
+  private _heardSource = 0;
   /** @internal */ _opts: PlayerOptions = {};
 
   /** @internal */
@@ -6785,10 +6786,23 @@ export class Player {
     records().push(wire.tx_release_player(this.id));
   }
 
+  /** @internal An occurrence of a source the app has replaced
+   * (docs/media-plan.md §2 rule 7). */
+  _stale(kind: number, payload: unknown): boolean {
+    const submitted = runtime.sources.player(this.id);
+    if (kind === wire.OCC_PLAYER_CHANGED) {
+      const source = Number((payload as unknown[])[5]);
+      if (source < submitted) return true;
+      this._heardSource = source;
+      return false;
+    }
+    return this._heardSource < submitted;
+  }
+
   /** @internal The mirror follows first, handler or none. */
   _absorb(kind: number, payload: unknown): void {
     if (kind === wire.OCC_PLAYER_CHANGED) {
-      const [state, failure, duration, width, height, detail] = payload as [number, number, number, number, number, string];
+      const [state, failure, duration, width, height, , detail] = payload as [number, number, number, number, number, number, string];
       this._state = known(PLAYER_STATES, Number(state), "player state");
       this._failure = Number(failure) === wire.MEDIA_FAILURE_NONE ? null : known(MEDIA_FAILURES, Number(failure), "media failure");
       this._detail = String(detail);
@@ -8537,7 +8551,7 @@ export class App {
       // hands position/seek back as (position, player).
       const pair = kind === wire.OCC_PLAYER_POSITION || kind === wire.OCC_SEEK_COMPLETED;
       const seat = this._players.get(Number(pair ? payload : ident));
-      if (seat === undefined) return;
+      if (seat === undefined || seat._stale(kind, pair ? ident : payload)) return;
       seat._absorb(kind, pair ? ident : payload);
       for (const [fn, args] of seat._handlers(kind)) this._dispatch(fn, ...args);
       return;

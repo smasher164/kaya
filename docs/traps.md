@@ -4,6 +4,35 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The previous source's position heard after a source change (measured 2026-11-18)
+
+Matrix #8 on 37c971e2 failed music_dock-python-x11 once: the `previous`
+session action came 0.2 s after Owl Time started playing and the guest
+restarted Owl Time (`Seek(0)`) instead of going back to In Tune, so its
+`playback["ms"]` read more than RESTART_AFTER_MS although `play_track` had
+just set it to 0. The bundle could not say whether that was the `at == 0`
+branch or a stale position, so the recorder grew first: the core now notes,
+at every source change a transaction submits, how many of that player's
+occurrences wait UNREAD in the ring and which, every player occurrence
+published between the submit and the apply, and the apply (media.rs
+source_submitted, published, source_applied; ring.rs unread_heads).
+
+Forced red and read back (`settle 3500` before `session_send next`,
+`previous` straight after it, a 0.3 s sleep in the guest's skip_next): the
+leg failed as the matrix did, and the trace said "player 1 source change
+submitted; 1 of the player's occurrences wait unread in the ring:
+player_position 4016 ms". A position tick of In Tune, published after the
+session action and before the guest's commit, sits in the ring behind the
+action; the guest reads it after its own source change, while the binding's
+mirror still reads `playing` (the change's `player_changed(loading)` is
+behind it), and stores it. The core cannot retract a record the bindings
+read directly, so the fix is a binding rule with the core's count beside it:
+docs/media-plan.md §2 rule 7. Guards: each binding's check ("a replaced
+source's late position and state are dropped"), Rust's
+app::media::tests::a_replaced_source_is_not_heard, each watched red with its
+binding's call cut, and the forced leg green with the rule and red without
+it.
+
 ## AppKit's frame autosave wrote the app's real domain at every launch (measured 2026-11-18)
 
 Matrix #7's real-store wall named ~/Library/Preferences/dev.kaya.aurora.notes.plist

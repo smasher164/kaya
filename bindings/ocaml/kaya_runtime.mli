@@ -25,6 +25,10 @@ val locale_line : unit -> string option
 val direction_bit : unit -> int
 val text_scale : unit -> float
 
+(* kaya_player_sources (docs/media-plan.md §2 rule 7); a ref so the checks
+   can stand in for it. *)
+val player_sources : (int64 -> int) ref
+
 (* kaya_can_play (docs/media-plan.md §8 ruling 1). *)
 val can_play : string -> string -> bool
 val catalog : string -> unit

@@ -1509,6 +1509,7 @@ pub enum Occurrence {
         duration_ms: u64,
         width: u32,
         height: u32,
+        source: u32,
         detail: String,
     },
     /// The playhead, every crate::media::POSITION_TICK_MS while playing.
@@ -3946,7 +3947,7 @@ impl OccSink {
                         &crate::wire::documents_detached_body(source, window, &documents),
                     );
                 }
-                Occurrence::PlayerChanged { player, state, failure, duration_ms, width, height, detail } => {
+                Occurrence::PlayerChanged { player, state, failure, duration_ms, width, height, source, detail } => {
                     ring.push_record(
                         crate::ring::REC_PLAYER_CHANGED,
                         &crate::wire::player_changed_body(
@@ -3955,6 +3956,7 @@ impl OccSink {
                             failure,
                             duration_ms,
                             (width, height),
+                            source,
                             &detail,
                         ),
                     );

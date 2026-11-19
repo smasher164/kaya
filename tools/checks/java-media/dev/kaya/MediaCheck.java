@@ -274,12 +274,12 @@ public final class MediaCheck {
         // 160x90, a detail sentence.
         byte[] changed = record(KayaWire.OCC_KIND_PLAYER_CHANGED, new Body()
                 .u64(7).u32(KayaWire.PLAYER_STATE_FAILED).u32(KayaWire.MEDIA_FAILURE_NOT_FOUND)
-                .u64(2000).u32(160).u32(90).str("gone").bytes());
+                .u64(2000).u32(160).u32(90).u32(0).u32(0).str("gone").bytes());
         KayaWire.Occ occ = KayaWire.parseOccurrence(changed);
         check(occ != null && occ.id == 7 && occ.keys.isEmpty(),
                 "player_changed decoded with the wrong id or keys: " + (occ == null ? null : occ.id));
         check(List.of((long) KayaWire.PLAYER_STATE_FAILED, (long) KayaWire.MEDIA_FAILURE_NOT_FOUND,
-                        2000L, 160L, 90L, "gone").equals(occ.payload),
+                        2000L, 160L, 90L, 0L, "gone").equals(occ.payload),
                 "player_changed's tail read back as " + occ.payload);
 
         byte[] tracks = record(KayaWire.OCC_KIND_PLAYER_TRACKS, new Body()
@@ -323,7 +323,7 @@ public final class MediaCheck {
         long id = p.id();
         app.mediaOccurrence(KayaWire.parseOccurrence(record(KayaWire.OCC_KIND_PLAYER_CHANGED, new Body()
                 .u64(id).u32(KayaWire.PLAYER_STATE_FAILED).u32(KayaWire.MEDIA_FAILURE_NOT_FOUND)
-                .u64(2000).u32(160).u32(90).str("gone").bytes())));
+                .u64(2000).u32(160).u32(90).u32(0).u32(0).str("gone").bytes())));
         app.mediaOccurrence(KayaWire.parseOccurrence(record(KayaWire.OCC_KIND_PLAYER_TRACKS, new Body()
                 .u64(id).u32(2).u32(0).strs("en", "fr").strs("en").bytes())));
         app.mediaOccurrence(KayaWire.parseOccurrence(action));
@@ -341,8 +341,33 @@ public final class MediaCheck {
         check(app.player(p).positionMs() == 1234, "a position read back as " + app.player(p).positionMs());
         app.mediaOccurrence(KayaWire.parseOccurrence(record(KayaWire.OCC_KIND_PLAYER_CHANGED, new Body()
                 .u64(id).u32(KayaWire.PLAYER_STATE_LOADING).u32(KayaWire.MEDIA_FAILURE_NONE)
-                .u64(0).u32(0).u32(0).str("").bytes())));
+                .u64(0).u32(0).u32(0).u32(0).u32(0).str("").bytes())));
         check(app.player(p).positionMs() == 0, "loading left the position at " + app.player(p).positionMs());
+
+        // A SOURCE THE APP HAS REPLACED IS NOT HEARD (docs/media-plan.md §2
+        // rule 7): the second source change submitted, the first source's
+        // late position and state drop and the second's are heard.
+        java.util.function.LongToIntFunction realSources = KayaApp.playerSources;
+        KayaApp.playerSources = player -> 2;
+        List<Long> positions = new ArrayList<>();
+        app.onPosition(p, (tx, ms) -> positions.add(ms));
+        seen.clear();
+        try {
+            app.mediaOccurrence(KayaWire.parseOccurrence(record(KayaWire.OCC_KIND_PLAYER_POSITION,
+                    new Body().u64(id).u64(4016).bytes())));
+            app.mediaOccurrence(KayaWire.parseOccurrence(record(KayaWire.OCC_KIND_PLAYER_CHANGED, new Body()
+                    .u64(id).u32(KayaWire.PLAYER_STATE_PAUSED).u32(KayaWire.MEDIA_FAILURE_NONE)
+                    .u64(0).u32(0).u32(0).u32(1).u32(0).str("").bytes())));
+            app.mediaOccurrence(KayaWire.parseOccurrence(record(KayaWire.OCC_KIND_PLAYER_CHANGED, new Body()
+                    .u64(id).u32(KayaWire.PLAYER_STATE_LOADING).u32(KayaWire.MEDIA_FAILURE_NONE)
+                    .u64(0).u32(0).u32(0).u32(2).u32(0).str("").bytes())));
+            app.mediaOccurrence(KayaWire.parseOccurrence(record(KayaWire.OCC_KIND_PLAYER_POSITION,
+                    new Body().u64(id).u64(0).bytes())));
+        } finally {
+            KayaApp.playerSources = realSources;
+        }
+        check(seen.equals(List.of("state loading mirror loading")) && positions.equals(List.of(0L)),
+                "a replaced source was heard: " + seen + " " + positions);
 
         // A ROW'S PLAYER FIELD: its id on the wire, 0 for none.
         KayaRecords.Info info = KayaRecords.Info.of(Row.class);

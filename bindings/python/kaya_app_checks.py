@@ -5130,8 +5130,14 @@ def _occ_bytes(kind, body):
 
 def _changed(player, state, failure, duration, w, h, detail):
     return _occ_bytes(_W.OCC_PLAYER_CHANGED,
-                      struct.pack("<QIIQII", player, state, failure, duration, w, h)
+                      struct.pack("<QIIQIIII", player, state, failure, duration, w, h, 1, 0)
                       + _W._enc.value(detail))
+
+
+def _changed2(player, state, source):
+    return _occ_bytes(_W.OCC_PLAYER_CHANGED,
+                      struct.pack("<QIIQIIII", player, state, 0, 0, 0, 0, source, 0)
+                      + _W._enc.value(""))
 
 
 def _tracks(player, a_sel, c_sel, audio, captions):
@@ -5163,7 +5169,7 @@ check("player_changed decodes through the generated decoder, every field",
                                    "refused"))
       == (_W.OCC_PLAYER_CHANGED, 7, [],
           [_W.PLAYER_STATE_FAILED, _W.MEDIA_FAILURE_NETWORK, 2000, 160, 90,
-           "refused"]))
+           1, "refused"]))
 check("player_tracks decodes both lists and both selections",
       _decoded(_tracks(7, 2, 0, ["en", "fr"], ["en"]))
       == (_W.OCC_PLAYER_TRACKS, 7, [], [2, 0, 2, "en", "fr", 1, "en"]))
@@ -5231,6 +5237,7 @@ check("a `Player | None` field is the I64 slot, its none 0",
       and md_spec.decoders[1](md_player.id) is md_player)
 
 md_occs = [_decoded(b) for b in [
+    _changed(md_player.id, _W.PLAYER_STATE_READY, 0, 2000, 160, 90, ""),
     _pair(_W.OCC_PLAYER_POSITION, md_player.id, 1200),
     _changed(md_player.id, _W.PLAYER_STATE_LOADING, 0, 0, 0, 0, ""),
     _changed(md_player.id, _W.PLAYER_STATE_ENDED, 0, 2000, 160, 90, ""),
@@ -5269,6 +5276,30 @@ check("a session action reaches on_action as the closed action",
       ("session", kaya.SessionAction.NEXT, 0) in md_seen)
 check("a stamped video's visibility passes the copy's row first",
       ("shown", 3, 0.5) in md_seen)
+
+# A source the app has replaced is not heard (docs/media-plan.md §2 rule 7):
+# the app's second source change is submitted, so the first source's late
+# player_changed and position drop, and the second's are heard.
+md_seen.clear()
+md_stale = [_decoded(b) for b in [
+    _pair(_W.OCC_PLAYER_POSITION, md_player.id, 4016),
+    _changed(md_player.id, _W.PLAYER_STATE_PAUSED, 0, 2000, 0, 0, ""),
+    _changed2(md_player.id, _W.PLAYER_STATE_LOADING, 2),
+    _pair(_W.OCC_PLAYER_POSITION, md_player.id, 0),
+]]
+real_sources = kaya.runtime.player_sources
+kaya.runtime.player_sources = lambda player: 2
+kaya.runtime.next_occurrence = lambda: md_stale.pop(0) if md_stale else None
+try:
+    app_md._dispatch_loop()
+finally:
+    kaya.runtime.next_occurrence = real_next_md
+    kaya.runtime.player_sources = real_sources
+check("a replaced source's late position and state are dropped; the new one's heard",
+      ("position", 4016) not in md_seen
+      and ("state", kaya.PlayerState.PAUSED, 0) not in md_seen
+      and ("state", kaya.PlayerState.LOADING, 0) in md_seen
+      and ("position", 0) in md_seen)
 
 
 # --- THE READER (docs/media-plan.md §8 ruling 4). AFTER A CANCEL OR A

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x3f0f96117842a9ee;
+    public const ulong SpecHash = 0x5924388addd89793;
     public const string Version = "0.0.0";
 
     public const uint ValueBool = 1;
@@ -4526,6 +4526,9 @@ static class KayaWire
             tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
             flatAt += 4;
             tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
             flatAt += 4;
             {
                 uint vtype = BitConverter.ToUInt32(rec, flatAt);
