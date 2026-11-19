@@ -151,6 +151,13 @@ home screen): their `am start` now carries the two recorder extras
 (run-emulator.py's act_two_recorder; a notification tap cannot carry any), and a
 forced red act two of restorefresh-compose drew the app's own window and dumped
 its trace (check-flightrec's NA11).
+The notification tap's door could not carry them at all, so since 2026-11-19
+act one leaves the recorder's two settings in `<act2 dir>/recorder` beside the
+marker (crates/kaya/src/act2.rs, every platform) and act two takes the ones its
+door left unset, naming them on its KAYA_ACT2 line. A forced red act two of
+tasks-compose (the notify_tap door) kept the app's own picture of the task's
+details and dumped act two's trace; with the adoption cut (1 substitution) it
+read "the app's own picture: none" and a 67-byte trace (check-flightrec's NA12).
 
 ## A selection kaya sets on WinUI raises no SelectionChanged (measured 2026-11-18)
 

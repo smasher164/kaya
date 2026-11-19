@@ -1058,6 +1058,10 @@ settle confirmations, layout height and room, the dialog window's focus and
 keyboard inset, the state's identity, kaya's show's cancellation, the
 re-show of a show at rest between anchors, a watcher that outlives the show
 Material cancels, and a remembered confirm function; eight cuts watched.
+AND ACT TWO ADOPTS ACT ONE'S RECORDER since 2026-11-19 (docs/traps.md, a
+Windows act two drew no picture of its window): a notification tap's door
+carries no extras, so crates/kaya/src/act2.rs passes the two settings beside
+the marker; one cut watched (NA12).
 Three hundred watched negatives, five more where the drives run, counts
 printed)
 

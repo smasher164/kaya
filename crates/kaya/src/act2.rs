@@ -19,6 +19,29 @@ pub(crate) const ENV_DIR: &str = "KAYA_ACT2_DIR";
 pub(crate) const ENV_VERDICT: &str = "KAYA_ACT2_VERDICT";
 pub(crate) const MARKER: &str = "marker";
 pub(crate) const VERDICT: &str = "act2.verdict";
+/// The flight recorder's settings act one ran under, beside the marker: a
+/// door that starts act two with an intent of its own (Android's
+/// notification tap) carries none of the runner's (docs/traps.md, an act
+/// two drew no picture of its window).
+pub(crate) const RECORDER: &str = "recorder";
+const RECORDER_VARS: [&str; 2] = ["KAYA_VERB_TRACE", "KAYA_FAIL_SHOT"];
+
+fn recorder_text(get: impl Fn(&str) -> Option<String>) -> String {
+    RECORDER_VARS
+        .iter()
+        .filter_map(|key| get(key).filter(|v| !v.is_empty()).map(|v| format!("{key}={v}\n")))
+        .collect()
+}
+
+/// What act two takes from the file: the recorder's own keys, and only the
+/// ones its door left unset.
+fn adopt_recorder(text: &str, set: impl Fn(&str) -> bool) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| line.split_once('='))
+        .filter(|(key, _)| RECORDER_VARS.contains(key) && !set(key))
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect()
+}
 
 /// `<state>/act2/<id>`. `state_root` is the platform's answer where only
 /// the platform has one (Android's files directory, handed in at attach);
@@ -145,6 +168,13 @@ pub(crate) fn arm(state_root: Option<&Path>) {
         Act::NotSelftest => {}
         Act::One => {
             if let Some(dir) = dir {
+                let recorder = dir.join(RECORDER);
+                let text = recorder_text(|key| std::env::var(key).ok());
+                if text.is_empty() {
+                    let _ = std::fs::remove_file(&recorder);
+                } else {
+                    let _ = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&recorder, text));
+                }
                 // SAFETY: single-threaded — the app thread does not exist yet.
                 unsafe { std::env::set_var(ENV_DIR, dir) };
             }
@@ -157,6 +187,10 @@ pub(crate) fn arm(state_root: Option<&Path>) {
         Act::Two => {
             let (scene, steps) = adopted.expect("act() said a marker was adopted");
             let dir = dir.expect("a marker was read out of it");
+            let recorder = std::fs::read_to_string(dir.join(RECORDER))
+                .map(|text| adopt_recorder(&text, |key| std::env::var_os(key).is_some()))
+                .unwrap_or_default();
+            let _ = std::fs::remove_file(dir.join(RECORDER));
             // THE LINE A RED ACT TWO NEEDS FIRST: what was adopted, and
             // from where. One write, like gtk.rs's kaya_diag.
             {
@@ -166,9 +200,10 @@ pub(crate) fn arm(state_root: Option<&Path>) {
                     .map(str::trim)
                     .filter(|l| !l.is_empty() && !l.starts_with('#'))
                     .count();
+                let keys: Vec<&str> = recorder.iter().map(|(key, _)| key.as_str()).collect();
                 let line = format!(
                     "KAYA_ACT2: the marker names scene {scene:?} with {statements} \
-statement(s); consumed from {}\n",
+statement(s); consumed from {}; recorder settings from act one: {keys:?}\n",
                     dir.join(MARKER).display()
                 );
                 let _ = std::io::stderr().write_all(line.as_bytes());
@@ -179,6 +214,9 @@ statement(s); consumed from {}\n",
                 std::env::set_var("KAYA_SELFTEST_SCRIPT", steps);
                 std::env::set_var(ENV_DIR, &dir);
                 std::env::set_var(ENV_VERDICT, dir.join(VERDICT));
+                for (key, value) in &recorder {
+                    std::env::set_var(key, value);
+                }
             }
             // ACT TWO KEEPS WHAT ACT ONE WROTE — the whole point of the
             // relaunch scenes — so nothing is cleared here; the domain is
@@ -206,5 +244,27 @@ mod tests {
         assert_eq!(act(false, true), Act::Two);
         // A shipped app.
         assert_eq!(act(false, false), Act::NotSelftest);
+    }
+
+    #[test]
+    fn act_two_takes_the_recorder_its_door_did_not_carry() {
+        let text = recorder_text(|key| match key {
+            "KAYA_VERB_TRACE" => Some("verb-trace-tasks-compose.txt".to_owned()),
+            "KAYA_FAIL_SHOT" => Some(String::new()),
+            _ => Some("never asked".to_owned()),
+        });
+        assert_eq!(text, "KAYA_VERB_TRACE=verb-trace-tasks-compose.txt\n");
+        let both = format!("{text}KAYA_FAIL_SHOT=fail-shot-tasks-compose.png\nKAYA_SELFTEST=tasks\n");
+        assert_eq!(
+            adopt_recorder(&both, |_| false),
+            [
+                ("KAYA_VERB_TRACE".to_owned(), "verb-trace-tasks-compose.txt".to_owned()),
+                ("KAYA_FAIL_SHOT".to_owned(), "fail-shot-tasks-compose.png".to_owned()),
+            ]
+        );
+        assert_eq!(
+            adopt_recorder(&both, |key| key == "KAYA_VERB_TRACE"),
+            [("KAYA_FAIL_SHOT".to_owned(), "fail-shot-tasks-compose.png".to_owned())]
+        );
     }
 }

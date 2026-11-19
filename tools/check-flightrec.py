@@ -84,6 +84,7 @@ MAC_RUNNER = "tools/validate-mac.py"
 LINUX_HOST = "tools/validate-linux.py"
 MAC_LANE = "tools/lib/lanes/mac.py"
 MODEM = "tools/lib/android_modem.py"
+ACT2_RS = "crates/kaya/src/act2.rs"
 # Each lane reads its health at start and at end, the end before its verdict
 # (docs/traps.md, the windows lane slowed by a rebooted VM's Defender).
 HEALTH_CALLS = {
@@ -113,7 +114,7 @@ def sources():
              STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS, SWIFTUI,
              DOOR_RECORD, ACT2_EXEC, COMPOSE, JOURNAL, *DOOR_LEGS, LEG_CEILING, STACK_NAMES, GTK_RS,
              LANE_HEALTH, VALIDATE_ALL, MAC_RUNNER, LINUX_HOST, MAC_LANE,
-             ANDROID_MEDIA, CAPTURE_LEG, SCENE_RS, MODEM)}
+             ANDROID_MEDIA, CAPTURE_LEG, SCENE_RS, MODEM, ACT2_RS)}
 
 
 def census_android_app_shot(src):
@@ -165,6 +166,15 @@ def census_android_app_shot(src):
             '"--es", "KAYA_FAIL_SHOT", f"fail-shot-{name}.png"' not in recorder:
         found.append("android: act two's plain and link doors no longer start it with the "
                      "recorder's extras, so a red act two draws the home screen")
+    act2 = src[ACT2_RS]
+    two = act2[act2.find("Act::Two => {"):]
+    if "recorder_text(|key| std::env::var(key).ok())" not in act2[act2.find("Act::One => {"):] \
+            or "std::fs::read_to_string(dir.join(RECORDER))" not in two \
+            or "for (key, value) in &recorder {\n" \
+               "                    std::env::set_var(key, value);" not in two:
+        found.append("android: act two does not adopt the recorder settings act one left beside "
+                     "its marker, so a notification tap's red act two leaves no picture or trace "
+                     "(docs/traps.md, an act two drew no picture of its window)")
     leg = py_block(runner, "run_apk_on")
     if "app_shot(serial, package, name, log)" not in leg:
         found.append("android: run_apk_on does not pull the app's own picture on a red leg")
@@ -3183,6 +3193,12 @@ na11 = doctored(ANDROID, r'"-n", component, \*act_two_recorder\(name\)\]', '"-n"
                 "NA11 the plain door started with no recorder extras, as shipped")
 gate.negative("NA11 a fresh act two that leaves no picture of itself",
               lambda: census_android_app_shot(na11), want="draws the home screen")
+na12 = doctored(ACT2_RS,
+                r"^ *for \(key, value\) in &recorder \{\n"
+                r" *std::env::set_var\(key, value\);\n *\}\n",
+                "", "NA12 act two no longer adopting act one's recorder")
+gate.negative("NA12 a tapped act two that leaves no picture of itself",
+              lambda: census_android_app_shot(na12), want="does not adopt the recorder settings")
 na3 = doctored(ANDROID, r"^ *app_shot\(serial, package, name, log\)\n", "",
                "NA3 cut the pull of the app's picture")
 gate.negative("NA3 a red leg's picture never pulled",
@@ -4351,6 +4367,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(323 + (5 if DRIVES else 0))
+gate.negatives_ran(324 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")
