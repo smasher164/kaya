@@ -68,8 +68,12 @@ if (-not (Test-Path -LiteralPath $marker)) {
     exit 1
 }
 
+# THE RECORDER'S TRACE, the file act one wrote: the guest's picture at a
+# failed step is written beside it, so act two without it has none (the Mac's
+# act two keeps it too; docs/traps.md, a Windows act two drew no picture).
+$env:KAYA_VERB_TRACE = "C:\kaya\flightrec\$Leg-vtrace.txt"
 foreach ($name in @('KAYA_SELFTEST', 'KAYA_SELFTEST_SCRIPT', 'KAYA_ACT2_DIR',
-                    'KAYA_ACT2_VERDICT', 'KAYA_VERB_TRACE', 'KAYA_LINGER',
+                    'KAYA_ACT2_VERDICT', 'KAYA_LINGER',
                     'KAYA_WIN_SLOT', 'KAYA_APPEARANCE')) {
     Remove-Item -LiteralPath "Env:$name" -Force -ErrorAction SilentlyContinue
 }

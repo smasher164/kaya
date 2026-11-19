@@ -42,6 +42,20 @@ KAYA_IDENTITY itself as well (the restored activity's mapping, below, under
 Android's continuation). Guard: music_restore-python on each lane, each red
 before its fix.
 
+## A Windows act two drew no picture of its window (measured 2026-11-18)
+
+The review page's act-two captures came back from Windows as an empty
+desktop: the act-two launchers (tools/guest/relaunch-launch.ps1,
+relaunch-link.ps1) removed KAYA_VERB_TRACE with the act's own variables, and
+the guest writes its failure picture beside the trace, so a red act two
+printed "failure picture: not taken: no verb trace file is set" and the
+bundle's only picture was the desktop after the process had gone. Both
+launchers now hand act two act one's trace path, as the Mac's act two keeps
+it. Proven by a forced red act two on all seven restoration legs: each wrote
+`<leg>-failshot.bmp` and the bundle carried step-shot. Android's fresh door
+has the same gap (restorefresh-compose: the device shot was the home screen),
+open in the restoration-build notes.
+
 ## A selection kaya sets on WinUI raises no SelectionChanged (measured 2026-11-18)
 
 The windows editorrestore leg restored the buffer's caret as 0:0 after act

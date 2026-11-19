@@ -975,9 +975,10 @@ binding-level semantics.
   (c)): background, `simctl terminate`, launch keeps the SceneStorage. On
   iOS a Go guest reads its session inside `app.Post` (the binding panics
   before Run there, naming it): Go's first Build runs on the main thread.
-- **Android.** A restored activity maps no launch extras
+- **Android.** A restored activity maps every launch extra but the act's
+  own pair, KAYA_SELFTEST and KAYA_SELFTEST_SCRIPT
   (`KayaEnv.fromIntent(intent, savedInstanceState)`): the platform recreates
-  it with the original intent. The resume door ends act one with `am kill`,
+  it with the original intent, and the Mac's act two keeps the same set. The resume door ends act one with `am kill`,
   then SIGKILL after 5 s (the low-memory killer's shape) when `am kill`
   leaves the process alive after a file pick. The reply receiver's process
   hands the headless token.
