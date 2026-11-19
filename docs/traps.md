@@ -52,9 +52,12 @@ printed "failure picture: not taken: no verb trace file is set" and the
 bundle's only picture was the desktop after the process had gone. Both
 launchers now hand act two act one's trace path, as the Mac's act two keeps
 it. Proven by a forced red act two on all seven restoration legs: each wrote
-`<leg>-failshot.bmp` and the bundle carried step-shot. Android's fresh door
-has the same gap (restorefresh-compose: the device shot was the home screen),
-open in the restoration-build notes.
+`<leg>-failshot.bmp` and the bundle carried step-shot. Android's plain, fresh
+and link doors had the same gap (restorefresh-compose: the device shot was the
+home screen): their `am start` now carries the two recorder extras
+(run-emulator.py's act_two_recorder; a notification tap cannot carry any), and a
+forced red act two of restorefresh-compose drew the app's own window and dumped
+its trace (check-flightrec's NA11).
 
 ## A selection kaya sets on WinUI raises no SelectionChanged (measured 2026-11-18)
 
@@ -74,6 +77,13 @@ Guard: editorrestore_go on the windows lane, red without the fix, red in a
 pooled run with the apply arm's call alone (the harness's selection emits no
 SelectRange op), and red with the apply arm's call cut ("selection 0:0,
 wanted 2:7").
+The same silence kept the APP deaf (2026-11-18, later): the apply arm queued
+only the session report, so the core never heard the selection and no
+`text_selected` reached the app, and the Go editor's status bar read `Ln 1,
+Col 1` over a restored `saved` selection. The arm now reads the selection back
+into `set_text_selection`, as the harness's select_text does. Guard:
+editorrestore asserts `label@position-1` in both acts; windows red with the
+call cut ("reads \"Ln 1, Col 1\""), restored sha-equal.
 
 ## Compose collapses a field's selection when the field loses focus (measured 2026-11-18)
 

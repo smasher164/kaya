@@ -23,6 +23,7 @@ expect_document "untitled"
 # be saved on Android as the caret it became.
 select_text textarea@buffer-1 2:7
 expect_selection textarea@buffer-1 "2:7=saved"
+expect label@position-1 "Ln 1, Col 8 (5 selected)"
 
 relaunch resume
 
@@ -33,6 +34,7 @@ expect textarea@buffer-1 "unsaved words"
 expect label@status-1 "restored unsaved changes, zoom 110%"
 expect_document_dirty "untitled" true
 expect_selection textarea@buffer-1 "2:7=saved"
+expect label@position-1 "Ln 1, Col 8 (5 selected)"
 expect_runs textarea@buffer-2 "0:16 block=heading1|33:40 italic|67:80 block=heading2|81:173 list=bullet|114:144 indent=1|125:129 color=#016FEF|174:183 block=heading2|184:222 list=numbered|223:243 checked|223:243 color=#0D8501|223:256 list=check|257:298 block=quote"
 expect_document_dirty "essay" false
 expect_menu "File>Open Recent>essay" enabled

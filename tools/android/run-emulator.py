@@ -3763,6 +3763,14 @@ def leg_app_stopped(serial, name, package, log):
     return True
 
 
+def act_two_recorder(name):
+    """The recorder's two extras and nothing the app reads: a door's start
+    without them left a red act two with no trace and only the home screen
+    for its picture (tools/check-flightrec.py's android door clause)."""
+    return ["--es", "KAYA_VERB_TRACE", f"verb-trace-{name}.txt",
+            "--es", "KAYA_FAIL_SHOT", f"fail-shot-{name}.png"]
+
+
 def act_two(serial, name, package, component, dump, log):
     """THE PLATFORM'S OWN DOOR (docs/tasks-s9-plan.md R6, R7;
     docs/tasks-s4-plan.md P5). Act one has published its verdict and left,
@@ -3817,7 +3825,8 @@ def act_two(serial, name, package, component, dump, log):
         # (docs/app-links-plan.md L5) is the same act boundary with the
         # URL in place of the component — what `am start -a VIEW -d`
         # does, which is what a tap on a link does. Neither carries an
-        # extra, so both second acts read their scene off the marker.
+        # extra the app reads (only the recorder's), so both second acts
+        # read their scene off the marker.
         # force-stop after the wait above — the process is already gone,
         # and this drops the task record so the start below cannot bring
         # a stale task forward with the previous leg's intent extras on
@@ -3833,10 +3842,10 @@ def act_two(serial, name, package, component, dump, log):
             # docs/traps.md). The filter is still what resolves it.
             start = ["am", "start", "-W", "-a",
                      "android.intent.action.VIEW", "-d", f"'{url}'",
-                     "-p", package]
+                     "-p", package, *act_two_recorder(name)]
             told = f"link {url}"
         else:
-            start = ["am", "start", "-W", "-n", component]
+            start = ["am", "start", "-W", "-n", component, *act_two_recorder(name)]
             told = f"plain launch of {component}"
         print(f"{name}: act one's process is gone; the door is a {told}",
               file=log)

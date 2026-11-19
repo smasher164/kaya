@@ -159,6 +159,12 @@ def census_android_app_shot(src):
         found.append("android: the runner no longer names KAYA_FAIL_SHOT for the leg")
     if 'f"files/fail-shot-{name}.png"' not in py_block(runner, "app_shot"):
         found.append("android: app_shot does not pull the file KAYA_FAIL_SHOT names")
+    door = py_block(runner, "act_two")
+    recorder = py_block(runner, "act_two_recorder")
+    if door.count("*act_two_recorder(name)]") != 2 or \
+            '"--es", "KAYA_FAIL_SHOT", f"fail-shot-{name}.png"' not in recorder:
+        found.append("android: act two's plain and link doors no longer start it with the "
+                     "recorder's extras, so a red act two draws the home screen")
     leg = py_block(runner, "run_apk_on")
     if "app_shot(serial, package, name, log)" not in leg:
         found.append("android: run_apk_on does not pull the app's own picture on a red leg")
@@ -3164,6 +3170,10 @@ na2 = doctored(COMPOSE, r"^( *)(mountedActivity\?\.let \{ "
                r"\3\4\1\2", "NA2 moved the verdict's picture after the publish")
 gate.negative("NA2 the verdict published before the picture",
               lambda: census_android_app_shot(na2), want="published before the app's picture")
+na11 = doctored(ANDROID, r'"-n", component, \*act_two_recorder\(name\)\]', '"-n", component]',
+                "NA11 the plain door started with no recorder extras, as shipped")
+gate.negative("NA11 a fresh act two that leaves no picture of itself",
+              lambda: census_android_app_shot(na11), want="draws the home screen")
 na3 = doctored(ANDROID, r"^ *app_shot\(serial, package, name, log\)\n", "",
                "NA3 cut the pull of the app's picture")
 gate.negative("NA3 a red leg's picture never pulled",
@@ -4314,6 +4324,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(314 + (5 if DRIVES else 0))
+gate.negatives_ran(315 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

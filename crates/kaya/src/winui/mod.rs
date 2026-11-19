@@ -18856,6 +18856,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 .Selection()?
                 .SetRange(range.start as i32, range.stop as i32)?;
             caret_moved(id.0);
+            // docs/restoration-plan.md SR4: an app-made or restored selection
+            // reaches the app as text_selected, which SetRange's silence
+            // would otherwise skip (tools/scenes/editorrestore.steps).
+            let text = lf(Editable::Textarea(field.clone()).text()?);
+            let selection = field.TextDocument()?.Selection()?;
+            if let (Some(start), Some(stop)) =
+                (byte_offset(&text, selection.StartPosition()?), byte_offset(&text, selection.EndPosition()?))
+            {
+                core.scene.set_text_selection(id, start as u64, stop as u64);
+                send_scene_asks(core);
+            }
         }
         ApplyOp::SetColumnHeaders {
             id,
