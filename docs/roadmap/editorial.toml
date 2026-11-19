@@ -9,7 +9,7 @@ state = "Since the 2026-10-30 read the chat app gained voice and video calls wit
 menu_heading = 'The menu: the pieces first, then the apps they unblock'
 menu_lede = "Every framework piece is its own entry, in the order recommended, and each names the demo app it unblocks; the apps follow, each listing what it still waits on, so an app is never picked with its pieces unbuilt. A star marks a piece that needs a ruling before any arm is written. With the task manager, the chat app and the music app shipped, the one demo app left is the video editor. Every ruling its plan asked is taken and every piece it names is built, the last two (the timecode formatter and a drop's point) on 2026-10-05 and 10-06, so the editor waits only on the maintainer's pick. The chat app's calls stage shipped on 2026-10-31 with the far end of a call, the peer's picture and voice. Read out of the surface promised against the surface built, the ledger's open headlines and the maintainer's own evidence order; the editor's pieces, the media reader and capture shipped between the reads and stay listed with their dates."
 recommended_next = 'The video editor'
-recommended_note = "Every piece its plan names has been built since 2026-10-06; it was held while user-facing features came first, and that list, then the apps' looks and the rich document, is done. The alternative worth weighing: session restoration with durable file references, which every document app wants and which the safe save, now built, makes the natural next step for picked files. Layering, which the editor's program monitor will use, shipped 2026-11-16. The one with a star needs a ruling first."
+recommended_note = "Every piece its plan names has been built since 2026-10-06; it was held while user-facing features came first, and that list, then the apps' looks and the rich document, is done. Session restoration with durable file references, which every document app wanted, shipped 2026-11-18. Layering, which the editor's program monitor will use, shipped 2026-11-16. The one with a star needs a ruling first."
 demo_heading = 'The demo apps, and what each still waits on'
 proposed_heading = 'Proposed: more demo apps, as milestones'
 proposed_lede = "Proposed 2026-09-28 at the maintainer's ask, not ruled. Each demo is a milestone that forces a set of pieces no shipped app needs, taken from the archetype table below; the order puts the one that shares the most with the video editor first, so its pieces are built once for both. The webcam and the microphone (the maintainer, 2026-09-28: at least one demo must use them) go into the chat app as calls rather than a demo of their own, the way Signal and Slack carry them: the conversation, the simulated peer and the notifications are already there. The photo gallery and the video editor's voiceover would use the same capture piece more lightly. Nothing here starts until the maintainer picks."
@@ -20,6 +20,7 @@ calibration_lede = 'Every cost class above is read off these: the shape of a shi
 method = ['Parity counts first-party support over the ten full toolkits (SwiftUI, Compose, Flutter, Qt, GTK4, WinUI 3, Avalonia, MAUI, React Native, Uno). Electron and Tauri are shells around a webview and the three Rust natives are an order of magnitude smaller, so they stay in the matrix for the system rows but do not set the bar. A package-only route counts half.', "Kaya has no package ecosystem. For every other toolkit a third of this list is a package away; for kaya each is first-party work on five backends or a hole. That is the architecture's cost and also its clearest differentiator, since nobody ships these natively everywhere.", 'Need is scored over fifteen app archetypes, a 105-app GNOME corpus counted by hand, the four vendor catalogues, Stack Overflow volume, issue votes across eleven frameworks, pub.dev dependency counts and store and legal obligation. Where the sources disagree the row says so rather than averaging: notifications scores 5 on four sources and never appeared in the native trackers; reduced motion scores 3 on legal obligation with no developer demand at all; the segmented control rests on the vendor catalogues alone.', "Cost is read off kaya's own record, not estimated from first principles: the calibration table is the whole basis. The record is fast because every slice is depth-then-breadth with agents fanning the breadth out, so a day here is a maintainer-with-agents day.", 'Six rows are here for honesty rather than as proposals: three already shipped in substance (indeterminate progress, tree-order focus, the app-side post primitive folded into the background row) and three refused by DESIGN (the native escape hatch, styling beyond the brand tier, device APIs). Code push is declined on the record because it is the loudest voice in the corpus.', "The score sorts; the tier decides. Tiers follow the rules stated under each heading, with the overrides named on their cards. Where the video editor's own blockers fall below the table stakes, that is the evidence speaking; the maintainer's forcing-artifact order is a legitimate reason to override it."]
 
 [reviews]
+restoration = 'https://claude.ai/artifact/MthgUgSZ4wwMy1PQSNpDKN'
 hscroll = 'https://claude.ai/artifact/7EaiAAwfPvvoJ6Xd2aMukq'
 layering = 'https://claude.ai/artifact/LL26jACE8HnF4s2kFzYa2e'
 groundfade = 'https://claude.ai/artifact/WKakLzQAvzBp5CUKZvefQV'
@@ -232,12 +233,14 @@ text = "SHIPPED 2026-10-31 (655ba113; review {review:hiderows}): ruled 2026-10-3
 [[menu]]
 title = '<a href="#item-restoration">Session restoration</a> and <a href="#item-bookmarks">durable file references</a>'
 star = true
-status = 'needs ruling'
+status = 'shipped'
 size = 'L'
 unblocks = 'every document app'
 key = 'Session restoration'
 plan = 'docs/restoration-plan.md'
-text = "DESIGNED 2026-11-17 (docs/restoration-plan.md, rulings SR1 to SR18 open): nothing restores an app the way the user left it, and a picked file cannot be reopened next launch. The plan recommends that kaya restore presentation state (scroll, caret, dividers, the window frame) by <code>a11y_id</code> on its own, that the app restore its model through a session store read before its first build, that a launch restore only when the platform says it continues the last one, and that a picked file mint a text token redeemed for a picked handle. SR1, SR3, SR6 and SR11 need the maintainer first. Unblocks every document app, the editor's recent projects among them."
+review = 'restoration'
+scene = 'tools/scenes/restore.steps'
+text = "SHIPPED 2026-11-18 (review {review:restoration}): every ruling of docs/restoration-plan.md built on five platforms, nine bindings and the C floor. kaya brings back a textarea's caret and a named list's top row by <code>a11y_id</code>; the app keeps its model in a session store and recreates its windows and documents from <code>restored_windows()</code>; the platform says resume or fresh; a picked file mints a token that <code>redeem</code> turns back into a picked handle next launch. First consumers: the editor (open tabs by reference, Open Recent), chat (the open conversation and its draft) and the music player (the album, the paused track and its queue), on all five lanes. Open: the plan's §9, what the build settled, for the maintainer; the real-store ruling on the Mac. Was: DESIGNED 2026-11-17 (docs/restoration-plan.md, rulings SR1 to SR18 open): nothing restores an app the way the user left it, and a picked file cannot be reopened next launch. The plan recommends that kaya restore presentation state (scroll, caret, dividers, the window frame) by <code>a11y_id</code> on its own, that the app restore its model through a session store read before its first build, that a launch restore only when the platform says it continues the last one, and that a picked file mint a text token redeemed for a picked handle. SR1, SR3, SR6 and SR11 need the maintainer first. Unblocks every document app, the editor's recent projects among them."
 
 [[menu]]
 title = '<b>The residue pass</b>'
@@ -440,8 +443,8 @@ blockers = ['tree', 'charts']
 name = 'Notes / text editor'
 grp = 'Obsidian, Apple Notes, Apostrophe'
 has = 'textarea with find, highlight and select, undo, file dialogs, clipboard, menus, dirty titles'
-blocked = 'tree sidebar, spellcheck, session restoration and recent files (rich text, the search field, document tabs and the font picker shipped)'
-blockers = ['tree', 'spellcheck', 'restoration']
+blocked = 'tree sidebar, spellcheck (rich text, the search field, document tabs, the font picker, session restoration and recent files shipped)'
+blockers = ['tree', 'spellcheck']
 
 [[archetype]]
 name = 'Chat / messaging'
@@ -484,8 +487,8 @@ blockers = ['file_assoc']
 name = 'Developer tool'
 grp = 'TablePlus, Postman, git clients'
 has = 'panes to three columns, textarea with find, auxiliary windows, menus and shortcuts'
-blocked = 'tree view, syntax-highlighted text, restoration, auto-update (document tabs shipped 2026-10-28)'
-blockers = ['tree', 'doctabs', 'restoration', 'auto_update']
+blocked = 'tree view, syntax-highlighted text, auto-update (document tabs shipped 2026-10-28, session restoration 2026-11-18)'
+blockers = ['tree', 'doctabs', 'auto_update']
 
 [[archetype]]
 name = 'Video editor'
