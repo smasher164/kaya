@@ -369,6 +369,8 @@ def run_lane(name, argv, env=None):
             rc = subprocess.run(argv, env=lane_env, stdout=lf,
                                 stderr=lf, check=False).returncode
         secs = int(time.monotonic() - t0)
+        ONLY_LEGS[name] = only.legs_in((LANES_DIR / f"{name}.log").read_text(
+            encoding="utf-8", errors="replace"))
         if rc == 0:
             print(f"{name}: PASS ({secs}s)")
         elif rc == only.REFUSED and only.active():
@@ -613,8 +615,8 @@ if MODE == "parallel":
             if not keep_lane_log(name):
                 status = 1
             status = 1
-        legs = sum(1 for line in log_text.splitlines()
-                   if ": PASS" in line)
+        legs = (only.legs_in(log_text) if only.active() else
+                sum(1 for line in log_text.splitlines() if ": PASS" in line))
         ONLY_LEGS[name] = legs
         print(f"{name}: {verdict} ({secs}s, {legs} legs)")
         # The lane's own phase clock, on the record beside its row: where

@@ -1716,6 +1716,42 @@ if n != 1:
 elif only_problem({**only_texts, "tools/validate-all.py": doctored}) is None:
     fail("self-test N27: a filtered verdict spelled like the record passed")
 
+# A FILTER WHOSE LEGS ALL FAILED RAN LEGS: the matrix once counted ": PASS"
+# lines and refused such a run as "matched no leg on any lane".
+import only as only_module  # noqa: E402
+
+ALL_RED = ("deploy-win: filtered run — KAYA_ONLY=restorefresh,editorrestore, 3 leg(s)\n"
+           "restorefresh_rust: FAIL (40s)\nrestorefresh_c: FAIL (41s)\n"
+           "editorrestore_go: FAIL (84s)\n"
+           "run-suites: filtered run — KAYA_ONLY=restorefresh, 2 leg(s)\n")
+
+
+def legs_problem(legs_in, matrix_text):
+    if "only.legs_in(log_text) if only.active()" not in code_lines_text(matrix_text):
+        return ("tools/validate-all.py no longer counts a filtered lane's legs through "
+                "only.legs_in")
+    got = legs_in(ALL_RED)
+    if got != 5:
+        return f"only.legs_in counts {got} legs in a lane log whose runners queued 5, every one red"
+    return None
+
+
+problem = legs_problem(only_module.legs_in, only_texts["tools/validate-all.py"])
+if problem:
+    fail("the matrix filter: " + problem)
+doctored, n = re.subn(r"only\.legs_in\(log_text\) if only\.active\(\)", "0 if only.active()",
+                      only_texts["tools/validate-all.py"], count=1)
+print(f"check-gates: self-test N28 put the matrix back to counting no leg, {n} substitution(s)")
+if n != 1:
+    fail("self-test N28 did not change exactly one count — the clause is not reading the "
+         "real matrix")
+elif legs_problem(only_module.legs_in, doctored) is None:
+    fail("self-test N28: a matrix that does not count a filtered lane's legs passed")
+print("check-gates: self-test N29 counted a lane's legs by its PASS lines")
+if legs_problem(lambda t: sum(1 for x in t.splitlines() if ": PASS" in x),
+                only_texts["tools/validate-all.py"]) is None:
+    fail("self-test N29: counting PASS lines read an all-red filtered lane as legs")
+
 # THE MATRIX REFUSES A FLAG IT DOES NOT KNOW (tools/lib/matrix_args.py;
 # docs/media-player-plan.md M16 F3): `--help` once started a whole matrix.
 # The parser is run over its cases, and validate-all is held to reading

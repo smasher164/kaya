@@ -13,6 +13,7 @@ sweep is not run, and the matrix's own verdict line says FILTERED. The
 commit's record is still one plain run on the frozen tree.
 """
 import os
+import re
 import sys
 
 REFUSED = 3
@@ -44,3 +45,12 @@ def summary(runner, selected):
               f"— no verdict", file=sys.stderr)
         sys.exit(REFUSED)
     print(f"{runner}: filtered run — KAYA_ONLY={spelled}, {selected} leg(s)")
+
+
+SUMMARY = re.compile(r"filtered run — KAYA_ONLY=\S*, (\d+) leg\(s\)")
+
+
+def legs_in(log_text):
+    """How many legs a lane's log says its runners queued under the filter,
+    red ones as surely as green (tools/check-gates.py's N28)."""
+    return sum(int(n) for n in SUMMARY.findall(log_text))
