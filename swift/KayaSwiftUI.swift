@@ -14831,8 +14831,11 @@ private func kayaRunScript(_ script: String) {
                         // iOS has no title bar; the surface-title read is the
                         // model that feeds UIScene.title — and while a
                         // navigation entry covers the window, the entry's
-                        // title is the visible one.
-                        if let top = kayaScene.windows[wid]?.entries.last {
+                        // title is the visible one. A window with sections
+                        // shows its selected section's stack.
+                        if let top = kayaStackEntries(kayaActiveSurface(wid)).last
+                            ?? kayaScene.windows[wid]?.entries.last
+                        {
                             return top.title
                         }
                         // A window with documents is titled by its active one
@@ -14851,8 +14854,10 @@ private func kayaRunScript(_ script: String) {
                     // age and depth — which tells a push that never reached the
                     // model from a surface that has not caught up.
                     let model = DispatchQueue.main.sync { () -> String in
-                        let entries = kayaStackEntries(wid)
-                        return "entries=\(entries.count) top=\"\(entries.last?.title ?? "")\""
+                        let surface = kayaActiveSurface(wid)
+                        let entries = kayaStackEntries(surface)
+                        let on = surface == wid ? "window" : "section \(surface)"
+                        return "\(on) entries=\(entries.count) top=\"\(entries.last?.title ?? "")\""
                     }
                     let click = kayaLastClick.map { c in
                         "last click \(c.target) \(Int((Date().timeIntervalSince1970 - c.at) * 1000))ms ago at entries=\(c.entries)"

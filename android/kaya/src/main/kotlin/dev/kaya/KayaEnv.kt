@@ -24,19 +24,21 @@ import android.system.Os
  * only for switches read per-scene. tools/check-jni.py's manifest census
  * holds every MainActivity to calling this from both.
  *
- * NOT FOR A RESTORED ACTIVITY ([restored] non-null): the platform re-creates
- * it with its LAUNCH's intent, whose extras belong to the process that read
- * them, so a resumed act two would otherwise start as act one again
- * (docs/restoration-plan.md SR15; check-jni's census).
+ * A RESTORED ACTIVITY ([restored] non-null) maps all but [ACT]: the platform
+ * re-creates it with its LAUNCH's intent, and the act's own pair would start
+ * a resumed act two as act one again, while the rest are the launch's
+ * settings every lane's act two keeps (docs/traps.md, Android's
+ * continuation; check-jni's census).
  */
 object KayaEnv {
+    private val ACT = setOf("KAYA_SELFTEST", "KAYA_SELFTEST_SCRIPT")
+
     @JvmStatic
     @JvmOverloads
     fun fromIntent(intent: Intent?, restored: Bundle? = null) {
-        if (restored != null) return
         val extras = intent?.extras ?: return
         for (key in extras.keySet()) {
-            if (key.startsWith("KAYA_")) {
+            if (key.startsWith("KAYA_") && (restored == null || key !in ACT)) {
                 @Suppress("DEPRECATION")
                 Os.setenv(key, extras.get(key).toString(), true)
             }

@@ -438,14 +438,10 @@ MODS = {
                                   "extra": MUSIC_CONTEXT_PHONE_TAIL},
     # The scrubber sits in the full player's sheet and the library in its
     # own section, so the position and the library row are the desktops'.
-    # The title: the interpreter's read misses an album pushed into a section
-    # in the transaction that adds the sections, while the page shows it
-    # (restoration-build notes, music_restore on iOS).
     ("python", "music_restore"): {"drop": (("set_value", "slider@progress"),
                                            ("expect", "label@elapsed"),
                                            ("expect", "label@remaining"),
-                                           ("expect_selected", "row@saved[201715]"),
-                                           ("expect_title", '"Through')),
+                                           ("expect_selected", "row@saved[201715]")),
                                   "keep": "expect_restored expect_tint expect_ax"},
     ("python", "music_search"): {"cut": "click row@go_search",
                                  "keep": "expect_image_phase=image@art_116452",

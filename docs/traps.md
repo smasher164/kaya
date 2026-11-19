@@ -37,10 +37,10 @@ directory from the default manifest: mac.py act2_dir, tools/linux/install-deskto
 run-emulator's act-two path, deploy-win's plain_door. Each now asks
 tools/lib/packaging/identity.py (`manifest_in(env)` where the leg's
 environment is in hand, `manifest_for(stem)` where only the scene is).
-Windows' door was fixed before its first run. On Android the leg is still
-parked: the python host's restored activity maps no launch extras, so act two
-loses KAYA_IDENTITY itself (restoration-build notes). Guard: music_restore-python
-on each lane, each red before its fix.
+Windows' door was fixed before its first run. On Android act two lost
+KAYA_IDENTITY itself as well (the restored activity's mapping, below, under
+Android's continuation). Guard: music_restore-python on each lane, each red
+before its fix.
 
 ## A selection kaya sets on WinUI raises no SelectionChanged (measured 2026-11-18)
 
@@ -160,9 +160,14 @@ the leg's bundle:
   one's `KAYA_SELFTEST` extra made the resumed process a second act one (the
   core reads env + marker as act one by design, act2.rs). Every host's
   onCreate hands `savedInstanceState` to `KayaEnv.fromIntent`, which maps
-  nothing for a restored activity; check-jni's census holds the call and its
-  negative "the restored Bundle dropped". Watched red: the skip cut, act two
-  never published a verdict.
+  every KAYA_* extra but the act's own pair (KAYA_SELFTEST,
+  KAYA_SELFTEST_SCRIPT) for a restored activity: the Mac's act two keeps the
+  same set (mac.py's act2_env). Mapping NOTHING, the first fix, lost
+  KAYA_IDENTITY too, so the music app's act two read the default app's id and
+  never found its marker (music_restore-python, 2026-11-18). check-jni's
+  census holds the call and its negative "the restored Bundle dropped".
+  Watched red: the skip cut, act two never published a verdict; the whole
+  restored mapping cut, music_restore-python red.
 - **`am kill` after a file pick leaves the app alive.** HOME stopped the
   activity (the save point printed) and the process read `oom_score_adj 100`
   5 s later, which `am kill` does not end; the restore scenes (no pick) were

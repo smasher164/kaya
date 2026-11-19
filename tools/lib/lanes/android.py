@@ -308,6 +308,7 @@ LEGS = {
         "music_artist-python", "music_artistdark-python", "music_search-python",
         "music_dockdark-python", "music_context-python",
         "restore-python", "restoredocs-python", "references-python",
+        "music_restore-python",
     ],
 }
 
@@ -603,10 +604,7 @@ IME_SCENES = ["ranges", "richtext"]
 # phone has; split/panes drive resize_window, which this host rejects
 # by design (the system owns surfaces; DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem", "auxquit"]
-# music_restore: the python host's restored activity maps no launch extras
-# (KayaEnv.fromIntent), so act two loses KAYA_IDENTITY, reads the default
-# app's id and never finds the music app's marker (restoration-build notes).
-UNWIRED_SCENES: list[str] = ["music_restore"]
+UNWIRED_SCENES: list[str] = []
 
 
 def scene_of(leg):
