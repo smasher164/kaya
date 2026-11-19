@@ -21098,6 +21098,17 @@ both the shrink floor's and the clipping check's longest word. The 66.18px
 the label got is under its 67px ask by less than the check's 1px slack. The
 copies of flow and language stay: each was the first hypothesis here, and
 neither moved the 70px.
+CAUSE FOUND (2026-11-19): the heading wears SubtitleTextBlockStyle (the
+heading role), whose setters include OpticalMarginAlignment=TrimSideBearings,
+and the probe copied no style. A forced print on the guest measured the label
+at 67px, the bare probe at 70px, the probe wearing the label's Style at 67px, a
+XAML probe with only OpticalMarginAlignment="TrimSideBearings" at 67px, and the
+label's Style under a local OpticalMarginAlignment="None" at 70px. The probe now
+takes the label's Style (word_probe) and the clamp is gone. Guard:
+check-universal-props holds the style copy (one cut watched); tasksrtl_rust with
+the copy cut went red in 1 of 3 solo runs with this entry's sentence (the
+heading's width is 66.18px in some layout passes and wider in others), green
+with it.
 
 ## A fill read inside a WinUI ListView item (measured 2026-11-04)
 

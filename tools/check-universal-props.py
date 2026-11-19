@@ -181,6 +181,9 @@ BASELINE_LINKS = (
         "for word in text.split_whitespace() {",
         "Width: f32::INFINITY,",
     )),
+    (WINUI, "fn word_probe(block: &TextBlock)", 1600, (
+        "probe.SetStyle(&style)?;",
+    )),
     (WINUI, "fn remeasure_when_loaded(", 1200, (
         "if element.IsLoaded()? {",
         # THROUGH THE TEXT ARMS' OWN BODY, which keeps a TABLE's stamped row
@@ -1163,7 +1166,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 154
+DECLARED = 155
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1467,6 +1470,8 @@ for label, path, pattern, repl in (
      r'named_descendant\(&root, "ValueTextBlock"\)\?', 'named_descendant(&root, "NoSuchBlock")?'),
     ("WinUI's clipping read no longer measuring a button's caption", WINUI,
      r"if word > room \+ 1\.0 \{", "if false {"),
+    ("WinUI's word probe without the label's style (a heading's trimmed bearings)", WINUI,
+     r"        probe\.SetStyle\(&style\)\?;\n", ""),
     ("WinUI's shrink floor back on the clamped zero-width measure", WINUI,
      r"minimum = minimum\.max\(longest_word_width\(&block\)\? \+ chrome\);",
      "minimum = minimum.max(chrome);"),

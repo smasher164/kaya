@@ -4528,11 +4528,7 @@ fn longest_word_width(block: &TextBlock) -> windows_core::Result<f64> {
         })?;
         widest = widest.max(f64::from(ui.DesiredSize()?.Width));
     }
-    // NO WORD IS WIDER THAN THE BLOCK'S OWN ONE-LINE MEASURE, and the off-tree
-    // probe can shape wider than the block it copies (docs/traps.md, the
-    // tasksrtl heading: 70px against the label's 67px).
-    let (natural, _) = measured_widths(&block.cast()?)?;
-    Ok(if natural > 0.0 { widest.min(natural) } else { widest })
+    Ok(widest)
 }
 
 /// What the probe saw, for the clipping sentence: its measure of the label's
@@ -4563,6 +4559,13 @@ fn word_probe_report(block: &TextBlock, natural: f64) -> windows_core::Result<St
 
 fn word_probe(block: &TextBlock) -> windows_core::Result<TextBlock> {
     let probe = TextBlock::new()?;
+    // THE LABEL'S STYLE, for the setters no local copy below carries: the type
+    // ramp's OpticalMarginAlignment trims a heading's side bearings
+    // (docs/traps.md, the tasksrtl heading). A block with no style answers an
+    // error here.
+    if let Ok(style) = block.Style() {
+        probe.SetStyle(&style)?;
+    }
     probe.SetFontFamily(&block.FontFamily()?)?;
     probe.SetFontSize(block.FontSize()?)?;
     probe.SetFontWeight(block.FontWeight()?)?;
