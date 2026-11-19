@@ -460,7 +460,7 @@ section to a branch of its lane's own collect.
 | mac | leg-log, verb-trace, shot, desktop-shot, windows, windowserver, sampler, sample, unified-log, power-history |
 | windows | leg-log, verb-trace, shot, desktop-shot, desktop, foreground, foreground-text |
 | ios | leg-log, verb-trace, shot, panic, app-log, devices |
-| android | leg-log, verb-trace, shot, logcat, devices, system-events, anr-history |
+| android | leg-log, verb-trace, shot, logcat, devices, system-events, anr-history, host-timeline |
 | linux | leg-log, verb-trace, shot, desktop, xvfb |
 
 Mac's `power-history` keeps the newest 200 sleep, wake and display events from
@@ -473,6 +473,12 @@ reads Android's DropBox on the failure path and keeps this package's reports.
 It is history, not current-leg attribution: match each report's PID and
 Timestamp against the step clock and system events. Empty history, failed
 reads and an unrecognized output format have different measured sentences.
+
+Android's `host-timeline` is the HOST once a second through a quiet-row or
+capture leg (lane_health.HostTimeline): each process's own CPU across the
+tick, the emulators named by serial, and the pager's moves. Every such leg's
+log carries its busiest tick, and a capture leg's audio HAL line names the
+tick at its first failed read.
 
 - `shot` is the GUEST'S OWN window where a platform can address one (the
   mac by window id, windows by PrintWindow on the WinUI class) and the

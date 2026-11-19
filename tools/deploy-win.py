@@ -58,6 +58,7 @@ import lane_health
 import secure_scan
 import walls
 import media_server
+import real_stores
 import win_launchers
 import contextlib
 import deploy_args
@@ -114,7 +115,24 @@ _t0 = time.monotonic()
 def timing(phase):
     global _t0
     print(f"TIMING {phase} {int(time.monotonic() - _t0)}s", flush=True)
+    if STORES is not None:
+        STORES.began(phase)
+        STORES.ended(phase)
     _t0 = time.monotonic()
+
+
+# THE REAL-STORE WALL ON THE GUEST (tools/lib/real_stores.py WIN_SNAPSHOT; docs/traps.md,
+# the dnd witness wrote the Windows guest's real session store): read after the deploy,
+# at every later phase's end and every leg's, and refused at the verdict naming them.
+STORES = None
+
+
+def guest_stores():
+    for _ in range(2):
+        got = real_stores.parse_win(run_ssh_out(real_stores.WIN_SNAPSHOT, wall=60))
+        if got is not None:
+            return got
+    return None
 
 
 def die(msg):
@@ -129,6 +147,8 @@ def beside(phase, fn):
 
     def run():
         t = time.monotonic()
+        if STORES is not None:
+            STORES.began(phase)
         try:
             box["ok"] = fn() is not False
         except SystemExit as e:
@@ -136,6 +156,8 @@ def beside(phase, fn):
         except Exception:  # noqa: BLE001 — printed, and the join fails the lane naming the phase
             traceback.print_exc()
         box["secs"] = int(time.monotonic() - t)
+        if STORES is not None:
+            STORES.ended(phase)
 
     thread = threading.Thread(target=run, name=phase, daemon=True)
     thread.start()
@@ -1553,6 +1575,10 @@ def verify_deployed():
 verify_deployed()
 DEPLOYED = True
 timing("deploy")
+STORES = real_stores.LegWatch(read=guest_stores)
+if STORES.snap is None:
+    die("deploy-win: the guest's real kaya stores (real_stores.WIN_SNAPSHOT over ssh) could "
+        "not be read after the deploy, so no leg could be checked against them")
 
 
 # THE CORE'S UNIT TESTS, EXECUTED ON WINDOWS: rung 1 of the ladder runs
@@ -2504,7 +2530,9 @@ def _leg_worker_slot(name, grouped):
         (LEGS_DIR / f"{name}.slot").write_text(f"{slot}\n", encoding="utf-8")
         t0 = time.monotonic()
         leg_epoch = int(time.time())
+        STORES.began(name)
         ok = run_one_suite(name, slot, log)
+        STORES.ended(name)
         refused = secure_refusals(name, log)
         for line in refused:
             print(f"{name}: {line}", file=log)
@@ -3104,6 +3132,14 @@ if os.environ.get("KAYA_RECORD"):
 # complete one, which is how an ios run that reached no leg at all was
 # read as a pass (2026-08-29). tools/check-gates.py holds all five
 # runners to this.
+for sentence in STORES.refused:
+    print(f"deploy-win: {sentence}", file=sys.stderr)
+    status = 1
+if STORES.blind:
+    print(f"deploy-win: the guest's real kaya stores could not be read after "
+          f"{', '.join(STORES.blind)}, so the real-store wall did not see them",
+          file=sys.stderr)
+    status = 1
 exclusive.summary("windows")
 # NO VERDICT OVER A LIVE SAMPLER (docs/deferred.md's LEAK entry): the lane
 # waits for its own flight-recorder sampler to leave the guest and prints

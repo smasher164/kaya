@@ -1077,10 +1077,19 @@ def ios_notification_checks(src, echo=False):
 def census_android_history(src):
     found = []
     sections = declared(src).get("android", ())
-    for name in ("system-events", "anr-history", "shade-history"):
+    for name in ("system-events", "anr-history", "shade-history", "host-timeline"):
         if name not in sections:
             found.append(f"android: declares no {name} section")
     body = py_block(src[ANDROID], "run_apk_on")
+    # docs/traps.md, the emulator's audio input: the quiet row's host, per second.
+    for needle, said in (("lane_health.HostTimeline().start()", "does not sample the host"),
+                         ("lane_health.wait_pool_settled()",
+                          "does not wait for the pool to settle before a quiet leg"),
+                         ('with_suffix(".host-timeline")', "does not write .host-timeline"),
+                         ("capture_audio_timeline(serial, host)",
+                          "does not name the host at the first failed read")):
+        if needle not in body:
+            found.append(f"android: run_apk_on {said} ({needle})")
     failures = []
     for node in ast.walk(ast.parse(body)):
         if isinstance(node, ast.If):
@@ -3608,7 +3617,16 @@ for call in ("android_system_events", "android_anr_history", "android_shade_hist
                        f"flightrec_lane.unwired_{call}(", f"Android {call} capture cut")
     gate.negative(f"Android {call} capture unwritten",
                   lambda: census_android_history(changed), want="failure path does not write")
-for name in ("system-events", "anr-history", "shade-history"):
+for label, before, after in (("sampler", "lane_health.HostTimeline().start()", "None"),
+                             ("settle wait", "lane_health.wait_pool_settled()", "'not waited'"),
+                             ("sidecar", 'with_suffix(".host-timeline")',
+                              'with_suffix(".unwired")'),
+                             ("first failed read", "capture_audio_timeline(serial, host)",
+                              "capture_audio_timeline(serial)")):
+    changed = doctored(ANDROID, re.escape(before), after, f"Android host timeline {label} cut")
+    gate.negative(f"Android host timeline {label} cut",
+                  lambda: census_android_history(changed), want="run_apk_on does not")
+for name in ("system-events", "anr-history", "shade-history", "host-timeline"):
     changed = doctored(LANE_PY, re.escape(f'self.adopt(bundle, "{name}",'),
                        f'self.adopt(bundle, "wrong-{name}",', f"Android {name} adoption cut")
     gate.negative(f"Android {name} section unwritten",
@@ -4118,6 +4136,15 @@ for label, rel, pattern, repl, want, check in (
         ("LH28 an emulator's own footprint no longer read", LANE_HEALTH,
          r"say\(lane, when, emulator_host_sentence\(serial, pid, text, problem\)\)", "pass",
          "android_report no longer reads each emulator's footprint", lane_health_checks),
+        ("LH29 a tick's CPU read off one process table", LANE_HEALTH,
+         r'used\.append\(\(r\["cpu"\] - was, r\)\)', 'used.append((r["cpu"], r))',
+         "branch `host tick` did not print", lane_health_checks),
+        ("LH30 a process born inside the tick not charged", LANE_HEALTH,
+         r"^            born \+= 1\n            was = 0\.0\n", "            continue\n",
+         "branch `host tick` did not print", lane_health_checks),
+        ("LH31 the pool called settled on its first quiet second", LANE_HEALTH,
+         r"quiet = quiet \+ 1 if seen\[-1\] < bound else 0", "quiet = ticks",
+         "branch `pool settled` did not print", lane_health_checks),
         ("LH16 a windows reading past cmd.exe's line", LANE_HEALTH,
          r'^(\"took=\"\+\$w\.ElapsedMilliseconds\n)', "\\1" + "#" + "x" * 2600 + "\n",
          "cmd.exe refuses", lane_health_checks)):
@@ -4324,6 +4351,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(315 + (5 if DRIVES else 0))
+gate.negatives_ran(323 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

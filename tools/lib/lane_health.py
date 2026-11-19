@@ -321,6 +321,168 @@ def top_consumers(n=4):
     return problem or busiest(parse_ps(text), n) or "nothing above 0%"
 
 
+# docs/traps.md, the emulator's audio input: one reading at a row's start could
+# not say what ran beside the leg that broke.
+HOST_TICK_S = 1.0
+HOST_TIMELINE_CAP_S = 900
+
+
+def host_tick(ps_a, ps_b, vm_a, vm_b, secs, load1, at, labels=None, n=5):
+    """One tick of the host: who used the CPU between two process tables (a
+    process born inside the tick is charged all it used), and the pager's moves
+    between two vm_stat readings."""
+    labels = labels or {}
+    before = {(r["pid"], r["name"]): r["cpu"] for r in parse_ps(ps_a)}
+    used, born = [], 0
+    for r in parse_ps(ps_b):
+        was = before.get((r["pid"], r["name"]))
+        if was is None:
+            if r["up"] > secs + 1:
+                continue
+            born += 1
+            was = 0.0
+        if r["cpu"] > was:
+            used.append((r["cpu"] - was, r))
+    used.sort(key=lambda u: -u[0])
+    total = sum(d for d, _ in used) / secs * 100
+    busy = ", ".join(f"{r['name']}[{labels.get(r['pid'], r['pid'])}] {100 * d / secs:.0f}%"
+                     for d, r in used[:n])
+    a, b = parse_vm_stat(vm_a), parse_vm_stat(vm_b)
+    if a and b:
+        moved = {key: b.get(key, 0) - a.get(key, 0)
+                 for key in ("Pageins", "Swapouts", "Decompressions", "Compressions")}
+        mem = (f"page-ins {moved['Pageins']}, swap-outs {moved['Swapouts']}, decompressions "
+               f"{moved['Decompressions']}, compressions {moved['Compressions']}, "
+               f"{gb(b.get('Pages free', 0) * b['page size'])} free")
+    else:
+        mem = "vm_stat unreadable (no page size in its output)"
+    return (f"{at} load1 {load1:.1f}; cpu {total:.0f}% over {secs:.1f}s, {born} process(es) "
+            f"born: {busy or 'no process used CPU'}; {mem}")
+
+
+# THE QUIET ROW WAITS FOR THE POOL (docs/traps.md, the emulator's audio input): the
+# row's own staging left the pool's emulators at up to 11 cores while its first
+# microphone leg opened its input; idle, the five sit near 45%.
+POOL_SETTLED_PCT = 150
+POOL_SETTLE_TICKS = 3
+POOL_SETTLE_CAP_S = 90
+
+
+def pool_cpu(ps_a, ps_b, secs, pids):
+    """The emulators' summed CPU between two process tables, in % of one core."""
+    before = {r["pid"]: r["cpu"] for r in parse_ps(ps_a)}
+    used = sum(max(0.0, r["cpu"] - before[r["pid"]]) for r in parse_ps(ps_b)
+               if r["pid"] in pids and r["pid"] in before)
+    return 100 * used / secs
+
+
+def wait_pool_settled(bound=POOL_SETTLED_PCT, ticks=POOL_SETTLE_TICKS, cap=POOL_SETTLE_CAP_S,
+                      ps=host_ps_text, args=host_args_text, sleep=time.sleep,
+                      clock=time.monotonic):
+    """Until every emulator together stays under `bound` for `ticks` seconds, at most `cap`."""
+    args_text, problem = args()
+    if problem:
+        return f"the pool's settle wait could not read the process table ({problem}); not waited"
+    pids = set(emulator_pids(args_text).values())
+    if not pids:
+        return "the pool's settle wait found no emulator process in the host's table; not waited"
+    t0 = t_a = clock()
+    ps_a, problem = ps()
+    seen, quiet = [], 0
+    while not problem:
+        sleep(HOST_TICK_S)
+        ps_b, problem = ps()
+        t_b = clock()
+        if problem:
+            break
+        seen.append(pool_cpu(ps_a, ps_b, t_b - t_a, pids))
+        ps_a, t_a = ps_b, t_b
+        quiet = quiet + 1 if seen[-1] < bound else 0
+        said = ", ".join(f"{p:.0f}%" for p in seen[-12:])
+        if quiet >= ticks:
+            return (f"the pool's {len(pids)} emulators settled under {bound}% for {ticks}s "
+                    f"after {t_b - t0:.0f}s (per second, the last {min(len(seen), 12)}: {said})")
+        if t_b - t0 > cap:
+            return (f"the pool's {len(pids)} emulators did NOT settle under {bound}% within "
+                    f"{cap}s; the leg runs anyway (per second, the last 12: {said})")
+    return (f"the pool's settle wait lost the process table after {clock() - t0:.0f}s "
+            f"({problem}); not waited further")
+
+
+class HostTimeline:
+    """The host once a tick for one leg's life, bounded by HOST_TIMELINE_CAP_S.
+    A process that began and ended inside one tick is not seen."""
+
+    def __init__(self, tick=HOST_TICK_S, cap=HOST_TIMELINE_CAP_S, ps=host_ps_text,
+                 vm=lambda: _run(["vm_stat"]), load=os.getloadavg,
+                 clock=lambda: time.strftime("%H:%M:%S")):
+        self.tick, self.cap, self.ps, self.vm, self.load, self.clock = (
+            tick, cap, ps, vm, load, clock)
+        self.rows = []
+        self.labels = {}
+        self.head = ""
+        self._stop = threading.Event()
+        self._thread = None
+
+    def start(self):
+        args, problem = host_args_text()
+        self.labels = ({} if problem else
+                       {pid: f"emulator-{port}" for port, pid in emulator_pids(args).items()})
+        self.head = (f"host-timeline: every {self.tick:g}s from {self.clock()}, at most "
+                     f"{self.cap}s; CPU is each process's own CPU time across the tick (100% is "
+                     f"one core of {os.cpu_count()}); emulators named by serial "
+                     + (f"(process table unreadable: {problem})" if problem else
+                        f"({len(self.labels)} found)"))
+        self._thread = threading.Thread(target=self._loop, name="host-timeline", daemon=True)
+        self._thread.start()
+        return self
+
+    def _loop(self):
+        ps_a, _ = self.ps()
+        vm_a, _ = self.vm()
+        t_a = t0 = time.monotonic()
+        while not self._stop.wait(self.tick):
+            if time.monotonic() - t0 > self.cap:
+                self.rows.append(("", f"{self.clock()} stopped: the {self.cap}s cap"))
+                return
+            ps_b, ps_problem = self.ps()
+            vm_b, _ = self.vm()
+            t_b = time.monotonic()
+            at = self.clock()
+            if ps_problem:
+                self.rows.append((at, f"{at} process table unreadable ({ps_problem})"))
+            else:
+                self.rows.append((at, host_tick(ps_a, ps_b, vm_a, vm_b, t_b - t_a,
+                                                self.load()[0], at, self.labels)))
+            ps_a, vm_a, t_a = ps_b, vm_b, t_b
+
+    def stop(self):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=30)
+        return self.text()
+
+    def text(self):
+        return "\n".join([self.head] + [line for _, line in self.rows]) + "\n"
+
+    def summary(self):
+        """The busiest tick and the mean, for a leg's log whatever its verdict."""
+        cpu = [(int(m.group(1)), line) for _at, line in self.rows
+               for m in [re.search(r"; cpu (\d+)% over", line)] if m]
+        if not cpu:
+            return f"host-timeline: no tick was read ({len(self.rows)} row(s))"
+        peak, line = max(cpu)
+        return (f"host-timeline: {len(cpu)} tick(s), mean cpu {sum(c for c, _ in cpu) / len(cpu):.0f}%"
+                f", the busiest: {line}")
+
+    def at(self, second):
+        """The tick that ended at `second` (HH:MM:SS), else the first after it."""
+        for at, line in self.rows:
+            if at and at >= second:
+                return line
+        return None
+
+
 # ---------------------------------------------------------- iOS simulators
 
 def ios_sentences(ps_text, args_text, udids):
@@ -2409,6 +2571,55 @@ def drive():
     cases.append(("fires only on a shift", "False True", [f"{fires[0]} {fires[1]}"]))
     parsed = leg_times("a: PASS (3s)\nb: FAIL (4s) red\nc: SKIP (1s)\nlane-health: x\n")
     cases.append(("leg parse", "{'a': 3, 'b': 4}", [repr(parsed)]))
+    ps_next = PS.replace("0:05.00  95.0 /usr/bin/qemu", "0:05.90  95.0 /usr/bin/qemu") + \
+        "  400     1 00:00   0:00.40  40.0 /usr/bin/rustc\n"
+    tick = host_tick(PS, ps_next, VM_A, VM_B, 1.0, 10.4, "07:22:30", {300: "emulator-5560"})
+    cases.append(("host tick", "07:22:30 load1 10.4; cpu 130% over 1.0s, 1 process(es) born: "
+                  "qemu-system-aarch64[emulator-5560] 90%, rustc[400] 40%; page-ins 13000, "
+                  "swap-outs 7, decompressions 0, compressions 180000, 0.0 GB free", [tick]))
+    cases.append(("host tick idle", "cpu 0% over 1.0s, 0 process(es) born: no process used CPU",
+                  [host_tick(PS, PS, VM_A, VM_B, 1.0, 1.0, "07:22:30")]))
+    cases.append(("host tick no vm_stat", "vm_stat unreadable (no page size in its output)",
+                  [host_tick(PS, PS, "", VM_B, 1.0, 1.0, "07:22:30")]))
+    clock = iter(f"07:22:{s:02d}" for s in range(60))
+    tables = iter([(PS, None), (ps_next, None), ("", "ps did not answer within 30s")]
+                  + [(PS, None)] * 1000)
+    timeline = HostTimeline(tick=0.01, cap=0.3, ps=lambda: next(tables),
+                            vm=lambda: (VM_A, None), load=lambda: (2.0, 0, 0),
+                            clock=lambda: next(clock))
+    timeline.start()
+    timeline._thread.join(timeout=10)
+    text = timeline.stop()
+    cases.append(("timeline tick", "07:22:01 load1 2.0; cpu ",
+                  [timeline.at("07:22:01") or "no tick at 07:22:01"]))
+    cases.append(("timeline unreadable", "07:22:02 process table unreadable (ps did not answer",
+                  [timeline.at("07:22:02") or "no tick at 07:22:02"]))
+    cases.append(("timeline cap", "stopped: the 0.3s cap", text.splitlines()))
+    cases.append(("timeline past its end", "None", [repr(timeline.at("08:00:00"))]))
+    cases.append(("timeline summary", "%, the busiest: 07:22:01 load1 2.0",
+                  [timeline.summary()]))
+    busy = PS.replace("0:05.00  95.0 /usr/bin/qemu", "0:{:05.2f}  95.0 /usr/bin/qemu")
+    args = "  300 /usr/bin/qemu-system-aarch64 -avd kaya -port 5554 -grpc 8554\n"
+
+    def pool(steps, cap=90):
+        tables = iter([(busy.format(5 + c), None) for c in steps] + [("", "ps vanished")])
+        clock = iter(range(1000))
+        return wait_pool_settled(ps=lambda: next(tables), args=lambda: (args, None),
+                                 sleep=lambda s: None, clock=lambda: next(clock), cap=cap)
+    cases.append(("pool settled", "the pool's 1 emulators settled under 150% for 3s after 5s "
+                  "(per second, the last 5: 300%, 200%, 100%, 100%, 100%)",
+                  [pool([0, 3, 5, 6, 7, 8])]))
+    cases.append(("pool never settled", "did NOT settle under 150% within 3s; the leg runs "
+                  "anyway (per second, the last 12: 300%, 300%, 300%, 300%)",
+                  [pool([0, 3, 6, 9, 12, 15], cap=3)]))
+    cases.append(("pool table lost", "the pool's settle wait lost the process table after",
+                  [pool([0, 3])]))
+    cases.append(("pool no table", "could not read the process table (ps exited 1: x); not waited",
+                  [wait_pool_settled(args=lambda: ("", "ps exited 1: x"))]))
+    cases.append(("pool no emulator", "found no emulator process in the host's table; not waited",
+                  [wait_pool_settled(args=lambda: ("  1 /sbin/launchd\n", None))]))
+    cases.append(("timeline summary unread", "host-timeline: no tick was read (0 row(s))",
+                  [HostTimeline().summary()]))
     return cases
 
 

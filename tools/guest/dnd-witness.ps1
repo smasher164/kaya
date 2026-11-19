@@ -260,6 +260,9 @@ if (-not (Test-Path $Stock)) {
 # neither window is ever under the other's drop point.
 $env:KAYA_WIN_SLOT = "0"
 Remove-Item Env:\KAYA_SELFTEST -ErrorAction SilentlyContinue
+# With no scene the core would keep its stores in the user's real ones
+# (docs/traps.md, the dnd witness wrote the Windows guest's real session store).
+$env:KAYA_SCRATCH_STORES = "$FilesDir\stores"
 if ($Failures.Count -eq 0) {
     Say "starting kaya dnd.exe with no scene"
     # IN THIS SCRIPT'S OWN CONSOLE: dnd.exe is a console program, and a new

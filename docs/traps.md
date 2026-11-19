@@ -4,6 +4,30 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The dnd witness wrote the Windows guest's real session store (measured 2026-11-19)
+
+`%LOCALAPPDATA%\dev.kaya.aurora.notes\kaya-session\session.v1` on the VM was
+rewritten on every matrix. The writer was the dnd witness legs
+(tools/guest/dnd-witness.ps1, dndwitness_rust and dndforeign_rust): they start
+dnd.exe "with no scene" (KAYA_SELFTEST removed), so the core kept its stores in
+the real ones. Read off the 7b660f25 matrix's windows log: dndforeign_rust's
+witness started dnd.exe at 19:44:58 VM time, the file's mtime, and the window
+under its drags was pid 5668, the file's writer pid. The VM's clock ran 11 h 23 m
+behind the host's that day, so match by the guest's own clock. The witness now
+sets `KAYA_SCRATCH_STORES` to its own folder. The wall: deploy-win reads the
+guest's `dev.kaya*` entries under LOCALAPPDATA and APPDATA over ssh
+(tools/lib/real_stores.py WIN_SNAPSHOT) after the deploy, each later phase and
+each leg, and refuses its verdict naming what moved and who ran. Watched: with
+the scratch line cut (1 substitution), `deploy-win dndforeign_rust` refused
+"dndforeign_rust CHANGED THE USER'S REAL kaya STORE: changed ...\session.v1";
+restored from a copy, sha equal, both witness legs passed with the wall silent.
+The leftover kaya-session directory was removed (copy in
+kaya-handoffs/charges/prefs-cleanup-win-session); the same directory's
+`preferences` (2026-10-16) and `tasks.sqlite` (2026-09-09) were left. The
+witness's first start also registers the declared identity under
+HKCU\Software\Classes\AppUserModelId, as 552 WinUI legs of that matrix did; that key is
+not a kaya store and the wall does not read the registry.
+
 ## Scratch suites and bare executables' domains piled up in ~/Library/Preferences (measured 2026-11-19)
 
 Every mac act one made a `<id>.selftest.<fnv of the leg's state home>` suite
@@ -15561,6 +15585,28 @@ the host after every lane, 197 failed reads from 07:22:30 on; the row ended at
 one-minute load 7.8 (10.4 at the leg) with the 5- and 15-minute loads still at
 30.8 and 52.1 from the matrix, 1.2 GB free and 477 page-ins in a 1 s sample.
 capture-jvm and chatcall-go read clean a minute later in the same row.
+THAT BUNDLE COULD NOT SAY WHAT LOADED THE HOST: it held one reading at the
+row's start and none during the leg. So the recorder grew (2026-11-19): every
+quiet-row and capture leg samples the host once a second (lane_health.HostTimeline,
+the bundle's `host-timeline` section; each process's CPU across the tick, the
+emulators by serial, the pager), its log carries the busiest tick, and the
+HAL line names the tick at the first failed read. Read back on a forced red.
+WHAT IT MEASURED ON A HOST NOBODY WAS USING, six `KAYA_QUIET=only` rows (24
+legs, 0 failed reads): the row is never idle. The idle pool sits near 45% of
+one core in all; a microphone leg's own emulator runs 340-380%; and the
+FIRST leg opened its input while the row's own staging (every apk onto every
+device, the tablet included) still had the OTHER emulators at 450-1100% (the
+tablet alone 830%). That is the starvation this entry's premise excludes, and
+the row made it itself. So a quiet leg now waits until the pool's emulators
+together stay under 150% for 3 s, at most 90 s, and prints what it waited for
+(lane_health.wait_pool_settled): measured 4-11 s for the first leg after
+staging and 3-15 s for the others (the previous leg's device pulses near
+220% every other second for about 10 s after it). Whether the 2026-11-19
+break was that aftermath, the matrix's leftover memory pressure (swap 2.6 of
+3.0 GB), or something else is not known: no per-second reading of it exists.
+The next break carries its own. Guards: check-flightrec's Android history
+census and its cuts of the sampler, the sidecar, the first-failed-read tick
+and the settle wait, and lane-health LH29-LH31.
 
 ## The WinUI self-view colour: the platform's player over a camera's frame source decodes BT.601 as BT.709 (measured 2026-10-03)
 

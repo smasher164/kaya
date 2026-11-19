@@ -17615,7 +17615,7 @@ KEY: selftest suite, .selftest.<hash>.plist, per-executable domain, kaya-go.plis
   that leaves none), and no unbundled leg writes a domain under its
   executable's name. The files already there are the maintainer's to remove.
 
-## OPEN — the Windows VM's real session store was written on 2026-11-18 (found 2026-11-19, the prefs cleanup)
+## ~~OPEN — the Windows VM's real session store was written on 2026-11-18 (found 2026-11-19, the prefs cleanup)~~ COMPLETE 2026-11-19: the writer was the dnd witness legs (tools/guest/dnd-witness.ps1 starts dnd.exe with no scene), which now give it `KAYA_SCRATCH_STORES`; deploy-win puts the real-store wall on the guest (real_stores.WIN_SNAPSHOT after the deploy, every phase and every leg), watched red naming dndforeign_rust; the leftover kaya-session directory removed (docs/traps.md, the dnd witness wrote the Windows guest's real session store)
 
 KEY: real session store on Windows, LOCALAPPDATA\dev.kaya.aurora.notes\kaya-session, session.v1, real-store wall on the guest
 - `%LOCALAPPDATA%\dev.kaya.aurora.notes\kaya-session\session.v1` on the

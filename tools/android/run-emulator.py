@@ -2104,6 +2104,10 @@ def run_apk_on(serial, name, apk, component, script, extras,
              "/data/local/tmp/kaya-rec.mp4"],
             stdout=log, stderr=log)
         rec_extra = ["--es", "KAYA_RECORD", "1"]
+    if name in lane.QUIET:
+        print(f"{name}: {lane_health.wait_pool_settled()}", file=log)
+    host = (lane_health.HostTimeline().start()
+            if script in CAPTURE_SCENES or name in lane.QUIET else None)
     adb(serial, "shell", "am", "start", "-W", "-n", component, "--es",
         "KAYA_SELFTEST", script, *rec_extra, *extras,
         stdout=subprocess.DEVNULL, stderr=log)
@@ -2280,8 +2284,12 @@ def run_apk_on(serial, name, apk, component, script, extras,
         emulator_capture.stop(feed)
         LIVE_FEEDS.discard(feed)
         print(f"{name}: microphone stopped at the leg's end; {feed.sentence()}", file=log)
+    if host is not None:
+        (LEGS_DIR / f"{name}.log").with_suffix(".host-timeline").write_text(
+            host.stop(), encoding="utf-8")
+        print(f"{name}: {host.summary()}", file=log)
     if script in CAPTURE_SCENES:
-        print(f"{name}: {capture_audio_timeline(serial)}", file=log)
+        print(f"{name}: {capture_audio_timeline(serial, host)}", file=log)
     if out:
         CORE_DIAG["legs"] += 1
         if CORE_DIAG_LINE in dump:
@@ -3018,7 +3026,7 @@ def hal_history(serial):
                         for e in events))
 
 
-def capture_audio_timeline(serial):
+def capture_audio_timeline(serial, host=None):
     """What the guest's audio HAL said while the leg's input ran, per second:
     a read the HAL padded with silence and a read that FAILED. A capture leg
     hearing `samples silent` under an injected tone is the HAL failing its
@@ -3044,9 +3052,16 @@ def capture_audio_timeline(serial):
                      for at, s in sorted(seconds.items()))
     load = os.getloadavg()[0]
     cause = (f"; THE EMULATOR'S AUDIO INPUT BROKE, so the guest heard padded silence "
-             f"whatever was injected — measured under host load "
-             f"(one-minute load {load:.1f} now; docs/traps.md)" if failed
+             f"whatever was injected (docs/traps.md, the emulator's audio input); one-minute "
+             f"load {load:.1f} now" if failed
              else f"; one-minute load {load:.1f} now")
+    first = min((at for at, s in seconds.items() if s.get("read-failed")), default=None)
+    if first and host is not None:
+        tick = host.at(first)
+        cause += (f"; the host at the first failed read ({first}): {tick}" if tick else
+                  f"; the host timeline holds no tick at or after {first}")
+    elif first:
+        cause += "; the host was not sampled for this leg"
     return f"audio HAL: {failed} failed read(s){cause}; per second: {rows}{hal_history(serial)}"
 
 

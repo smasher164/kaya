@@ -101,18 +101,51 @@ def snapshot(under=None):
     return seen
 
 
+# THE WINDOWS GUEST'S stores, read over ssh by tools/deploy-win.py (docs/traps.md,
+# the dnd witness wrote the Windows guest's real session store): `roots`' two for
+# Windows, the same `dev.kaya*` filter, a tab-separated row per entry and an END
+# line so a cut-off read is not taken for an empty one.
+WIN_SNAPSHOT = (
+    'powershell -NoProfile -Command "foreach ($r in @($env:LOCALAPPDATA,$env:APPDATA)) { '
+    'Get-ChildItem -LiteralPath $r -Filter ' + PREFIX + '* -Force -ErrorAction SilentlyContinue '
+    '| ForEach-Object { $_; if ($_.PSIsContainer) { Get-ChildItem -LiteralPath $_.FullName '
+    '-Recurse -Force -ErrorAction SilentlyContinue } } | ForEach-Object { '
+    '\\"{0}`t{1}`t{2}\\" -f $_.FullName, $(if ($_.PSIsContainer) {\\"dir\\"} else '
+    '{$_.Length}), $_.LastWriteTimeUtc.Ticks } }; Write-Output END"')
+
+
+def parse_win(text):
+    """WIN_SNAPSHOT's answer as a snapshot, or None when it did not end with END."""
+    lines = (text or "").replace("\r", "").splitlines()
+    if not lines or lines[-1].strip() != "END":
+        return None
+    seen = {}
+    for line in lines[:-1]:
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        path, size, ticks = parts
+        seen[path] = ("dir", 0, 0) if size == "dir" else ("file", int(size), int(ticks))
+    return seen
+
+
 class LegWatch:
     """The wall per leg on a lane that runs legs side by side (validate-mac,
-    run-leg): a store that moved by a leg's end is named with every leg that
-    ran since the last look, the one ending first."""
+    run-leg, deploy-win through `read`): a store that moved by a leg's end is
+    named with every leg that ran since the last look, the one ending first.
+    A reading is taken outside the lock and applied only if no later one was;
+    `read` returning None is a look that could not be made, said once per leg."""
 
-    def __init__(self):
+    def __init__(self, read=snapshot):
         import threading
         self.lock = threading.Lock()
-        self.snap = snapshot()
+        self.read = read
+        self.snap = read()
+        self.taken = self.applied = 0
         self.running = set()
         self.since = set()
         self.refused = []
+        self.blind = []
 
     def began(self, name):
         with self.lock:
@@ -121,8 +154,20 @@ class LegWatch:
 
     def ended(self, name):
         with self.lock:
+            self.taken += 1
+            mine = self.taken
+        now = self.read()
+        with self.lock:
             self.running.discard(name)
-            now = snapshot()
+            if now is None or self.snap is None:
+                if now is None:
+                    self.blind.append(name)
+                else:
+                    self.snap, self.applied = now, mine
+                return
+            if mine < self.applied:
+                return
+            self.applied = mine
             changes = moved(self.snap, now)
             if changes:
                 self.snap = now

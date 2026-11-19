@@ -52,7 +52,10 @@ domain left out as scratch by name and a `.selftest` suite NOT (since
 2026-11-19 the scratch store is a file in the leg's state home), before BUILD, after it, and after each gate, and names the gate that moved
 it; validate-all reads the same snapshot across a whole run, and validate-mac
 and run-leg after every leg (real_stores.LegWatch, naming the leg and those
-that ran since the last look). Self-test J watches a stand-in gate that
+that ran since the last look); deploy-win reads the Windows guest's own
+LOCALAPPDATA and APPDATA the same way over ssh (real_stores.WIN_SNAPSHOT,
+since 2026-11-19) after the deploy, every later phase and every leg, and
+refuses its verdict naming them. Self-test J watches a stand-in gate that
 writes one refused by name, J1 one that leaves a `.selftest` suite and a
 `kaya-go.plist` (docs/traps.md, a
 gate wrote the user's real session store). What each gate is for:

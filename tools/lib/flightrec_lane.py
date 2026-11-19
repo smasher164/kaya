@@ -55,7 +55,8 @@ SECTIONS = {
     "ios": ("leg-log", "verb-trace", "shot", "desktop-shot", "panic", "app-log", "devices", "binary-stamp",
             "notifications", "stacks", "animations", "system-log"),
     "android": ("leg-log", "verb-trace", "shot", "desktop-shot", "logcat", "devices",
-                "system-events", "anr-history", "shade-history", "media-server"),
+                "system-events", "anr-history", "shade-history", "media-server",
+                "host-timeline"),
     "linux": ("leg-log", "verb-trace", "shot", "desktop", "xvfb"),
 }
 
@@ -1731,6 +1732,10 @@ class AndroidRecorder(LaneRecorder):
                 self.adopt_shot(bundle, "desktop-shot", log.with_suffix(".desktop-shot.png"),
                                 why_absent=self.SHOT_ABSENT,
                                 note_src=log.with_suffix(".desktopwhen"))
+                self.adopt(bundle, "host-timeline", log.with_suffix(".host-timeline"),
+                           why_absent="flightrec: the runner wrote no host timeline for "
+                                      "this leg; run_apk_on samples the host only for the "
+                                      "quiet row's legs and the capture scenes")
                 self.section(bundle, "devices", ["adb", "devices", "-l"])
                 window = log.with_suffix(".window")
                 if not serves:
