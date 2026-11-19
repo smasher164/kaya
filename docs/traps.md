@@ -15554,6 +15554,14 @@ late delivering frames"). The guest kernel's virtio_snd logged no control
 message timeout over the period that held two reds (dmesg through adb root on
 emulator-5554, then unroot).
 
+THE QUIET ROW IS NOT ALWAYS QUIET ENOUGH (read 2026-11-19, matrix on
+7b660f25, bundle 20261119T152201Z-063309 android-capture-compose):
+capture-compose broke at its first input in the android-quiet row, alone on
+the host after every lane, 197 failed reads from 07:22:30 on; the row ended at
+one-minute load 7.8 (10.4 at the leg) with the 5- and 15-minute loads still at
+30.8 and 52.1 from the matrix, 1.2 GB free and 477 page-ins in a 1 s sample.
+capture-jvm and chatcall-go read clean a minute later in the same row.
+
 ## The WinUI self-view colour: the platform's player over a camera's frame source decodes BT.601 as BT.709 (measured 2026-10-03)
 
 The documented WinUI 3 camera preview, `MediaPlayerElement` over

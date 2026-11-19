@@ -17624,6 +17624,10 @@ KEY: real session store on Windows, LOCALAPPDATA\dev.kaya.aurora.notes\kaya-sess
   declared app's REAL session store; a lane or a test wrote it without the
   harness's scratch, and nothing on the guest watches those roots
   (tools/lib/real_stores.py runs on the host only). Left in place.
+- SEEN AGAIN 2026-11-19: the full matrix on 7b660f25 rewrote it (VM time
+  2026-11-18 19:44:58, about 07:08 on the host, during the windows lane;
+  writer pid 5668, a new session id, the same two facets). So a Windows lane
+  phase writes the real store on every matrix.
 - Closing this means: find the writer (the facet names point at a scene or
   a unit test with two columns), and put the real-store wall on the guest
   (deploy-win before and after its legs and its unit tests), watched red.
