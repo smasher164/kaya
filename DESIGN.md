@@ -2992,8 +2992,9 @@ closures because its module system has no value to hand back. Kaya uses the rese
 desktops remember a window's frame across launches and restore it before
 the first frame, clamped onto a screen that still has it, with the
 `remember_frame` window prop the opt-out and the phones inert.
-UNDER THE HARNESS both stores are scratch — the domain `<id>.selftest`
-and a data directory under the state home — emptied by the process that
+UNDER THE HARNESS both stores are scratch — a preference file and a data
+directory under the leg's state home, never a name among the user's own
+preferences — emptied by the process that
 starts a scene's first act and kept by the process a relaunch marker
 adopts, which is what lets `relaunch launch` (the plain door: the same
 artifact started the way a user would, no notification) measure

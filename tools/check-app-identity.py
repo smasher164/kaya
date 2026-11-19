@@ -1141,6 +1141,10 @@ def lane_bundle_findings(root):
     if "require_lane_bundle(argv, leg_name(scene, lang))" not in body:
         bad.append("tools/lib/lanes/mac.py: leg_argv no longer refuses a bundle under the real "
                    "identity (require_lane_bundle)")
+    if "give_lane_identity(argv)" not in body:
+        bad.append("tools/lib/lanes/mac.py: leg_argv no longer gives a bare executable the "
+                   "scratch identity (give_lane_identity), so its domain is its name in the "
+                   "user's ~/Library/Preferences")
     mac = (root / "tools/lib/packaging/mac.py").read_text(encoding="utf-8")
     if '{declared.id}{LANE_SUFFIX if lane else ""}' not in mac:
         bad.append("tools/lib/packaging/mac.py: the Info.plist's CFBundleIdentifier no longer "
@@ -1795,19 +1799,21 @@ for _tag, _rel, _pat, _repl, _want in (
     doctor_shadow(f"the {_tag} cut", s, _rel, _pat, _repl)
     g.negative(f"C16 with the {_tag} cut", lambda p=s: check(p), want=_want)
 
-# N46-N47 — C17's own.
+# N46-N48 — C17's own.
 for _tag, _rel, _pat, _repl, _want in (
     ("realchat", "tools/lib/lanes/mac.py", r"stem=scene,\n( +)accessory=True, lane=True\)",
      r"stem=scene,\n\1accessory=True)", "build a bundle under the real identity"),
     ("norefuse", "tools/lib/lanes/mac.py",
      r"    require_lane_bundle\(argv, leg_name\(scene, lang\)\)\n", "",
      "leg_argv no longer refuses"),
+    ("nogive", "tools/lib/lanes/mac.py", r"    give_lane_identity\(argv\)\n", "",
+     "no longer gives a bare executable"),
 ):
     s = fresh(_tag)
     doctor_shadow(f"the {_tag} cut", s, _rel, _pat, _repl)
     g.negative(f"C17 with the {_tag} cut", lambda p=s: check(p), want=_want)
 
-g.negatives_ran(52)
+g.negatives_ran(53)
 
 # The vacuity floor rule 5 asks for: the census below walks these six
 # roots, and a walk that found almost nothing agrees with everything.

@@ -218,9 +218,10 @@ back through the platform's own record.
   redirected here, measured); created on first ask.
 - **Under KAYA_SELFTEST the stores are scratch and act one clears them.**
   The app's real defaults domain and data must not be polluted by lanes, so
-  under the harness the pref domain is `<id>.selftest` (the UserDefaults
-  suite, the SharedPreferences file name, the keyfile name) and the data
-  directory is `<state>/selftest/<id>/data`; a process that starts act one
+  under the harness the pref store is `<state>/selftest/<id>/preferences`
+  (the UserDefaults suite named by that absolute path, the keyfile itself;
+  Android's SharedPreferences file is `<id>.selftest` in the app's sandbox)
+  and the data directory is `<state>/selftest/<id>/data`; a process that starts act one
   (KAYA_SELFTEST set, no marker) EMPTIES both, and a process adopted from a
   marker keeps them — which is what makes a relaunch scene measure
   persistence. AND THE SCRATCH IS PER LEG (found by the first S4 matrix,
@@ -229,10 +230,11 @@ back through the platform's own record.
   would empty it under another leg's open database — a runner gives every
   leg its own state home (`XDG_STATE_HOME`, honored by act2.rs on the
   three desktops; the linux leg scripts already did, the phones isolate
-  per device), the data dir and the marker live under it, and the
-  preference domain carries a tag derived from it (`<id>.selftest.<fnv64>`)
-  because a UserDefaults suite has no directory to live under; a plain
-  relaunch inherits the leg's environment and lands in the same suite.
+  per device), and the data dir, the preference file and the marker live
+  under it; a plain relaunch inherits the leg's environment and lands in
+  the same file. (Until 2026-11-19 the suite was a NAME carrying a hash of
+  that home, and every act one left one in ~/Library/Preferences;
+  docs/traps.md.)
   The harness's `expect_pref <key> "<value>"` reads back
   through the PLATFORM's store for that domain (the suite re-opened on
   Apple, the preferences file re-read on Android, the keyfile's bytes on

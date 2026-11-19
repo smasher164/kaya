@@ -1454,15 +1454,54 @@ def release_real_store(domain, key):
 
 def standard_domain(argv):
     """The domain NSUserDefaults.standard names for the process argv starts:
-    the bundle's identifier, else the executable's name (docs/traps.md, the
-    host domain's window frame)."""
+    the bundle's identifier, an Info.plist's beside a bare executable, else
+    the executable's name (docs/traps.md, the host domain's window frame, and
+    an unbundled leg's domain is its executable's name)."""
     import plistlib
     exe = pathlib.Path(argv[0])
-    if exe.parent.name == "MacOS" and exe.parent.parent.name == "Contents":
-        info = exe.parent.parent / "Info.plist"
-        if info.is_file():
-            return plistlib.loads(info.read_bytes()).get("CFBundleIdentifier", exe.name)
+    bundled = exe.parent.name == "MacOS" and exe.parent.parent.name == "Contents"
+    info = (exe.parent.parent if bundled else exe.parent) / "Info.plist"
+    if info.is_file():
+        return plistlib.loads(info.read_bytes()).get("CFBundleIdentifier", exe.name)
     return exe.name
+
+
+# AN UNBUNDLED LEG'S DOMAIN IS ITS EXECUTABLE'S NAME, in the user's
+# ~/Library/Preferences (kaya-go, confirm.exe, sections); an Info.plist beside
+# the executable names the main bundle instead (docs/traps.md, an unbundled
+# leg's domain is its executable's name).
+UNBUNDLED_IDENTITY = "dev.kaya.unbundled"
+
+
+def unbundled_info_plist():
+    from packaging.mac import LANE_SUFFIX
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+            '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+            '<plist version="1.0">\n<dict>\n'
+            f'  <key>CFBundleIdentifier</key><string>{UNBUNDLED_IDENTITY}{LANE_SUFFIX}</string>\n'
+            '</dict>\n</plist>\n')
+
+
+def give_lane_identity(argv):
+    """The Info.plist beside a bare executable, written when it is missing or
+    differs (a build tool may clear its output directory)."""
+    exe = pathlib.Path(argv[0]) if argv and argv[0] else None
+    if exe is None or (exe.parent.name == "MacOS" and exe.parent.parent.name == "Contents"):
+        return
+    path = exe if exe.is_absolute() else _ROOT / exe
+    if not path.is_file():
+        return
+    info = path.parent / "Info.plist"
+    want = unbundled_info_plist()
+    try:
+        if info.read_text(encoding="utf-8") == want:
+            return
+    except OSError:
+        pass
+    tmp = info.with_name(f".Info.plist.{os.getpid()}.{threading.get_ident()}")
+    tmp.write_text(want, encoding="utf-8")
+    os.replace(tmp, info)
 
 
 def real_store_verdict(root, scene, lf, argv):
@@ -1721,21 +1760,27 @@ def act_one_ok(log_text):
 
 
 def require_lane_bundle(argv, leg):
-    """A bundled leg runs under the scratch bundle identity, or AppKit writes
-    the user's real domain (packaging/mac.py LANE_SUFFIX)."""
+    """Every leg runs under a scratch identity, or AppKit writes the user's
+    real domain or one named after the executable (packaging/mac.py
+    LANE_SUFFIX)."""
     from packaging.mac import LANE_SUFFIX
     exe = pathlib.Path(argv[0])
-    if not (exe.parent.name == "MacOS" and exe.parent.parent.name == "Contents"):
-        return
     path = exe if exe.is_absolute() else _ROOT / exe
-    if not (path.parent.parent / "Info.plist").is_file():
+    if not path.is_file():
         return
     domain = standard_domain([str(path)])
-    if not domain.endswith(LANE_SUFFIX):
+    if domain.endswith(LANE_SUFFIX):
+        return
+    if exe.parent.name == "MacOS" and exe.parent.parent.name == "Contents":
         raise SystemExit(f"mac lane: {leg} would run {exe.parent.parent.parent.name} under the "
                          f"bundle identity {domain}, the user's real domain; lane bundles are "
                          f"built with packaging_mac.bundle(..., lane=True), which names it "
                          f"{domain}{LANE_SUFFIX} (docs/restoration-plan.md §9)")
+    raise SystemExit(f"mac lane: {leg} would run the bare executable {exe} under the domain "
+                     f"{domain}, a file named after it in the user's ~/Library/Preferences; "
+                     f"leg_argv gives it {UNBUNDLED_IDENTITY}{LANE_SUFFIX} through "
+                     f"give_lane_identity, an Info.plist beside it (docs/traps.md, an "
+                     f"unbundled leg's domain is its executable's name)")
 
 
 def leg_argv(scene, lang, hs_bin):
@@ -1743,6 +1788,7 @@ def leg_argv(scene, lang, hs_bin):
     `hs_bin(stem)` resolves a Haskell binary (cabal list-bin)."""
     stem = guest_stem(scene)
     argv = require_modern(_guest_argv(scene, lang, hs_bin, stem), lang)
+    give_lane_identity(argv)
     require_lane_bundle(argv, leg_name(scene, lang))
     if RELAUNCH_DOOR.get(scene) == "resume":
         # Both acts run as a user who keeps windows at a quit.

@@ -10,10 +10,12 @@
 //! answers ABSENT, which is why every backing stores the type beside the
 //! value; a set is durable when it returns; any thread may use the store.
 //!
-//! UNDER `KAYA_SELFTEST` THE STORE IS SCRATCH (§4): the domain is
-//! `<id>.selftest` and the data directory `<state>/selftest/<id>/data`, and
-//! act one empties both (crates/kaya/src/act2.rs, `arm`). A lane must not
-//! write the user's real defaults.
+//! UNDER `KAYA_SELFTEST` THE STORE IS SCRATCH (§4): the store is
+//! `<state>/selftest/<id>/preferences` and the data directory
+//! `<state>/selftest/<id>/data`, and act one empties both
+//! (crates/kaya/src/act2.rs, `arm`). A lane must not write the user's real
+//! defaults, nor leave a suite of its own among them (docs/traps.md, a
+//! scratch suite per leg piled up in ~/Library/Preferences).
 
 use std::path::PathBuf;
 
@@ -61,41 +63,37 @@ pub(crate) fn is_reserved(key: &str) -> bool {
 /// `act2::arm`, before the app thread on every platform that has one.
 pub(crate) const ENV_DOMAIN: &str = "KAYA_PREF_DOMAIN";
 
-/// The suite / SharedPreferences file / key-file directory this process
-/// writes: `<id>`, or `<id>.selftest` under the harness.
+/// The suite / SharedPreferences file / key file this process writes:
+/// `<id>`, or the scratch store's under the harness.
 pub(crate) fn domain() -> Option<String> {
     static DOMAIN: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     DOMAIN
         .get_or_init(|| {
             let id = crate::scene::declared_id()?;
-            Some(if scratch() { format!("{id}.selftest{}", leg_tag()) } else { id })
+            if scratch() { scratch_domain(&id) } else { Some(id) }
         })
         .clone()
 }
 
-/// THE SCRATCH IS PER LEG WHERE THE RUNNER GIVES EACH LEG ITS OWN STATE
-/// HOME (docs/traps.md, 2026-09-09: a mac pool ran many legs of one app at
-/// once, every act one emptied the one shared tree, and taskspersist's
-/// open database went read-only under it). The data directory and the
-/// marker already live under `XDG_STATE_HOME`; the preference DOMAIN is a
-/// suite name with no directory in it, so it carries a tag derived from
-/// that home — empty when the runner set none, so a plain relaunch that
-/// inherits the leg's environment lands in the same suite.
-fn leg_tag() -> String {
-    if scratch_stores().is_some() {
-        return ".scratch".to_owned();
-    }
-    let Some(home) = std::env::var_os("XDG_STATE_HOME") else { return String::new() };
-    let home = home.to_string_lossy();
-    if home.is_empty() {
-        return String::new();
-    }
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in home.as_bytes() {
-        h ^= u64::from(*b);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    format!(".{h:016x}")
+/// THE SCRATCH STORE IS A PATH IN THE SCRATCH TREE, beside the data
+/// directory, so it is per leg wherever the runner gives each leg its own
+/// state home (docs/traps.md, 2026-09-09) and never a name in the user's
+/// preferences. UserDefaults takes an absolute suite name as the file's
+/// path (docs/traps.md, a scratch suite per leg piled up in
+/// ~/Library/Preferences).
+#[cfg(not(target_os = "android"))]
+fn scratch_domain(id: &str) -> Option<String> {
+    Some(scratch_tree(id)?.join("preferences").to_string_lossy().into_owned())
+}
+
+/// Android's SharedPreferences takes a name, inside the app's own sandbox.
+#[cfg(target_os = "android")]
+fn scratch_domain(id: &str) -> Option<String> {
+    Some(format!("{id}.selftest"))
+}
+
+fn scratch_tree(id: &str) -> Option<PathBuf> {
+    Some(selftest_session_root()?.join("selftest").join(id))
 }
 
 /// Whether this process's stores are the harness's scratch. `act2::arm`
@@ -139,7 +137,7 @@ fn data_dir_path() -> Option<PathBuf> {
     if scratch() {
         // THE SCRATCH DATA DIRECTORY (§4), under the same state home the
         // second act's marker uses.
-        return Some(selftest_session_root()?.join("selftest").join(id).join("data"));
+        return Some(scratch_tree(&id)?.join("data"));
     }
     real_data_dir(&id)
 }
@@ -342,7 +340,11 @@ mod backing {
     use std::sync::Mutex;
 
     fn path() -> Option<PathBuf> {
-        Some(config_home()?.join(super::domain()?).join("preferences"))
+        let domain = super::domain()?;
+        if super::scratch() {
+            return Some(PathBuf::from(domain));
+        }
+        Some(config_home()?.join(domain).join("preferences"))
     }
 
     #[cfg(target_os = "linux")]
@@ -537,26 +539,35 @@ mod backing {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn the_leg_tag_follows_the_state_home_and_is_empty_without_one() {
+    fn the_scratch_store_is_a_path_in_the_legs_own_scratch_tree() {
         let _serial = crate::assets::serially();
         let before = std::env::var_os("XDG_STATE_HOME");
         let scratch = std::env::var_os(ENV_SCRATCH);
+        let armed = std::env::var_os("KAYA_SELFTEST");
         unsafe { std::env::remove_var(ENV_SCRATCH) };
-        unsafe { std::env::remove_var("XDG_STATE_HOME") };
-        assert_eq!(super::leg_tag(), "");
+        unsafe { std::env::set_var("KAYA_SELFTEST", "restore") };
         unsafe { std::env::set_var("XDG_STATE_HOME", "/tmp/kaya-leg-a/state") };
-        let a = super::leg_tag();
+        let a = super::scratch_domain("dev.kaya.x");
         unsafe { std::env::set_var("XDG_STATE_HOME", "/tmp/kaya-leg-b/state") };
-        let b = super::leg_tag();
+        let b = super::scratch_domain("dev.kaya.x");
+        unsafe { std::env::remove_var("KAYA_SELFTEST") };
+        unsafe { std::env::set_var(ENV_SCRATCH, "/tmp/kaya-stores-x") };
+        let given = super::scratch_domain("dev.kaya.x");
+        match armed {
+            Some(v) => unsafe { std::env::set_var("KAYA_SELFTEST", v) },
+            None => unsafe { std::env::remove_var("KAYA_SELFTEST") },
+        }
         match before {
             Some(v) => unsafe { std::env::set_var("XDG_STATE_HOME", v) },
             None => unsafe { std::env::remove_var("XDG_STATE_HOME") },
         }
-        if let Some(v) = scratch {
-            unsafe { std::env::set_var(ENV_SCRATCH, v) };
+        match scratch {
+            Some(v) => unsafe { std::env::set_var(ENV_SCRATCH, v) },
+            None => unsafe { std::env::remove_var(ENV_SCRATCH) },
         }
-        assert!(a.starts_with('.') && a.len() == 17, "{a}");
-        assert_ne!(a, b, "two legs, two suites");
+        assert_eq!(a.as_deref(), Some("/tmp/kaya-leg-a/state/kaya/selftest/dev.kaya.x/preferences"));
+        assert_eq!(b.as_deref(), Some("/tmp/kaya-leg-b/state/kaya/selftest/dev.kaya.x/preferences"));
+        assert_eq!(given.as_deref(), Some("/tmp/kaya-stores-x/selftest/dev.kaya.x/preferences"));
     }
 
     /// docs/traps.md, a gate wrote the user's real session store.
@@ -569,7 +580,7 @@ mod tests {
         unsafe { std::env::remove_var(ENV_SCRATCH) };
         let unset = (super::scratch(), super::selftest_session_root());
         unsafe { std::env::set_var(ENV_SCRATCH, "/tmp/kaya-stores-x") };
-        let given = (super::scratch(), super::selftest_session_root(), super::leg_tag());
+        let given = (super::scratch(), super::selftest_session_root());
         unsafe { std::env::set_var("KAYA_SELFTEST", "restore") };
         let scene = super::selftest_session_root();
         match armed {
@@ -581,7 +592,7 @@ mod tests {
             None => unsafe { std::env::remove_var(ENV_SCRATCH) },
         }
         assert!(!unset.0, "no scene and no scratch: the real stores");
-        assert_eq!(given, (true, Some(PathBuf::from("/tmp/kaya-stores-x")), ".scratch".to_owned()));
+        assert_eq!(given, (true, Some(PathBuf::from("/tmp/kaya-stores-x"))));
         assert_ne!(scene, Some(PathBuf::from("/tmp/kaya-stores-x")), "a scene's own scratch wins");
     }
 

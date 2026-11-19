@@ -40,8 +40,8 @@ function wireGoldens(w: typeof W): [string, Uint8Array, string][] {
 
 if (isMainThread) {
   // SCRATCH BEFORE THE WORKER EXISTS. The prefs block below writes into
-  // the platform's own store, so `KAYA_SELFTEST` must move the domain to
-  // `<id>.selftest` before anything asks. IT HAS TO BE SET HERE: a
+  // the platform's own store, so `KAYA_SELFTEST` must move the store into
+  // the scratch tree before anything asks. IT HAS TO BE SET HERE: a
   // worker's `process.env` is a JS-level COPY (node:worker_threads),
   // while the main thread's assignment reaches the real environ, which
   // is the one the core reads through std::env (measured 2026-09-09 —
@@ -1625,8 +1625,8 @@ if (isMainThread) {
   // store on the spot, so these are the one runtime half of this file.
   //
   // `KAYA_SELFTEST` was set on the MAIN thread before this worker was
-  // spawned (see the branch above), so the domain is `<id>.selftest` and
-  // the data directory `<state>/selftest/<id>/data`.
+  // spawned (see the branch above), so the store and the data directory
+  // are under `<state>/selftest/<id>/`.
   const dataDir = kaya.appDataDir();
   check("appDataDir answers a real directory", dataDir.length > 0);
   check("and under the harness it is the SCRATCH one, never the app's", dataDir.includes("selftest"));

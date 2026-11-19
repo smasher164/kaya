@@ -1046,5 +1046,6 @@ binding-level semantics.
   identity's C17 (a lane bundle call without the flag, leg_argv without the
   refusal); chat-go with the real identity put back refused by run-leg naming
   the leg, and the gate sweep refused it first. The scratch suites
-  `<id>.selftest.<hash>` and the unbundled legs' per-executable domains are
-  docs/deferred.md's entry.
+  `<id>.selftest.<hash>` and the unbundled legs' per-executable domains were
+  docs/deferred.md's entry, closed 2026-11-19 (the store is a file in the
+  leg's state home; a bare executable runs under `dev.kaya.unbundled.lane`).

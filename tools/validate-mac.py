@@ -33,6 +33,7 @@ import guest_warnings
 import verdict as verdict_reader
 import lane_health
 import media_server
+import real_stores
 from host_lib import HOST_LIB, host_lib_stamp
 
 TEXT = {"text": True, "encoding": "utf-8", "errors": "replace"}
@@ -717,6 +718,14 @@ def _run_leg(name, argv, env, scene=None):
 
 
 def _leg_body(name, argv, env, scene=None):
+    STORES.began(name)
+    try:
+        _leg_acts(name, argv, env, scene)
+    finally:
+        STORES.ended(name)
+
+
+def _leg_acts(name, argv, env, scene=None):
     log = LEGS_DIR / f"{name}.log"
     t0 = time.monotonic()
     if os.environ.get("KAYA_RECORD"):
@@ -860,10 +869,12 @@ def queue_leg(name, argv, env, scene=None):
         scratch = FLIGHTREC_SCRATCH / name
         log = LEGS_DIR / f"{name}.log"
         entry = lane_health.MAC_APPS.leg_began(name)
+        STORES.began(name)
         with open(log, "w", encoding="utf-8", errors="replace") as lf:
             rc = FR.watched_leg(scratch, argv, leg_env, lf, echo=sys.stdout)
         lane_health.MAC_APPS.leg_ended(entry)
         secs = int(time.monotonic() - t0)
+        STORES.ended(name)
         verdict = "PASS" if rc == 0 else "FAIL"
         front = ("" if rc == 0
                  else " — " + flightrec_lane.mac_frontmost(ROOT))
@@ -1032,6 +1043,9 @@ if media_queued():
     MEDIA.enter_context(media_server.serving(
         log=ROOT / "target/mac-media-server.log"))
 
+# THE REAL-STORE WALL PER LEG (tools/lib/real_stores.py LegWatch), from
+# after the builds.
+STORES = real_stores.LegWatch()
 for _entry in lane.ORDER:
     _kind = _entry[0]
     if _entry == ("drain",):
@@ -1083,6 +1097,9 @@ if os.environ.get("KAYA_RECORD"):
 # The one-line verdict: suites accumulate failures rather than abort,
 # so a truncated log must still end with the answer.
 lane_health.mac_report("mac", "end")
+for sentence in STORES.refused:
+    print(f"validate-mac: {sentence}", file=sys.stderr)
+    status = 1
 if lane_health.MAC_APPS.refusals():
     print(f"validate-mac: {len(lane_health.MAC_APPS.refusals())} lane process(es) registered "
           f"with LaunchServices under another app's identity (IDENTITY ADOPTED above)",

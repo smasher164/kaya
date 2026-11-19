@@ -778,13 +778,16 @@ def selftest():
                   file=sys.stderr)
             ok = False
 
-    # J. a gate that writes a kaya app's real store is refused by name; one
-    # that writes a `.selftest` suite (scratch by name) is not.
+    # J. a gate that writes a kaya app's real store, a `.selftest` suite or
+    # a domain named after a mac leg's bare executable is refused by name;
+    # one that writes a lane bundle's `.lane` domain (scratch by name) is not.
     with tempfile.TemporaryDirectory(prefix="kaya-gates-stores-") as tmp:
         under = [pathlib.Path(tmp)]
         os.environ["KAYA_GATES_SELFTEST_STORE"] = tmp
         os.environ["KAYA_GATES_SELFTEST_REAL"] = "dev.kaya.wall/kaya-session/session.v1"
-        os.environ["KAYA_GATES_SELFTEST_SUITE"] = "dev.kaya.wall.selftest.scratch.plist"
+        os.environ["KAYA_GATES_SELFTEST_SUITE"] = "dev.kaya.wall.lane.plist"
+        os.environ["KAYA_GATES_SELFTEST_LEAKS"] = "dev.kaya.wall.selftest.plist"
+        os.environ["KAYA_GATES_SELFTEST_EXE"] = "kaya-go.plist"
 
         def writes(var):
             return ["python3", "-c",
@@ -793,6 +796,8 @@ def selftest():
                     "p.write_text('x')"]
         real = [("a", ["true"], False, "x"),
                 ("writes-real", writes("KAYA_GATES_SELFTEST_REAL"), False, "x")]
+        leaks = [("writes-suite", writes("KAYA_GATES_SELFTEST_LEAKS"), False, "x"),
+                 ("writes-exe", writes("KAYA_GATES_SELFTEST_EXE"), False, "x")]
         scratch = [("writes-scratch", writes("KAYA_GATES_SELFTEST_SUITE"), False, "x")]
         said = io.StringIO()
         with contextlib.redirect_stderr(said):
@@ -803,12 +808,22 @@ def selftest():
             print("gates: SELF-TEST FAIL — a gate that wrote a kaya app's real store was not "
                   "refused by name", file=sys.stderr)
             ok = False
+        said = io.StringIO()
+        with contextlib.redirect_stderr(said):
+            verdict = sweep(leaks, "selftest-J1", stores_under=under)
+        print(f"selftest-J1: {said.getvalue().strip()[:400]}")
+        if (verdict or "dev.kaya.wall.selftest.plist" not in said.getvalue()
+                or "kaya-go.plist" not in said.getvalue()):
+            print("gates: SELF-TEST FAIL — a gate that left a .selftest suite or a bare "
+                  "executable's domain was not refused by name", file=sys.stderr)
+            ok = False
         if not sweep(scratch, "selftest-J0", stores_under=under):
-            print("gates: SELF-TEST FAIL — a gate that wrote a .selftest suite was refused",
+            print("gates: SELF-TEST FAIL — a gate that wrote a .lane domain was refused",
                   file=sys.stderr)
             ok = False
         for var in ("KAYA_GATES_SELFTEST_STORE", "KAYA_GATES_SELFTEST_REAL",
-                    "KAYA_GATES_SELFTEST_SUITE"):
+                    "KAYA_GATES_SELFTEST_SUITE", "KAYA_GATES_SELFTEST_LEAKS",
+                    "KAYA_GATES_SELFTEST_EXE"):
             del os.environ[var]
 
     if ok:
@@ -816,7 +831,8 @@ def selftest():
               "a gate hung past its wall, "
               "a failing gate, a missing script, a gate that relinked the "
               "host libkaya and one that relinked the lanes' copy from a sweep "
-              "target of its own, and a gate that wrote a kaya app's real store")
+              "target of its own, a gate that wrote a kaya app's real store, and one "
+              "that left a .selftest suite or a bare executable's domain")
     return ok
 
 

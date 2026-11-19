@@ -3851,9 +3851,9 @@ check("route 0 is delivered and SILENT — the core announced that miss",
 # never enters the core, but a pref call reaches the platform's own store
 # on the spot, so these are the one runtime half of this file.
 #
-# SCRATCH FIRST. `KAYA_SELFTEST` moves the pref domain to `<id>.selftest`
-# and the data directory to `<state>/selftest/<id>/data` (prefs.rs's
-# `domain`/`data_dir_path`), so a gate run cannot touch the developer's
+# SCRATCH FIRST. `KAYA_SELFTEST` moves the pref store and the data
+# directory under `<state>/selftest/<id>/` (prefs.rs's
+# `scratch_domain`/`data_dir_path`), so a gate run cannot touch the developer's
 # own settings. Set HERE and not at the top of the file: the domain is
 # resolved once, on first use, and nothing above this line asks.
 os.environ["KAYA_SELFTEST"] = "kaya_app_checks"

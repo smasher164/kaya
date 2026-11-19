@@ -4,6 +4,47 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## Scratch suites and bare executables' domains piled up in ~/Library/Preferences (measured 2026-11-19)
+
+Every mac act one made a `<id>.selftest.<fnv of the leg's state home>` suite
+that nothing deleted, and every leg run as a bare executable wrote AppKit's
+domain under the executable's name (`kaya-go`, `confirm.exe`, `sections`):
+1154 such files on the maintainer's Mac and 338 `%LOCALAPPDATA%\dev.kaya*.selftest*`
+directories on the Windows VM, removed 2026-11-19 (backups in
+kaya-handoffs/charges/prefs-cleanup-backup*.{tar.gz,zip}). Measured with an
+unbundled probe before choosing the fix:
+- `CFFIXED_USER_HOME`, and `HOME` with it, move NSHomeDirectory but NOT
+  preferences: cfprefsd still wrote ~/Library/Preferences. `__CFBundleIdentifier`
+  in the environment changes nothing.
+- Swizzling `+[NSUserDefaults standardUserDefaults]` catches window frames,
+  split views and the colour panel's mode, but `NSToolbar Configuration
+  com.apple.NSColorPanel` still reaches the executable's domain (AppKit goes
+  through CFPreferences directly).
+- `UserDefaults(suiteName:)` with an ABSOLUTE PATH writes `<path>.plist`
+  and creates its parent directories; nothing appears in
+  ~/Library/Preferences, and after the directory is removed a fresh read
+  sees nothing (cfprefsd writes nothing back). So the core's scratch store
+  is `<state>/selftest/<id>/preferences` (prefs.rs `scratch_domain`), the
+  key file's path on Linux and Windows too.
+- An `Info.plist` holding only `CFBundleIdentifier`, placed BESIDE a bare
+  executable, makes that the main bundle's identifier and so the standard
+  domain; bundlePath, resourcePath, the process name and
+  NSRunningApplication's localizedName are unchanged, and lib.rs's
+  `bundled_executable` (the notification capability) reads the path, not the
+  id. The mac lane writes one beside every bare leg executable
+  (lanes/mac.py `give_lane_identity`, `dev.kaya.unbundled.lane`).
+- cfprefsd writes a NEW domain's file at once, but a change to an existing
+  file reaches the disk 10-13 s later (three trials). A wall that reads files
+  sees a created domain at the leg that made it and a changed one late, which
+  is why the first watched negative passed: a leftover empty suite of the same
+  name already existed.
+Guards: real_stores no longer exempts `.selftest` and watches every name a
+bare leg executable would take; validate-mac and run-leg look after every
+leg (LegWatch). Watched: the scratch path cut to `<id>.selftest`, run-leg
+windowmem rust refused "windowmem-rust-swiftui CHANGED THE USER'S REAL kaya
+STORE: created .../dev.kaya.aurora.notes.selftest.plist"; give_lane_identity
+cut, leg_argv refused restoredocs-ocaml naming the domain `restoredocs.exe`.
+
 ## GTK's table park spun the main loop inside the core's borrow (measured 2026-11-18)
 
 The linux music_restore leg's act two died with `RefCell already mutably
@@ -278,9 +319,9 @@ directory, removed by the run that made it) to everything a gate, test or
 lane starts, and the core (crates/kaya/src/prefs.rs, `scratch()`) keeps a
 process's preferences, data directory, session file and reference ledger
 under it whenever no scene is armed; a scene's own scratch wins. The probe's
-suite is now `dev.kaya.check-window-memory.selftest`. The wall: gates.py
-and validate-all refuse a verdict when anything under the real store roots
-for a `dev.kaya*` id moved during the run (docs/gates.md, How the sweep
+suite is now a path in a temporary directory (since 2026-11-19). The wall:
+gates.py and validate-all refuse a verdict when anything under the real store
+roots for a `dev.kaya*` id moved during the run (docs/gates.md, How the sweep
 runs). The pre-existing `tasks.sqlite` in that directory (2026-09-09) was
 left alone.
 
@@ -12685,10 +12726,11 @@ already give each leg its own XDG homes; Android and iOS isolate per
 device. The rule: A RUNNER GIVES EVERY LEG ITS OWN STATE HOME — the mac
 lane's leg_env sets `XDG_STATE_HOME=target/mac-legs/<leg>/state`, act2.rs
 honors the variable on Windows as it did on macOS and Linux, and the
-core's preference domain under the harness carries a tag derived from
-that home (`<id>.selftest.<fnv64>`), since a UserDefaults suite has no
-directory to live under; a plain relaunch inherits the leg's environment
-and lands in the same suite. The act-two marker moves with it, which is
+core's preference store under the harness is a file under that home (a
+UserDefaults suite named by its absolute path; until 2026-11-19 a suite
+NAME tagged with a hash of the home: "Scratch suites and bare executables'
+domains piled up in ~/Library/Preferences"); a plain relaunch inherits the leg's environment
+and lands in the same file. The act-two marker moves with it, which is
 also what keeps `tasks` and `taskspersist` — two relaunch scenes of one
 app — from consuming each other's marker in the pool.
 

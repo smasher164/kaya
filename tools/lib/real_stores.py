@@ -2,9 +2,11 @@
 none of them (docs/traps.md, a gate wrote the user's real session store).
 
 Every root an app's own store lives under (prefs, data, session, reference
-ledger) on the host this runs on, filtered to `dev.kaya*` entries; a
-`.selftest` preference suite and a lane bundle's `.lane` domain are the
-harness's scratch by name and are left out. A snapshot is {path: (kind, size, mtime_ns)}, a preference plist's by
+ledger) on the host this runs on, filtered to `dev.kaya*` entries and the
+domains AppKit names after a mac leg's bare executable; a lane bundle's
+`.lane` domain is the harness's scratch by name and is left out. A
+`.selftest` suite is NOT: the scratch store lives in the scratch tree
+(crates/kaya/src/prefs.rs scratch_domain), so one here is a leak. A snapshot is {path: (kind, size, mtime_ns)}, a preference plist's by
 its parsed content instead, since cfprefsd rewrites one whose content a run
 left as it found it (the mac lane's windowmem sentinel plants and removes a
 key by design; docs/traps.md, AppKit's frame autosave); `moved` names what a
@@ -59,12 +61,28 @@ def scratch_bundle(name):
     return stem.endswith(LANE_SUFFIX)
 
 
+def executable_domains():
+    """The plist names AppKit gives a mac leg run as a bare executable: every
+    guest stem, its OCaml `.exe`, kaya-go and the four hosts (lanes/mac.py
+    give_lane_identity is what keeps them from being written)."""
+    import lanes.mac as lane
+    stems = {lane.guest_stem(scene) for _name, scene, _lang in lane.legs()}
+    names = stems | {f"{s}.exe" for s in stems} | {"kaya-go"} | set(lane.HOSTS.values())
+    return {f"{n}.plist" for n in names}
+
+
+def watched(name, exe_domains):
+    if name in exe_domains:
+        return True
+    return name.startswith(PREFIX) and not scratch_bundle(name)
+
+
 def snapshot(under=None):
     seen = {}
+    exe_domains = executable_domains()
     for root in roots() if under is None else under:
         try:
-            tops = [p for p in root.iterdir() if p.name.startswith(PREFIX)
-                    and ".selftest" not in p.name and not scratch_bundle(p.name)]
+            tops = [p for p in root.iterdir() if watched(p.name, exe_domains)]
         except OSError:
             continue
         for top in tops:
@@ -81,6 +99,38 @@ def snapshot(under=None):
                     if e is not None:
                         seen[str(p)] = e
     return seen
+
+
+class LegWatch:
+    """The wall per leg on a lane that runs legs side by side (validate-mac,
+    run-leg): a store that moved by a leg's end is named with every leg that
+    ran since the last look, the one ending first."""
+
+    def __init__(self):
+        import threading
+        self.lock = threading.Lock()
+        self.snap = snapshot()
+        self.running = set()
+        self.since = set()
+        self.refused = []
+
+    def began(self, name):
+        with self.lock:
+            self.running.add(name)
+            self.since.add(name)
+
+    def ended(self, name):
+        with self.lock:
+            self.running.discard(name)
+            now = snapshot()
+            changes = moved(self.snap, now)
+            if changes:
+                self.snap = now
+                beside = sorted(self.since - {name})
+                self.refused.append(refusal(
+                    f"{name}" + (f" (or {', '.join(beside)}, which ran since the last look)"
+                                 if beside else ""), changes))
+            self.since = set(self.running)
 
 
 def moved(before, after):

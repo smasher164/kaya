@@ -17594,7 +17594,7 @@ KEY: expect_tint none, caption[t8], iOS dark tint read, 8D8D93, secondaryLabel
   20261105T104330Z-081707) and green after on all five lanes
   (`validate-all --only tints,tasks`, 40 legs).
 
-## OPEN — Mac scene runs leave preference domains behind (found 2026-11-18, the real-store ruling)
+## ~~OPEN — Mac scene runs leave preference domains behind (found 2026-11-18, the real-store ruling)~~ COMPLETE 2026-11-19: the core's scratch store is a file in the leg's own state home (`<state>/selftest/<id>/preferences`, a UserDefaults suite named by its absolute path; the key file on Linux and Windows; Android keeps `<id>.selftest` in its sandbox), so no suite is ever created among the user's preferences and the hash tag is gone; every bare mac leg executable gets an Info.plist beside it naming `dev.kaya.unbundled.lane` (lanes/mac.py give_lane_identity), and leg_argv refuses a bare one without it, naming the leg. The real-store wall no longer exempts `.selftest`, watches every name a bare leg executable would take, and looks after every leg on validate-mac and run-leg. 1154 leftovers removed from ~/Library/Preferences and 338 `.selftest` directories from the Windows VM's LOCALAPPDATA, backups in kaya-handoffs/charges (docs/traps.md, "Scratch suites and bare executables' domains piled up in ~/Library/Preferences")
 
 KEY: selftest suite, .selftest.<hash>.plist, per-executable domain, kaya-go.plist, LANE_SUFFIX, scratch preference domain
 - The ruling (RULED A, docs/restoration-plan.md §9) keeps scene runs out of
@@ -17614,3 +17614,16 @@ KEY: selftest suite, .selftest.<hash>.plist, per-executable domain, kaya-go.plis
 - Closing this means: whoever creates a suite deletes it (proven by a leg
   that leaves none), and no unbundled leg writes a domain under its
   executable's name. The files already there are the maintainer's to remove.
+
+## OPEN — the Windows VM's real session store was written on 2026-11-18 (found 2026-11-19, the prefs cleanup)
+
+KEY: real session store on Windows, LOCALAPPDATA\dev.kaya.aurora.notes\kaya-session, session.v1, real-store wall on the guest
+- `%LOCALAPPDATA%\dev.kaya.aurora.notes\kaya-session\session.v1` on the
+  Windows VM is dated 2026-11-18 11:35 (VM time), writer pid 14300, one
+  window with `items` and `rows` column facets ("x", "a"). That is the
+  declared app's REAL session store; a lane or a test wrote it without the
+  harness's scratch, and nothing on the guest watches those roots
+  (tools/lib/real_stores.py runs on the host only). Left in place.
+- Closing this means: find the writer (the facet names point at a scene or
+  a unit test with two columns), and put the real-store wall on the guest
+  (deploy-win before and after its legs and its unit tests), watched red.

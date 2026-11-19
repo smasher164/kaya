@@ -403,8 +403,11 @@ enum KayaWindowMemoryProbe {
             optedOut.frame == held && kayaFrameMemory[10] == nil)
 
         // --- AppKit's host-domain autosave: forgotten, the rest kept. ---
-        // A `.selftest` suite: scratch by name (gates.py's real-store wall).
-        let suite = "dev.kaya.check-window-memory.selftest"
+        // A suite at a path in scratch, never a name among the user's
+        // preferences (gates.py's real-store wall).
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kaya-check-window-memory-\(getpid())")
+        let suite = scratch.appendingPathComponent("host").path
         let host = UserDefaults(suiteName: suite)!
         let mine = [
             "NSWindow Frame main.KayaRoot-1-AppWindow-1",
@@ -430,5 +433,6 @@ enum KayaWindowMemoryProbe {
         expect("a frame that is not kaya's window's is kept",
             theirs.allSatisfy { host.object(forKey: $0) != nil })
         host.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: scratch)
     }
 }

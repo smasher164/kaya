@@ -18988,8 +18988,8 @@ private func kayaRunScript(_ script: String) {
             case "expect_pref", "expect_no_pref":
                 // THE PLATFORM'S OWN STORE, RE-OPENED (docs/tasks-s4-plan.md
                 // §4): UserDefaults for this process's domain, which the core
-                // names in KAYA_PREF_DOMAIN so the rule `<id>` / `<id>.selftest`
-                // is spelled once (crates/kaya/src/prefs.rs).
+                // names in KAYA_PREF_DOMAIN so the rule (`<id>`, or the scratch
+                // file's path) is spelled once (crates/kaya/src/prefs.rs).
                 let prefKey = String(parts[1])
                 let held = kayaPrefRead(prefKey)
                 if parts[0] == "expect_no_pref" {

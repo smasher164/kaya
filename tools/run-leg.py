@@ -36,6 +36,7 @@ import flightrec_lane
 import content_fresh
 import guest_warnings
 import media_server
+import real_stores
 from lanes import mac as lane
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
@@ -155,6 +156,10 @@ if _override and _override != env["KAYA_SELFTEST_SCRIPT"]:
 # a `relaunch` ends act one at it, and the lane's door is the carve-out.
 # tools/lib/lanes/mac.py's own functions, so a hand run and the lane push
 # the same door.
+name = lane.leg_name(scene, lang) + ("-" + appearance if appearance else "")
+# Before clear_act2, which plants windowmem's sentinel in the real domain.
+STORES = real_stores.LegWatch()
+STORES.began(name)
 second = scene in lane.RELAUNCH_DOOR
 if second:
     lane.clear_act2(ROOT, env, scene)
@@ -168,7 +173,6 @@ if second:
 # together).
 FR = flightrec_lane.MacRecorder(ROOT)
 SCRATCH = pathlib.Path(tempfile.mkdtemp())
-name = lane.leg_name(scene, lang) + ("-" + appearance if appearance else "")
 
 
 def kaya_teardown():
@@ -219,6 +223,10 @@ if second:
         sys.stdout.write(
             log.read_text(encoding="utf-8", errors="replace")[before:])
 served.close()
+STORES.ended(name)
+for _sentence in STORES.refused:
+    print(f"run-leg: {_sentence}", file=sys.stderr)
+    rc = rc or 1
 if rc != 0:
     # AT THE MOMENT OF THE RED, as the lane prints it: a leg driving the
     # platform's own input dies with every press swallowed when something
