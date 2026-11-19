@@ -73,6 +73,7 @@ impl NumberRange {
         None
     }
 
+    #[cfg(test)]
     pub(crate) fn check(&self, who: &str) {
         if let Some(message) = self.refusal(who) { panic!("{message}"); }
     }

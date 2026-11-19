@@ -136,7 +136,7 @@ GUEST_STEM = {"restorefresh": "restore", "listdetail": "split", "taskspersist": 
               "media_reader": "media", "capture_denied": "capture", "colorpanel": "colorpicker",
               "music_home": "music", "music_playlist": "music", "music_header": "music",
               "music_dock": "music", "music_artist": "music", "music_search": "music",
-              "music_context": "music", "richdocax": "richdoc"}
+              "music_context": "music", "music_restore": "music", "richdocax": "richdoc"}
 
 # THE LOCALE A SCENE RUNS UNDER (docs/compliance-plan.md §4): the knob the
 # leg carries, so the same guest is read under German and Arabic; the
@@ -246,7 +246,9 @@ HAND_QUEUED = {"editor": "go", "editorrestore": "go", "chat": "go", "chatrestore
                "music_home": "python", "music_playlist": "python",
                "music_header": "python", "music_dock": "python",
                "music_artist": "python", "music_search": "python",
-               "music_context": "python"}
+               "music_context": "python",
+               # The player across a relaunch (docs/restoration-plan.md SR17).
+               "music_restore": "python"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -437,6 +439,7 @@ ORDER = [
     ("music_artist", ("python",)),
     ("music_search", ("python",)),
     ("music_context", ("python",)),
+    ("music_restore", ("python",)),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",
@@ -1363,6 +1366,7 @@ RELAUNCH_DOOR = {"tasks": "launch-notification", "taskspersist": "launch",
                  "restoredocs": "resume",
                  "editorrestore": "resume",
                  "chatrestore": "resume",
+                 "music_restore": "resume",
                  # The user's dismissal: the same quit with the setting off.
                  "restorefresh": "fresh",
                  # THE LINK DOOR (docs/app-links-plan.md L5): `open` hands
@@ -1380,11 +1384,11 @@ def act2_dir(root, env=None):
     the LEG's own state home (leg_env sets one per leg — docs/traps.md,
     the pooled-scratch race of 2026-09-09) and the identity manifest's
     `id`, through tools/ONE manifest reader."""
-    from packaging.identity import load
+    from packaging.identity import load, manifest_in
     source = env if env is not None else os.environ
     state = source.get("XDG_STATE_HOME") or os.path.join(
         os.path.expanduser("~"), ".local/state")
-    return pathlib.Path(state) / "kaya" / "act2" / load(root).id
+    return pathlib.Path(state) / "kaya" / "act2" / load(root, manifest_in(source)).id
 
 
 def clear_act2(root, env=None, scene=None):

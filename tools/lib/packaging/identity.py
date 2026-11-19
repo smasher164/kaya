@@ -39,6 +39,14 @@ def manifest_for(stem):
     return APPS.get(stem, MANIFEST)
 
 
+def manifest_in(env):
+    """The declaration a process with this environment reads: the file
+    IDENTITY_VAR names, or MANIFEST. A runner that finds an app's act-two
+    marker or stages its desktop entry asks this, never MANIFEST alone."""
+    named = env.get(IDENTITY_VAR)
+    return ASSET_ROOT + named if named else MANIFEST
+
+
 def env_for(stem):
     """The runner's environment for a guest whose app has its own file:
     the asset name the core resolves, or nothing for the default."""

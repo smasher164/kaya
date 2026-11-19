@@ -3920,7 +3920,7 @@ dirty-state titles, text ranges and find — and the struck bullets
 below are that record. The forcing framing is DISCHARGED: no open item
 below waits on "the editor" as its trigger; each open bullet names its
 own trigger (the bookmark/persistence bullet's RECENT FILES trigger,
-docs/editor-plan.md §3, is now one the shipped editor can fire).
+docs/editor-plan.md §3, fired: the editor's Open Recent shipped 2026-11-18).
 The SECOND forcing artifact was the PORTFOLIO (guests/python/
 portfolio.py), which drove tables, canvas, adaptive layout and the
 grouped iOS tier through 2026-08-30. The THIRD is the TASK MANAGER
@@ -4058,8 +4058,17 @@ unpicked.
     REQUIRED regex is exactly a signature ending in `;` — holds all
     three for GTK and WinUI the way the entry asked.
 
-- **No bookmark/persistence machinery: a picked file cannot be reopened
-  across restarts** (deferred by docs/save-plan.md §3, which said
+- ~~**No bookmark/persistence machinery: a picked file cannot be reopened
+  across restarts**~~ COMPLETE 2026-11-18: built as docs/restoration-plan.md
+  SR11 to SR13 rule (cbd836f7, then each platform through 9ac0991e): a picked
+  file mints a `kaya-ref1:` token (a bookmark on macOS and iOS, a persisted URI
+  grant on Android, the path on GTK and Windows), `redeem` answers a picked
+  handle or a refusal (missing, revoked, provider gone, foreign, the cap of 128
+  counted durably), `forget` releases it, in all nine bindings and the C floor;
+  the references scene runs on five lanes and the editor's Open Recent redeems
+  at launch (6d94f8dc). Filtered runs only: the full plain matrix waits on the
+  maintainer's real-store ruling (docs/traps.md, the open panel's last
+  directory). The entry as filed follows. (deferred by docs/save-plan.md §3, which said
   "ledger it"; written down here 2026-08-17, which is when someone
   checked and found the line missing). kaya hands the guest a HANDLE
   for a file the user chose and the handle dies with the process:
@@ -4080,8 +4089,8 @@ unpicked.
   persistable grant for its own crash path, and a leftover backup's
   document handle reaches the relaunched process through it
   (docs/rich-document-plan.md §4.1), but no app can ask for one.
-  DESIGNED 2026-11-17 in docs/restoration-plan.md SR11 to SR13 (rulings
-  open): a picked file mints a text token, `redeem` answers a picked handle
+  DESIGNED 2026-11-17 in docs/restoration-plan.md SR11 to SR13 (ruled the
+  same night, built 2026-11-18): a picked file mints a text token, `redeem` answers a picked handle
   or a why-not, `forget` releases it, and a uniform cap of 128.
   KEY: bookmark, persistence, security-scoped, persistable URI, recent
   files, reopen across restarts, durable reference, restoration-plan
@@ -5167,7 +5176,18 @@ unpicked.
   assert on a container the uniqueness convention cannot name — the
   layout scene already qualifies whenever its rows deserve assertions.
 
-- **Session restoration — core-owned, and cheap only here** (from the
+- ~~**Session restoration — core-owned, and cheap only here**~~ COMPLETE
+  2026-11-18: built as docs/restoration-plan.md rules (d68e975e through the
+  music player's slice): kaya restores a textarea's caret and a named For's
+  top row by `a11y_id`, the app restores its model through the session store
+  and recreates its windows and documents from `restored_windows()`, the
+  platform decides resume or fresh on all five lanes, in all nine bindings and
+  the C floor; the restore, restoredocs, references and restorefresh scenes
+  run on five lanes, editorrestore and chatrestore on five, music_restore on
+  four (Android's waits on the python host's identity in a restored activity:
+  restoration-build notes). What the build settled beyond the rulings is the
+  plan's §9. Filtered runs only: the full plain matrix waits on the
+  maintainer's real-store ruling. The entry as filed follows. (from the
   2026-07-24 survey; TRIGGER SATISFIED by the text editor). THE UNDO
   HALF OF THIS ENTRY IS DONE: the design pass it demanded happened, the
   depth slice landed 2026-08-04 and the completion pass closed its
@@ -5188,13 +5208,13 @@ unpicked.
   emitted during an undo. Do the design pass before any protocol work;
   the machinery being present is not the same as the semantics being
   obvious.
-  THE DESIGN PASS IS docs/restoration-plan.md (PROPOSED 2026-11-17, rulings
-  SR1 to SR18 open), and it corrects this entry's premise: the core holds no
+  THE DESIGN PASS IS docs/restoration-plan.md (ruled 2026-11-17, built
+  2026-11-18), and it corrects this entry's premise: the core holds no
   scroll, caret, typed text or selection, so "serialize the core scene"
   saves derived signals and misses what the user sees. Its recommendation:
   kaya restores presentation state (scroll, caret, dividers, the frame) by
   `a11y_id` on its own, and the app restores its model through a session
-  store; this entry closes when that build does.
+  store; this entry closed when that build did.
   KEY: session restoration, restore, session store, restored(), relaunch
   resume, restoration-plan
 - **The system-integration floor** (from the survey; the editor

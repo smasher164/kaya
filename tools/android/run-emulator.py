@@ -2086,7 +2086,7 @@ def run_apk_on(serial, name, apk, component, script, extras,
     # leaves both files behind and a stale verdict would answer for this
     # run (docs/tasks-s9-plan.md R6).
     if two_act:
-        run_as(serial, package, "rm", "-rf", ACT2_REL)
+        run_as(serial, package, "rm", "-rf", act2_rel(name))
         # A safe save's backups belong to the leg that left them, and a
         # second act counts the ones it is handed (saferestore.steps).
         run_as(serial, package, "rm", "-rf", "files/kaya-safesave")
@@ -3633,7 +3633,12 @@ def reply_notification(serial, title, text, log):
 # under the app's private data, with `<id>` the DECLARED reverse-DNS id
 # and not the lane's package. run-as is the door — the same one the verb
 # trace comes back through, and the debug APKs are debuggable.
-ACT2_REL = f"files/act2/{DECLARED.id}"
+def act2_rel(name):
+    """`files/act2/<id>` for the leg's app: the declaration its guest
+    reads (music's own, every other guest MANIFEST's)."""
+    scene = name.rsplit("-", 1)[0]
+    stem = lane.PYTHON_GUESTS.get(scene, scene) if name.endswith("-python") else scene
+    return f"files/act2/{app_identity.load(ROOT, app_identity.manifest_for(stem)).id}"
 # How long act one's process has to be GONE after its verdict (its own
 # exit grace is 3s), and how long the relaunched process has to answer.
 ACT2_GONE_S = 20.0
@@ -3867,7 +3872,7 @@ def act_two_verdict(serial, name, package, log):
         # non-empty text read the MISS as the answer (measured
         # 2026-09-08, and it is what the first hand run reported).
         text, _rc = run_as(serial, package, "cat",
-                           f"{ACT2_REL}/act2.verdict")
+                           f"{act2_rel(name)}/act2.verdict")
         for line in text.replace("\r", "").splitlines():
             if line.startswith("KAYA_SELFTEST:"):
                 return line.strip()
@@ -3878,7 +3883,7 @@ def act_two_verdict(serial, name, package, log):
     # DIRECTORY IS LISTED rather than the marker cat'd — a cat exits 0
     # either way (see run_as), so a code-keyed sentence here would say
     # the same thing for both causes.
-    listing, _rc = run_as(serial, package, "ls", ACT2_REL)
+    listing, _rc = run_as(serial, package, "ls", act2_rel(name))
     held = listing.replace("\r", "").split()
     seen = ("the marker is still on disk, so nothing consumed it"
             if "marker" in held else

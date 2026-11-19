@@ -316,7 +316,7 @@ LEGS = {
 PYTHON_GUESTS = {"portfolio": "portfolio", "varied": "varied", "music_home": "music",
                  "music_playlist": "music", "music_header": "music", "music_dock": "music",
                  "music_artist": "music", "music_search": "music", "music_context": "music",
-                 "restore": "restore", "restoredocs": "restoredocs", "references": "references"}
+                 "music_restore": "music", "restore": "restore", "restoredocs": "restoredocs", "references": "references"}
 
 # The locale a scene runs under, the knob the leg carries as an intent
 # extra (docs/compliance-plan.md §4); the reads ask the platform, never
@@ -352,6 +352,7 @@ RELAUNCH_DOOR = {"tasks": "notify_tap", "taskspersist": "launch",
                  # parks, HOME stops it, `am kill` ends it with its task kept.
                  "restore": "resume", "restoredocs": "resume", "references": "resume",
                  "editorrestore": "resume", "chatrestore": "resume",
+                 "music_restore": "resume",
                  # The user's dismissal: act one leaves with its task removed,
                  # and the plain door's force-stop hands a null saved state.
                  "restorefresh": "fresh"}
@@ -487,6 +488,12 @@ MODS = {
                         "expect_sheet_detent medium;dismiss_sheet;"
                         "expect_sheets 0;"},
     "editor": {"cut": ("close_window", "expect_document_dirty", "")},
+    # The scrubber sits in the full player's sheet and the library in its
+    # own section, so the position and the library row are the desktops'.
+    "music_restore": {"drop": ((("set_value slider@progress", "expect label@elapsed"),
+                                "expect_restored", "the phones' scrubber is the full player's"),
+                               (("expect label@remaining", "expect_selected row@saved[201715]"),
+                                "expect_tint", "the phones' library is its own section"))},
     # A PHONE SHOWS ITS REGIONS IN THE DOCUMENTS LIST AND HAS NO WINDOWS
     # (docs/doctabs-plan.md §1.6): the desktops' tail goes, and the phone ends
     # on its own empty state, Q2's carve-out.
@@ -596,7 +603,10 @@ IME_SCENES = ["ranges", "richtext"]
 # phone has; split/panes drive resize_window, which this host rejects
 # by design (the system owns surfaces; DESIGN.md, Windows).
 DESKTOP_ONLY_SCENES = ["window", "panels", "split", "panes", "windowmem", "auxquit"]
-UNWIRED_SCENES: list[str] = []
+# music_restore: the python host's restored activity maps no launch extras
+# (KayaEnv.fromIntent), so act two loses KAYA_IDENTITY, reads the default
+# app's id and never finds the music app's marker (restoration-build notes).
+UNWIRED_SCENES: list[str] = ["music_restore"]
 
 
 def scene_of(leg):

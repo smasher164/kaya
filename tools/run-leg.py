@@ -194,10 +194,12 @@ print(f"run-leg: {scene}-{lang}: timeout 120 {' '.join(argv)}", flush=True)
 log = ROOT / f"target/run-leg-{scene}-{lang}.log"
 log.parent.mkdir(parents=True, exist_ok=True)
 t0 = time.monotonic()
-# The media suite's server, the lane's way (tools/lib/media_server.py).
-served = (media_server.serving(log=ROOT / "target/run-leg-media-server.log")
-          if media_server.serves(scene) else contextlib.nullcontext())
-with served, open(log, "w", encoding="utf-8", errors="replace") as lf:
+# The media suite's server, the lane's way (tools/lib/media_server.py), up
+# through both acts as validate-mac keeps it up through the lane.
+served = contextlib.ExitStack()
+if media_server.serves(scene):
+    served.enter_context(media_server.serving(log=ROOT / "target/run-leg-media-server.log"))
+with open(log, "w", encoding="utf-8", errors="replace") as lf:
     rc = FR.watched_leg(SCRATCH / name, argv, env, lf, cwd=ROOT,
                         echo=sys.stdout)
 if second:
@@ -216,6 +218,7 @@ if second:
         rc = lane.second_act(ROOT, scene, argv, env, log)
         sys.stdout.write(
             log.read_text(encoding="utf-8", errors="replace")[before:])
+served.close()
 if rc != 0:
     # AT THE MOMENT OF THE RED, as the lane prints it: a leg driving the
     # platform's own input dies with every press swallowed when something

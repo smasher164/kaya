@@ -290,7 +290,11 @@ songs = {}
 album_keys = {}
 playback = {"key": None, "album": [], "order": [], "at": 0, "start": False,
             "shuffle": False, "repeat": "off", "seconds": 0, "ms": 0,
-            "muted": False}
+            "muted": False, "resume_ms": None}
+# The page on top, the playing track, its position and the queue come back
+# after a relaunch from the app's session store (docs/restoration-plan.md SR17).
+kept = kaya.app_session()
+QUEUE_FIELDS = ("key", "album", "order", "at", "shuffle", "repeat")
 def stored_likes() -> list[dict[str, Any]]:
     """The liked tracks, newest first. A list kept before Liked Songs holds
     only the tracks' ids, which the catalogue fills in (migrate_likes)."""
@@ -314,6 +318,68 @@ dock_ready = {"built": False}
 home_state = {"shown": False, "asked": None}
 live = {"play": [], "repeat": [], "sheet": False}
 entries = iter(range(FIRST_ALBUM_ENTRY, 1 << 32))
+
+
+def keep_queue():
+    if playback["key"] is None:
+        kept.remove("queue")
+        return
+    held = {playback["key"], *playback["album"], *playback["order"]}
+    kept.set("queue", json.dumps({**{f: playback[f] for f in QUEUE_FIELDS},
+                                  "songs": {k: songs[k] for k in held if k in songs}}))
+
+
+def keep_page(surface):
+    """The top album, Liked Songs or Search page of each surface."""
+    try:
+        pages = json.loads(kept.get("pages", "{}"))
+    except ValueError:
+        pages = {}
+    top = next((p for p in reversed(stacks.get(surface, []))
+                if p["kind"] in ("album", "liked", "search")), None)
+    if top is None:
+        pages.pop(str(surface), None)
+    elif top["kind"] == "album":
+        if top["id"] not in known:
+            return
+        pages[str(surface)] = {"kind": "album", "album": known[top["id"]]}
+    else:
+        pages[str(surface)] = {"kind": top["kind"]}
+    kept.set("pages", json.dumps(pages))
+
+
+def restore_session():
+    """What the last launch left (docs/restoration-plan.md SR17), once Home
+    is under it."""
+    primary = next((w for w in kaya.restored_windows() if w.id == 0), None)
+    if not desktop and primary is not None and primary.section is not None:
+        kaya.select_section(primary.section)
+    try:
+        pages = json.loads(kept.get("pages", "{}"))
+        queue = json.loads(kept.get("queue", "null"))
+    except ValueError as e:
+        print(f"music: the session's pages or queue did not read: {e!r}", file=sys.stderr)
+        return
+    for surface, page in pages.items():
+        if page["kind"] == "album":
+            open_album(page["album"], int(surface))
+        elif page["kind"] == "liked":
+            open_liked(int(surface))
+        elif page["kind"] == "search" and desktop:
+            open_search()
+    if not queue:
+        return
+    for key, song in queue["songs"].items():
+        songs.setdefault(key, song)
+    for field in QUEUE_FIELDS[1:]:
+        playback[field] = queue[field]
+    shuffle_on.set(playback["shuffle"])
+    repeat_on.set(playback["repeat"] != "off")
+    repeat_name.set(repeat_label())
+    at = kept.get("position", 0)
+    play_track(queue["key"], start=False)
+    playback["resume_ms"] = at
+    show_position(at)
 
 
 def library_caption():
@@ -360,6 +426,7 @@ def on_saved(row):
 def go_home():
     for _ in stacks.pop(0, []):
         kaya.pop_entry()
+    keep_page(0)
     # The album last opened stays the selected card under Home.
     show_library_selection(None)
     home_shown.set(True)
@@ -408,6 +475,7 @@ def show_album(album, surface):
     page = {"kind": "album", "id": album["id"], "album": album["id"], "entry": entry,
             "surface": surface, "keys": []}
     stack.append(page)
+    keep_page(surface)
     if desktop:
         show_destination()
     with app.push_entry(entry, title=album["name"], window=surface,
@@ -541,6 +609,7 @@ def page_closed(surface, entry):
     page = find_page(surface, entry)
     if page is not None:
         stacks[surface].remove(page)
+        keep_page(surface)
         if desktop and surface == 0:
             show_destination()
 
@@ -750,6 +819,7 @@ def enqueue(keys, next_up):
         at = playback["at"] if name == "order" else queue.index(playback["key"])
         rest = [k for k in queue[at + 1:] if k not in keys]
         playback[name] = queue[:at + 1] + (keys + rest if next_up else rest + keys)
+    keep_queue()
 
 
 def song_album(key):
@@ -834,6 +904,7 @@ def play_track(key, start):
             page["tracks"].patch(k, tint=kaya.Tint.ACCENT if k == key else kaya.Tint.NONE)
     song = songs[key]
     playback["start"] = start
+    playback["resume_ms"] = None
     playback["seconds"] = song["seconds"]
     player.set_source(catalogue.source(song["audio"]))
     show_position(0)
@@ -844,6 +915,7 @@ def play_track(key, start):
     show_liked_now()
     show_art()
     show_play_state(False)
+    keep_queue()
     declare_session()
 
 
@@ -932,6 +1004,7 @@ def set_shuffle(on):
         return
     playback["order"] = shuffled(playback["key"]) if on else list(playback["album"])
     playback["at"] = playback["order"].index(playback["key"])
+    keep_queue()
 
 
 REPEAT_NEXT = {"off": "all", "all": "one", "one": "off"}
@@ -954,6 +1027,7 @@ def cycle_repeat(_on):
     repeat_name.set(repeat_label())
     for box in live["repeat"]:
         box.symbol(repeat_symbol())
+    keep_queue()
 
 
 def set_liked(on):
@@ -1103,6 +1177,7 @@ def open_liked(surface):
                                      phase="phase", fetch=catalogue.fetch)
         liked_body(page)
     fill_liked(page)
+    keep_page(surface)
     if desktop:
         show_destination()
 
@@ -1193,6 +1268,8 @@ def show_play_state(playing):
 
 
 def show_position(ms):
+    if ms // 1000 != playback["ms"] // 1000 or ms == 0:
+        kept.set("position", int(ms))
     playback["ms"] = ms
     seconds = playback["seconds"]
     at = min(ms / 1000, seconds) if seconds else 0
@@ -1221,6 +1298,9 @@ def on_player_state(state):
     key = playback["key"]
     if key is None:
         return
+    if state == kaya.PlayerState.READY and playback["resume_ms"] is not None:
+        player.seek(playback["resume_ms"])
+        playback["resume_ms"] = None
     if state == kaya.PlayerState.READY and playback["start"]:
         playback["start"] = False
         player.play()
@@ -1596,6 +1676,7 @@ def open_search():
     stacks[0] = [page]
     with app.push_entry(entry, title="Search", on_popped=lambda: page_closed(0, entry)):
         search_body(page)
+    keep_page(0)
     show_destination()
 
 
@@ -1921,6 +2002,7 @@ def home_arrived(shelves):
         home_shown.set(True)
         if home_state["asked"]:
             home_state["asked"]()
+        restore_session()
     else:
         with app.add_section(SECTION_HOME, title="Home", symbol=kaya.Symbol.HOME):
             home_body(shelves)
@@ -1929,6 +2011,7 @@ def home_arrived(shelves):
             search_body(roots[-1])
         with app.add_section(SECTION_LIBRARY, title="Library", symbol=kaya.Symbol.QUEUE):
             library_body()
+        restore_session()
     for album_id, entry in cards.items():
         art_pool.submit(fetch_card_art, album_id, entry["url"])
 

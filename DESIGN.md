@@ -3036,6 +3036,47 @@ read back on Windows). The harness drives both halves: `open_link`
 through the platform's own open from inside the process, and
 `relaunch link` through the cold door every lane can push.
 
+## Session restoration and durable file references (docs/restoration-plan.md, built 2026-11-18)
+
+An app comes back the way the user left it when the platform says this
+launch continues the last one, and starts fresh when the user dismissed
+it. TWO OWNERS, SPLIT BY WHO HOLDS THE STATE. kaya restores presentation
+on its own, keyed by `a11y_id` within a window's scope: a textarea's caret
+and selection and a named `For`'s top row, re-applied through the app's own
+ops after the transaction that mounts the widget unless that transaction
+commanded the widget itself, a `For`'s row held until its key arrives. The
+app restores its model through a session store with the preference store's
+four types and walls (`session()`, `window_session(id)`,
+`document_session(id)`), read before the first build, and `restored()`
+answers fresh, resumed or recovered. The core records each window's shape
+(its documents in order, the active one, the selected section, the
+navigation depth) and hands it back through `restored_windows()`; the app
+recreates what it wants with `.restore(saved_id)` on the window or document
+builder, the primary window is adopted without a call, and a scope nobody
+took is discarded at the first idle after the first build. WHETHER TO
+RESTORE IS THE PLATFORM'S ANSWER, read at the save point: the Mac's
+`NSQuitAlwaysKeepsWindows` (true resumes; false or absent starts fresh), a
+session id carried by SwiftUI's `@SceneStorage` on iOS, where the first
+store read waits for it, and by the activity's saved state on Android; GTK
+and WinUI have no rule and always resume. kaya's Mac windows are never
+AppKit-restored (`ApplePersistenceIgnoreState`), since SwiftUI reopened aux
+windows for ids the guest never allocated. The file (`kaya-session/` in the
+app's data directory, `no_backup` on Android) carries a session id, is
+written at idle and at each platform save point, is bounded at 256 KiB, and
+a second live process (an advisory lock) starts fresh and writes nothing;
+`restoration`, `restore_version` and `restore_always` are identity-manifest
+keys, because the store is read before any transaction. A DURABLE
+REFERENCE is a picked file's text token, `kaya-ref1:<platform>:<payload>:
+<check>` within 8 KiB: a bookmark on macOS and iOS, a persisted URI grant
+on Android, the path on GTK and Windows. `redeem` answers a picked handle
+or a refusal (missing, revoked, provider gone, foreign naming the platform
+it came from, or the cap of 128, counted durably), and `forget` releases
+it. The harness drives `relaunch resume` and `relaunch fresh` on every lane
+(docs/restoration-plan.md SR15 says which doors are the platform's own and
+which are a runner's knob), `expect_restored` reads the answer, and
+tools/check-restore.py holds every facet's report on every backend. What the
+build settled beyond the rulings is the plan's §9.
+
 ## Accessibility (the universal props, landed 2026-07-25)
 
 Native widgets ARE the accessibility tree (see the Accessibility case

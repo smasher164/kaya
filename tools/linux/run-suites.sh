@@ -1843,6 +1843,11 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh python3 guests/python/music.py
     run "$proto" music_context-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_SELFTEST=music_context KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/music.py
+    # The player across a relaunch (docs/restoration-plan.md SR17), through
+    # persist-leg's resume door as the restore scenes are.
+    export RELAUNCH_DOOR_MUSIC_RESTORE=resume
+    run "$proto" music_restore-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_SELFTEST=music_restore KAYA_LIB="$LIB" \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh python3 /work/guests/python/music.py
     # The dock and the media session: MPRIS on the leg's own bus (media-leg.sh).
     run "$proto" music_dock-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_SELFTEST=music_dock KAYA_LIB="$LIB" \
         tools/linux/media-leg.sh tools/linux/a11y-leg.sh python3 guests/python/music.py

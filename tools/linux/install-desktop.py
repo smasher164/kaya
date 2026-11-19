@@ -29,7 +29,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "tools/lib"))
 
 from packaging import linux  # noqa: E402
-from packaging.identity import load  # noqa: E402
+from packaging.identity import load, manifest_in  # noqa: E402
 
 
 def exec_line(argv):
@@ -80,10 +80,11 @@ def main(argv):
             "usage: install-desktop.py [--config-home <dir>] "
             "<xdg-data-home> <guest> [args...]")
     data_home = pathlib.Path(argv[0])
-    written = linux.stage(ROOT, exec_line(argv[1:]), data_home, config_home)
+    manifest = manifest_in(os.environ)
+    written = linux.stage(ROOT, exec_line(argv[1:]), data_home, config_home, manifest)
     print(f"install-desktop: {len(written)} files under {data_home}",
           file=sys.stderr)
-    print(load(ROOT).id)
+    print(load(ROOT, manifest).id)
 
 
 main(sys.argv[1:])

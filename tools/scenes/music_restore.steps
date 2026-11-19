@@ -1,0 +1,27 @@
+# THE MUSIC PLAYER COMES BACK (docs/restoration-plan.md SR17): the album on
+# top, the playing track paused where it stood, and the queue behind it ride
+# the app's session store. The phones' scrubber and library sit in the full
+# player and the Library section (tools/lib/lanes/ios.py, android.py).
+expect_restored fresh
+expect_image_phase image@art_201715 shown
+click column@card_201715
+expect_image_phase image@track_art[1860160] shown
+double_click row@track[1860160]
+expect label@dock_title "Seven Chimes"
+expect_ax button@play_pause "button/Pause"
+click button@play_pause
+expect_ax button@play_pause "button/Play"
+set_value slider@progress 0.5
+expect label@elapsed "0:10"
+
+relaunch resume
+
+expect_restored resumed
+expect_title "Through The Olive Branches"
+expect label@dock_title "Seven Chimes"
+expect_ax button@play_pause "button/Play"
+expect label@remaining "-0:10"
+expect_selected row@saved[201715] on
+expect_tint label@track_name[1860160] accent
+click button@next
+expect label@dock_title "Athens"

@@ -1,6 +1,6 @@
 # Session restoration and durable file references (design pass, 2026-11-17)
 
-Status: RULED 2026-11-17: every recommendation as written, with the independent review's fold-ins (F1 to F15); the build started on the maintainer's word the same night. Review page
+Status: BUILT 2026-11-18: every ruling on all five platforms, the nine bindings and the C floor, with the editor, chat and the music player as its first consumers; what the build settled beyond the rulings, for the maintainer's review, is §9. Review page
 claude.ai/artifact/DxTd4WDaWRcBnQMRBqBQYK. The maintainer, 2026-11-17:
 "let's design session restoration now". This plan is the design pass for
 docs/deferred.md's session restoration entry (headed "core-owned, and
@@ -936,3 +936,103 @@ Each fold-in sits at the ruling it changes:
 - F12: the file carries its writer's pid and start time (SR14).
 - F13, F14: §1.1's and §1.2's citations.
 - F15: §4's guards.
+
+## §9. What the build settled (2026-11-17 to 2026-11-18), for review
+
+Each line is a question the rulings did not answer, the answer the build
+took, and where it lives. The maintainer reviews them; none moved a
+binding-level semantics.
+
+- **macOS, SR6 measured.** With `NSQuitAlwaysKeepsWindows` absent, macOS
+  26.6 closes windows at quit and restores nothing, so the Mac rule reads
+  true = resumed, false or absent = fresh (the plan had "absent = keep").
+  The Option-Command-Q inversion is not honoured: AppKit exposes no public
+  way to read it.
+- **macOS, F5.** `isRestorable = false` relaunched the app with no window
+  at all, so kaya instead sets `ApplePersistenceIgnoreState` in the argument
+  domain at launch (`kayaTakeRestorationFromAppKit`): SwiftUI reopened an
+  aux window for an id the guest never allocated after a clean quit
+  (docs/traps.md, "SwiftUI reopens an aux window after a quit"); the
+  auxquit leg and the interpreter's stray-window verdict hold it. AppKit's
+  frame autosave is refused for kaya's window names, since it wrote the
+  app's real domain at every launch.
+- **F12, the second live process.** An advisory lock on
+  `kaya-session/session.lock`, held for the process's life, rather than the
+  pid and start time (a pid is reused; the lock dies with its process). The
+  header still records the pid. On Android, std's `File::try_lock` answers
+  "not supported", so the lock is `flock(2)` there.
+- **SR14, F11, the knobs.** `restoration`, `restore_version` and
+  `restore_always` are keys in the app's identity manifest, not
+  transaction ops: the store is read before the first build, and a
+  manifest key needs no binding surface, so it is uniform in all nine by
+  construction. Android's store is `no_backup` (`noBackupFilesDir`).
+- **F9, iOS.** The token rides SwiftUI's `@SceneStorage("kaya.session")`,
+  which is the scene's restoration activity, rather than a UIScene delegate
+  of kaya's own (SwiftUI's scene delegate owns `stateRestorationActivity`).
+  A store read waits for the token (5 s, printed) and never on the main
+  thread; a timeout or a main-thread read is HEADLESS: fresh, and nothing is
+  written, so a background launch cannot wipe the file. Measured (step 0
+  (c)): background, `simctl terminate`, launch keeps the SceneStorage. On
+  iOS a Go guest reads its session inside `app.Post` (the binding panics
+  before Run there, naming it): Go's first Build runs on the main thread.
+- **Android.** A restored activity maps no launch extras
+  (`KayaEnv.fromIntent(intent, savedInstanceState)`): the platform recreates
+  it with the original intent. The resume door ends act one with `am kill`,
+  then SIGKILL after 5 s (the low-memory killer's shape) when `am kill`
+  leaves the process alive after a file pick. The reply receiver's process
+  hands the headless token.
+- **SR15, the fresh door.** Real on the Mac (`-NSQuitAlwaysKeepsWindows NO`)
+  and on Android (a null Bundle); on iOS, GTK and WinUI, which have no
+  dismissal a runner can drive, the session knob `KAYA_SESSION_TOKEN=absent`
+  in act two's environment, read only in a scene run. restorefresh runs in
+  Rust only: the door is the runner's, not a binding surface. On GTK and
+  WinUI `relaunch resume` is the plain launch; the Windows non-Rust legs
+  relaunch through a generated act-two launcher.
+- **SR4, F7, facets.** Facets are scoped to the WINDOW (a section's or a
+  document's widgets share it). Live widgets only; a stamped copy's facet by
+  row key is not built. The caret restores on a textarea only, since
+  `select_range` is a textarea surface; entry, search and number-field
+  carets wait for it. F7's "the user's first scroll ends the hold" is not
+  built: while a container's restore is pending the core ignores its row
+  reports, because no backend can yet tell the first layout's report from a
+  user's scroll above kaya's floors (SwiftUI's `onScrollPhaseChange` is
+  macOS 15 / iOS 18); the hold ends at the key's arrival, the app's own
+  `scroll_to_row`, or a later batch that grows the collection without it.
+  A plain scroll's points, a textarea's own scroll and `restorable(false)`
+  are not built (each needs a new apply op or universal prop on every
+  backend).
+- **SR9.** `.restore(saved)` takes the saved window or document id, not an
+  opaque scope object, since window ids are the app's and the scope is named
+  by its id. A section and the navigation depth are recorded and handed
+  back; the app selects or re-pushes them.
+- **SR11 to SR13, references.** The Mac payload is a plain NSURL bookmark,
+  not security-scoped (kaya's Mac apps are unsandboxed). A lane scene reads
+  each refusal from a label the guest writes, rather than a new
+  `expect_reference` verb, since the redeem happens in the guest. The
+  across-launches cap is held by the ledger's unit test, which re-reads the
+  file as a later launch would; a lane leg would need 128 distinct picks.
+- **Spellings.** Python and JS spell the app scope `app_session()`, since
+  `session` is their media session (docs/media-plan.md §5); Java spells the
+  handle `SessionHandle`; JS's error is `KayaReferenceError`, since
+  `ReferenceError` shadows the builtin. Rust and the others keep
+  `session()`.
+- **SR17, consumers.** The rich document's consumer is the editor's rich
+  tab (the only app that opens a .kdoc). A file-backed tab's unsaved edits
+  are kept too, not only an untitled tab's: a resume that dropped them would
+  lose typing. Open Recent dedupes by display name and only grows (no menu
+  removal exists). A restored chat thread commands no scroll, so kaya's
+  facet places it. The music player keeps, besides what SR17 names, the
+  queue's track records (so a restored queue can play a track no page has
+  loaded) and its shuffle and repeat, and takes the phones' section from
+  `restored_windows()` rather than its own store; the Liked Songs and
+  Search destinations come back as pages. On the phones music_restore does
+  not assert the position, since the scrubber sits in the full player's
+  sheet.
+- **Recorder.** The session load line names every facet the file brought,
+  each changed facet report and each restored caret prints under a scene
+  run, and `act one emptied <dir>` prints at each act one.
+- **Not settled here: the real stores on the Mac.** The chat leg's real
+  NSOpenPanel writes `NSOSPLastRootDirectory` into the app's real
+  preferences domain out of process (docs/traps.md, "The open panel's last
+  directory in the real domain"); the fix (a scratch bundle identity for
+  scene runs, or the runner writing the keys back) is the maintainer's.

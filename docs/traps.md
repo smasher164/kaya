@@ -4,6 +4,44 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## GTK's table park spun the main loop inside the core's borrow (measured 2026-11-18)
+
+The linux music_restore leg's act two died with `RefCell already mutably
+borrowed` and then `panic in a function that cannot unwind`. The backtrace:
+drain_transactions (holding CORE mutably) -> apply -> scroll_row ->
+park_table_row, whose `while MainContext::iteration(false) {}` dispatched a
+harness step queued by GtkStage::on_main (`mounted`), which borrowed CORE
+again. The restored top-row facet of the album's track TABLE is a
+ScrollToRow in the first mounting transaction, exactly when the harness is
+polling for the scene to be ready, so restoration made a latent hazard
+(any app scroll_to_row on a GTK table while a step is queued) certain.
+Fixing the harness's source alone was not enough: on wayland a toolkit
+source of run_core's re-borrowed CORE the same way. So a table's scroll_row
+inside a drain now queues the park (PENDING_PARKS) and `finish_parks` runs it
+from an idle with the main-loop spin OUTSIDE the borrow; GtkStage::on_main and
+on_main_mut also wait for CORE (`when_core_free`, a 10 ms re-arm, session_idle's
+shape: a ready idle source would keep the nested `while iteration` loop
+spinning forever). Still open: the harness's own scroll_to_row verb parks
+inside on_main_mut's borrow. Guard: music_restore-python on both linux
+protocols, red without it.
+
+## A runner found act two under the default app's id (measured 2026-11-18)
+
+The music app declares its own identity (guests/assets/identities/music.toml,
+dev.kaya.aurora.music), and its first relaunch leg was red on the Mac, linux,
+iOS and Android with the runner's own sentence: act one "left no marker
+at .../act2/dev.kaya.aurora.notes/marker". The core writes the marker under
+the id of the declaration the process reads, and five runners derived the
+directory from the default manifest: mac.py act2_dir, tools/linux/install-desktop.py
+(the desktop entry and the id persist-leg waits on), run-sim's act2_dir_on,
+run-emulator's act-two path, deploy-win's plain_door. Each now asks
+tools/lib/packaging/identity.py (`manifest_in(env)` where the leg's
+environment is in hand, `manifest_for(stem)` where only the scene is).
+Windows' door was fixed before its first run. On Android the leg is still
+parked: the python host's restored activity maps no launch extras, so act two
+loses KAYA_IDENTITY itself (restoration-build notes). Guard: music_restore-python
+on each lane, each red before its fix.
+
 ## A selection kaya sets on WinUI raises no SelectionChanged (measured 2026-11-18)
 
 The windows editorrestore leg restored the buffer's caret as 0:0 after act

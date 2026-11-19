@@ -96,8 +96,16 @@ def gtk_findings(source):
     if not fn:
         out.append(f"{GTK}: scroll_row is gone — the command's one arm")
         return out
-    if "park_table_row(core, id, index)" not in fn:
+    finish = block_after(src, "\nfn finish_parks()")
+    if "PENDING_PARKS.with_borrow_mut(|parks| parks.push((id, index)))" not in fn:
+        out.append(f"{GTK}: the windowed arm parks inside the drain's borrow, where the park's "
+                   f"main-loop spin dispatches sources that borrow the core (docs/traps.md, "
+                   f"the GTK table's nested spin)")
+    if "park_table_row_begin(core, id, index)" not in (finish or ""):
         out.append(f"{GTK}: the windowed arm does not take the harness's own park (§3)")
+    if "park_table_row_begin(core, id, index)" not in block_after(
+            src, "\nfn park_table_row(core: &mut CoreState, id: u64, index: usize)"):
+        out.append(f"{GTK}: park_table_row no longer starts with the command's park (§3)")
     harness = block_after(src, "fn scroll_to_row(&self, t: crate::harness::Target, key: &str)")
     if "park_table_row(core, id, index)" not in harness:
         out.append(f"{GTK}: the harness's scroll_to_row no longer shares park_table_row with the "
@@ -264,6 +272,12 @@ n5 = gate.doctor("the gtk harness park unshared", REAL[GTK],
                  "            let _ = index;\n            String::new()\n")
 watched("a GTK harness verb with its own park", {**REAL, GTK: n5},
         "no longer shares park_table_row")
+n5b = gate.doctor("the gtk park back inside the drain", REAL[GTK],
+                  r"        PENDING_PARKS\.with_borrow_mut\(\|parks\| "
+                  r"parks\.push\(\(id, index\)\)\);\n",
+                  "        park_table_row(core, id, index);\n")
+watched("a GTK table park inside the drain's borrow", {**REAL, GTK: n5b},
+        "parks inside the drain's borrow")
 n6 = gate.doctor("the gtk top write cut", REAL[GTK],
                  r"        adj\.set_value\(top\);\n",
                  "        let _ = top;\n")
@@ -331,7 +345,7 @@ n17 = gate.doctor("the compose park no longer moving the generation", REAL[COMPO
 watched("a Compose park that never moves the generation", {**REAL, COMPOSE: n17},
         "still the latest park")
 
-gate.negatives_ran(22)
+gate.negatives_ran(23)
 
 for line in census(REAL):
     gate.finding(line)

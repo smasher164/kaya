@@ -26,7 +26,7 @@ import pathlib
 import shutil
 
 from . import mark
-from .identity import load
+from .identity import MANIFEST, load
 
 # What the hicolor theme is asked for. 16 and 24 are the panel and the
 # notification's own small slot; 512 is what GNOME Software and the
@@ -128,7 +128,7 @@ def activation_findings(data_home, app_id):
     return bad
 
 
-def stage(root, exec_line, out_dir, config_home=None):
+def stage(root, exec_line, out_dir, config_home=None, manifest=MANIFEST):
     """Write the entry, the service file and the icon theme into
     `out_dir` (an XDG data root). Returns the paths written.
 
@@ -137,7 +137,7 @@ def stage(root, exec_line, out_dir, config_home=None):
     root, so the two paths are named separately rather than derived from
     each other. A caller that wants no scheme handler leaves it out.
     """
-    declared = load(root)
+    declared = load(root, manifest)
     source = declared.icon_path.read_bytes()
     out = pathlib.Path(out_dir)
     written = []

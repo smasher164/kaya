@@ -182,6 +182,7 @@ RELAUNCH_DOOR = {"tasks": "com-activator", "taskspersist": "launch",
                  # through each leg's act2_<leg>.cmd (tools/lib/win_launchers.py).
                  "restore": "resume", "restoredocs": "resume", "references": "resume",
                  "editorrestore": "resume", "chatrestore": "resume",
+                 "music_restore": "resume",
                  # No dismissal exists to drive: act2_<leg>.cmd sets the
                  # session knob KAYA_SESSION_TOKEN=absent.
                  "restorefresh": "fresh"}
@@ -413,6 +414,9 @@ ORDER = [
      # Search and the toasts: `type` posts to the guest's own window, as the
      # search pool's does, and the toast's Undo is pressed through its peer.
      "music_search_python",
+     # The player across a relaunch (docs/restoration-plan.md SR17): no
+     # hover, muted, its door the leg's own act2_ launcher (POOLED_DOORS).
+     "music_restore_python",
      # The context flyouts pool, one at a time among themselves (SERIAL_GROUPS'
      # flyout group; docs/traps.md, the flyout a neighbour dismissed).
      "music_context_python",
@@ -1089,6 +1093,7 @@ GUEST_STEM = {"restorefresh": "restore", "listdetail": "split", "formatde": "for
               "music_home": "music", "music_playlist": "music", "music_header": "music",
               "music_headerdark": "music", "music_dock": "music", "music_dockdark": "music", "music_artist": "music",
               "music_artistdark": "music", "music_search": "music", "music_context": "music",
+              "music_restore": "music",
               "richdocax": "richdoc"}
 
 # THE MEDIA SUITE'S SERVER (docs/media-plan.md §7a): the VM reaches the host

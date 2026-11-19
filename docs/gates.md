@@ -708,7 +708,11 @@ size; one cut per backend. AND THE APP'S REQUEST WINS OVER A KEPT
 OFFSET since 2026-10-31 (docs/hidden-plan.md H8): SwiftUI's
 kayaTryScrollRow clears the scroll's kept offset, so a remounted copy's
 restore a turn later cannot undo the app's scroll; hiderows reads the
-restore, and nothing reads the race. 22 watched negatives, counts printed)
+restore, and nothing reads the race. AND GTK'S TABLE PARKS OUTSIDE THE
+DRAIN'S BORROW since 2026-11-18 (docs/traps.md, the GTK table's nested spin):
+the command queues the park and finish_parks spins the main loop with the
+core released, through the same park_table_row_begin the harness verb takes.
+23 watched negatives, counts printed)
 
 ## tools/check-search.py
 

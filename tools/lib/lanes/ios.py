@@ -92,12 +92,12 @@ GO_SCENES = [
 # (docs/python-mobile-plan.md).
 PYTHON_SCENES = ["portfolio", "varied", "music_home", "music_playlist", "music_header",
                  "music_dock", "music_artist", "music_search", "music_context",
-                 "restore", "restoredocs", "references"]
+                 "music_restore", "restore", "restoredocs", "references"]
 # A scene whose guest file is another's: staged under the scene's name, the
 # one the host's main.py runs (tools/pyhost-main.py).
 PYTHON_GUEST = {"music_home": "music", "music_playlist": "music", "music_header": "music",
                 "music_dock": "music", "music_artist": "music", "music_search": "music",
-                "music_context": "music"}
+                "music_context": "music", "music_restore": "music"}
 # Python scenes that also run under KAYA_APPEARANCE=dark, as `<scene>dark-python`
 # (docs/media-player-plan.md M5).
 PYTHON_DARK = ("music_header", "music_artist", "music_dock")
@@ -436,6 +436,17 @@ MODS = {
     ("python", "music_context"): {"cut": "expect_title",
                                   "keep": "expect_context_items=row@top_track[1860165]",
                                   "extra": MUSIC_CONTEXT_PHONE_TAIL},
+    # The scrubber sits in the full player's sheet and the library in its
+    # own section, so the position and the library row are the desktops'.
+    # The title: the interpreter's read misses an album pushed into a section
+    # in the transaction that adds the sections, while the page shows it
+    # (restoration-build notes, music_restore on iOS).
+    ("python", "music_restore"): {"drop": (("set_value", "slider@progress"),
+                                           ("expect", "label@elapsed"),
+                                           ("expect", "label@remaining"),
+                                           ("expect_selected", "row@saved[201715]"),
+                                           ("expect_title", '"Through')),
+                                  "keep": "expect_restored expect_tint expect_ax"},
     ("python", "music_search"): {"cut": "click row@go_search",
                                  "keep": "expect_image_phase=image@art_116452",
                                  "extra": MUSIC_SEARCH_PHONE_TAIL},
@@ -526,6 +537,7 @@ RELAUNCH_DOOR = {"tasks": "launch-notification",
                  "restore": "resume", "restoredocs": "resume",
                  "references": "resume",
                  "editorrestore": "resume", "chatrestore": "resume",
+                 "music_restore": "resume",
                  # The user's dismissal: the plain launch with the session
                  # knob (SR15; the switcher is out of the driver's reach).
                  "restorefresh": "fresh"}

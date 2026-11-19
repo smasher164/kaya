@@ -2204,7 +2204,7 @@ def act2_answer(name, door, outfile, log):
 # a test — the marker act one left is the whole signal
 # (tools/guest/relaunch-launch.ps1 carries the rest).
 def plain_door(name, scene, log, exe=None):
-    decl = app_identity.load(ROOT)
+    decl = app_identity.load(ROOT, app_identity.manifest_for(lane.GUEST_STEM.get(scene, scene)))
     exe = exe or f"{lane.RELAUNCH_EXE.get(scene, scene)}.exe"
     outfile = f"out_{name}-act2.txt"
     run_ssh(f"del C:\\kaya\\{outfile} 2>nul & schtasks /create /tn "

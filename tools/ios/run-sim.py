@@ -1874,13 +1874,15 @@ def scene_script_drop(scene, drops, keep, prefix=None):
 
 
 # ------------------------------------------------------------- the leg
-def act2_dir_on(udid, bundle_id):
+def act2_dir_on(udid, bundle_id, scene):
     """`<Documents>/act2/<id>` inside the app's data container, which is
-    where crates/kaya/src/act2.rs computes it from $HOME on iOS."""
+    where crates/kaya/src/act2.rs computes it from $HOME on iOS, under the
+    id of the declaration the scene's app reads."""
     data = out_of(["xcrun", "simctl", "get_app_container", udid,
                    bundle_id, "data"]).strip()
-    from packaging.identity import load
-    return pathlib.Path(data) / "Documents" / "act2" / load(ROOT).id
+    from packaging.identity import load, manifest_for
+    return pathlib.Path(data) / "Documents" / "act2" / load(
+        ROOT, manifest_for(lane.PYTHON_GUEST.get(scene, scene))).id
 
 
 def relaunch_url(text):
@@ -2086,7 +2088,7 @@ def second_act(udid, bundle_id, name, scene, env, act_one_out, log):
               f'"KAYA_SELFTEST: ACT 1 OK", so the door was never pushed',
               file=log)
         return False
-    d = act2_dir_on(udid, bundle_id)
+    d = act2_dir_on(udid, bundle_id, scene)
     marker, verdict = d / "marker", d / "act2.verdict"
     if not marker.is_file():
         print(f"run-sim: {name}: act one published ACT 1 OK but left no "
@@ -2196,7 +2198,7 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         # A stale marker or verdict may not serve this run: the core
         # consumes a marker on read, so what survives is from a run that
         # DIED before its second act.
-        _act2 = act2_dir_on(udid, bundle_id)
+        _act2 = act2_dir_on(udid, bundle_id, scene)
         for _name in ("marker", "act2.verdict"):
             (_act2 / _name).unlink(missing_ok=True)
     data_container = out_of(["xcrun", "simctl", "get_app_container",

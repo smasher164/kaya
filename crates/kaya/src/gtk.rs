@@ -2064,6 +2064,22 @@ thread_local! {
 
 /// docs/restoration-plan.md SR5: one session idle per loop turn, at the
 /// default idle priority, which runs after GTK's layout.
+/// A harness step runs on the main loop once nothing holds the core: a
+/// drain that spins the loop inside its borrow (park_table_row) would
+/// otherwise dispatch the step into a RefCell already borrowed
+/// (docs/traps.md, the GTK table's nested spin).
+fn when_core_free(job: Box<dyn FnOnce() + Send>) {
+    glib::idle_add_once(move || run_when_core_free(job));
+}
+
+fn run_when_core_free(job: Box<dyn FnOnce() + Send>) {
+    if CORE.with(|slot| slot.try_borrow_mut().is_err()) {
+        glib::timeout_add_local_once(std::time::Duration::from_millis(10), move || run_when_core_free(job));
+        return;
+    }
+    job();
+}
+
 fn schedule_session_idle() {
     if SESSION_IDLE_PENDING.with(|p| p.replace(true)) {
         return;
@@ -6286,6 +6302,13 @@ fn scroll_axis(core: &CoreState, t: crate::harness::Target) -> Option<Along> {
 /// viewport's top: the harness's scroll_to_row and the app's
 /// (docs/scroll-to-plan.md §3) share it.
 fn park_table_row(core: &mut CoreState, id: u64, index: usize) {
+    park_table_row_begin(core, id, index);
+    while glib::MainContext::default().iteration(false) {}
+    window_report(core, id);
+    reflow_table(core, id);
+}
+
+fn park_table_row_begin(core: &mut CoreState, id: u64, index: usize) {
     // THE BAND FOLLOWS THE ROW BEFORE THE PIXELS DO: the range is
     // reported from the index the CORE resolved rather than from
     // an estimate off the scrollbar, which is the one reading that
@@ -6306,9 +6329,30 @@ fn park_table_row(core: &mut CoreState, id: u64, index: usize) {
     // before the adjustment's upper covers the row at all.
     window_report(core, id);
     reflow_table(core, id);
-    while glib::MainContext::default().iteration(false) {}
-    window_report(core, id);
-    reflow_table(core, id);
+}
+
+thread_local! {
+    static PENDING_PARKS: RefCell<Vec<(u64, usize)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A table's scroll_to_row applied inside a drain parks once the drain has
+/// released the core: the park spins the main loop, and a source that loop
+/// dispatches may borrow the core (docs/traps.md, the GTK table's nested spin).
+fn finish_parks() {
+    for (id, index) in PENDING_PARKS.with_borrow_mut(std::mem::take) {
+        CORE.with_borrow_mut(|core| {
+            if let Some(core) = core.as_mut() {
+                park_table_row_begin(core, id, index);
+            }
+        });
+        while glib::MainContext::default().iteration(false) {}
+        CORE.with_borrow_mut(|core| {
+            if let Some(core) = core.as_mut() {
+                window_report(core, id);
+                reflow_table(core, id);
+            }
+        });
+    }
 }
 
 /// A band move's ops land outside a batch's idle, so they end as a batch
@@ -6329,7 +6373,8 @@ fn apply_band_ops(core: &mut CoreState, ops: Vec<ApplyOp>) {
 /// scrolled window's top (S2), once the content has laid out (S4).
 fn scroll_row(core: &mut CoreState, id: u64, copy: Option<WidgetId>, index: usize) {
     if core.tables.contains_key(&id) {
-        park_table_row(core, id, index);
+        PENDING_PARKS.with_borrow_mut(|parks| parks.push((id, index)));
+        glib::idle_add_local_once(finish_parks);
         return;
     }
     let Some(copy) = copy else {
@@ -23363,16 +23408,12 @@ impl GtkStage {
         f: impl FnOnce(&mut CoreState) -> T + Send + 'static,
     ) -> T {
         let (tx, rx) = std::sync::mpsc::channel();
-        let cell = std::cell::Cell::new(Some((f, tx)));
-        glib::idle_add(move || {
-            if let Some((f, tx)) = cell.take() {
-                CORE.with_borrow_mut(|core| {
-                    let core = core.as_mut().expect("core state initialized");
-                    let _ = tx.send(f(core));
-                });
-            }
-            glib::ControlFlow::Break
-        });
+        when_core_free(Box::new(move || {
+            CORE.with_borrow_mut(|core| {
+                let core = core.as_mut().expect("core state initialized");
+                let _ = tx.send(f(core));
+            });
+        }));
         rx.recv().expect("the main context applied the step")
     }
 
@@ -23468,16 +23509,12 @@ impl GtkStage {
         f: impl FnOnce(&CoreState) -> T + Send + 'static,
     ) -> T {
         let (tx, rx) = std::sync::mpsc::channel();
-        let cell = std::cell::Cell::new(Some((f, tx)));
-        glib::idle_add(move || {
-            if let Some((f, tx)) = cell.take() {
-                CORE.with_borrow(|core| {
-                    let core = core.as_ref().expect("core state initialized");
-                    let _ = tx.send(f(core));
-                });
-            }
-            glib::ControlFlow::Break
-        });
+        when_core_free(Box::new(move || {
+            CORE.with_borrow(|core| {
+                let core = core.as_ref().expect("core state initialized");
+                let _ = tx.send(f(core));
+            });
+        }));
         rx.recv().expect("the main context applied the step")
     }
 }

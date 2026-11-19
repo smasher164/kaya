@@ -159,4 +159,5 @@ toggles whose check marks are what holds over the selection (the buffer's
 
 Syntax highlighting; tabs and panes; find-and-replace-all across a
 selection; recent files (needs the bookmark/persistence machinery the
-save plan deliberately left out); large-file performance work.
+save plan deliberately left out; built 2026-11-18, docs/restoration-plan.md
+SR17, Open Recent); large-file performance work.
