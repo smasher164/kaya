@@ -525,6 +525,7 @@ RELAUNCH_DOOR = {"tasks": "launch-notification",
                  # parks, another app takes the front, the system ends it.
                  "restore": "resume", "restoredocs": "resume",
                  "references": "resume",
+                 "editorrestore": "resume", "chatrestore": "resume",
                  # The user's dismissal: the plain launch with the session
                  # knob (SR15; the switcher is out of the driver's reach).
                  "restorefresh": "fresh"}
@@ -609,7 +610,9 @@ def suite_legs(suite):
             out.append("go" if scene == "milestone2" else f"{scene}-go")
         out.append("editor-go")
         out.append("editorkeyboard-go")
+        out.append("editorrestore-go")
         out.append("chat-go")
+        out.append("chatrestore-go")
         out.append("chatcall-go")
         out.append("chatkeyboard-go")
         out.append("chatkeyboardland-go")
@@ -641,7 +644,9 @@ def wired_scenes():
     out.update(RUST_SCENES)
     out.add("editor")
     out.add("editorkeyboard")
+    out.add("editorrestore")
     out.add("chat")
+    out.add("chatrestore")
     out.add("chatcall")
     out.add("chatkeyboard")
     out.add("chatkeyboardland")

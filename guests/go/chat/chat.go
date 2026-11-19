@@ -68,7 +68,13 @@ func App() *kaya.App {
 	peer := dialPeer(app, convs, order)
 	phone := &calls{app: app, peer: peer, convs: convs}
 
-	app.Build(func(tx *kaya.Tx) {
+	// Posted: the session answers once the app runs (docs/traps.md, iOS's
+	// restoration token).
+	app.Post(func(tx *kaya.Tx) {
+		// The open conversation and each conversation's unsent draft ride the
+		// session store (docs/restoration-plan.md SR17).
+		session := kaya.Session()
+		resuming := false
 		tx.Window(0).Title("chat").Size(900, 640).Panes(2).Inset(0)
 		list := ConversationCollection(tx)
 
@@ -167,6 +173,7 @@ func App() *kaya.App {
 				tx.PopEntry()
 			}
 			open = id
+			session.SetString("open", id)
 			selectOpen(tx, id, true)
 			entry := tx.PushEntry(threadEntry).
 				Title(c.name).
@@ -174,10 +181,12 @@ func App() *kaya.App {
 					if open == id {
 						selectOpen(tx, id, false)
 						open = ""
+						session.Remove("open")
 					}
 				}).
 				Id()
 			var compose kaya.Widget
+			draft := session.GetString("draft."+id, "")
 			send := func(tx *kaya.Tx, text string) {
 				text = strings.TrimSpace(text)
 				if text == "" {
@@ -190,6 +199,8 @@ func App() *kaya.App {
 				insert(tx, m)
 				tx.ScrollToRow(threadList, m.key)
 				tx.SetText(compose, "")
+				draft = ""
+				session.Remove("draft." + id)
 				refresh(tx, c)
 			}
 			// A photo is the user's own message, shown in the thread; the
@@ -223,7 +234,6 @@ func App() *kaya.App {
 					}(files[0])
 				}).Show()
 			}
-			draft := ""
 			var found []string
 			at := -1
 			matches := tx.Signal("")
@@ -363,7 +373,14 @@ func App() *kaya.App {
 					// attach button before it, as Messages places its own.
 					tx.Button("Attach", attach).Symbol(kaya.SymbolAttach).A11yID("attach")
 					tx.Row(func() {
-						compose = tx.Textarea(func(tx *kaya.Tx, text string) { draft = text }).
+						compose = tx.Textarea(func(tx *kaya.Tx, text string) {
+							draft = text
+							if text == "" {
+								session.Remove("draft." + id)
+							} else {
+								session.SetString("draft."+id, text)
+							}
+						}).
 							Submits().MaxLines(5).Placeholder("Message").A11yID("compose").Grow(1).
 							OnSubmitted(send)
 						if kaya.Capabilities().EmojiPicker {
@@ -379,9 +396,16 @@ func App() *kaya.App {
 			for _, m := range c.messages {
 				insert(tx, m)
 			}
-			if c.firstUnread != "" {
+			if draft != "" {
+				tx.SetText(compose, draft)
+			}
+			// A RESTORED THREAD SCROLLS WHERE IT WAS: kaya's own facet, which a
+			// commanded scroll here would override (SR4).
+			switch {
+			case resuming:
+			case c.firstUnread != "":
 				tx.ScrollToRow(threadList, c.firstUnread)
-			} else {
+			default:
 				tx.ScrollToRow(threadList, c.messages[len(c.messages)-1].key)
 			}
 			c.unread, c.firstUnread = 0, ""
@@ -449,7 +473,9 @@ func App() *kaya.App {
 				if id == open {
 					tx.PopEntry()
 					open = ""
+					session.Remove("open")
 				}
+				session.Remove("draft." + id)
 				list.Remove(tx, id)
 				delete(convs, id)
 				tx.SetBadge(unreadTotal())
@@ -493,6 +519,11 @@ func App() *kaya.App {
 			picture.Close()
 			list.Insert(tx, id, Conversation{Name: c.name, Avatar: c.avatar})
 			refresh(tx, c)
+		}
+		if id := session.GetString("open", ""); convs[id] != nil {
+			resuming = true
+			openThread(tx, id)
+			resuming = false
 		}
 	})
 

@@ -198,7 +198,7 @@ DARK_LEGS = (("canvasdark-rust-swiftui", "canvas", "rust"),
 # The apps and depth scenes hand-queued OUTSIDE SCENES/DEPTH_SCENES
 # (each would otherwise derive a cargo --example that does not exist):
 # editor is a GO app by design, portfolio and varied are PYTHON alone.
-HAND_QUEUED = {"editor": "go", "chat": "go", "chatcall": "go", "portfolio": "python", "varied": "python",
+HAND_QUEUED = {"editor": "go", "editorrestore": "go", "chat": "go", "chatrestore": "go", "chatcall": "go", "portfolio": "python", "varied": "python",
                # The task manager's second scene (docs/tasks-s4-plan.md
                # §4): the same rust example under another script, so it
                # derives no --example of its own.
@@ -337,9 +337,16 @@ ORDER = [
     # panels, real keys).
     ("editor", ("go",)),
     ("drain",),
+    # The editor across a relaunch (docs/restoration-plan.md SR17), alone
+    # between drains for editor's reasons.
+    ("editorrestore", ("go",)),
+    ("drain",),
     # The chat app: go alone by design (docs/chat-plan.md R1), alone
     # between drains for the keystrokes its compose field takes.
     ("chat", ("go",)),
+    ("drain",),
+    # Chat across a relaunch (docs/restoration-plan.md SR17).
+    ("chatrestore", ("go",)),
     ("drain",),
     # The chat app's calls (docs/capture-plan.md §8): its devices are the
     # in-process synthetic ones; it posts the incoming call.
@@ -1142,7 +1149,7 @@ BUNDLED_SCENES = {"notify", "tasks", "badge", "auxquit"}
 # an aux window after a quit); KAYA_SELFTEST still makes it accessory at launch.
 REGULAR_BUNDLES = {"auxquit"}
 # The go scenes that post one: the one kaya-go binary, wrapped per scene.
-BUNDLED_GO_SCENES = {"chat", "chatcall"}
+BUNDLED_GO_SCENES = {"chat", "chatcall", "chatrestore"}
 GO_GUESTS = "target/go-guests"
 
 
@@ -1354,6 +1361,8 @@ RELAUNCH_DOOR = {"tasks": "launch-notification", "taskspersist": "launch",
                  "restore": "resume",
                  "references": "resume",
                  "restoredocs": "resume",
+                 "editorrestore": "resume",
+                 "chatrestore": "resume",
                  # The user's dismissal: the same quit with the setting off.
                  "restorefresh": "fresh",
                  # THE LINK DOOR (docs/app-links-plan.md L5): `open` hands

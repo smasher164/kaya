@@ -4,6 +4,8 @@
 package editor
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -191,6 +193,21 @@ func docName(dest *kaya.PickedFile) string {
 
 const findKey = "bar"
 
+// An unsaved buffer up to this size rides its document's session scope; a
+// larger one goes to the app's data directory with its path in the scope
+// (docs/restoration-plan.md SR17, SR14).
+const draftBound = 32 * 1024
+
+// Open Recent's length, as TextEdit's.
+const recentCap = 8
+
+// One Open Recent entry: the name it shows and the durable reference
+// (docs/restoration-plan.md SR11), kept in the app's preferences.
+type recentFile struct {
+	Name  string `json:"name"`
+	Token string `json:"token"`
+}
+
 // The coding face the app ships (guests/assets/fonts), registered at build
 // so every platform draws the buffer in it (docs/looks-plan.md §3.7).
 const codeFamily = "JetBrains Mono"
@@ -253,11 +270,12 @@ type document struct {
 	rich     bool
 	renamed  bool
 	readOnly string
+	spilled  bool
 	app      *kaya.App
-	status      kaya.Signal[string]
-	where       kaya.Signal[string]
-	count       kaya.Signal[string]
-	words       kaya.Signal[string]
+	status   kaya.Signal[string]
+	where    kaya.Signal[string]
+	count    kaya.Signal[string]
+	words    kaya.Signal[string]
 	// A WORKAROUND — docs/traps.md, "A live-zone `When` stamps an EMPTY
 	// key path".
 	findRows kaya.Collection
@@ -320,9 +338,45 @@ func App() *kaya.App {
 		styles = map[kaya.Block]kaya.Signal[bool]{}
 	)
 
+	spillPath := func(d *document) string {
+		return filepath.Join(kaya.AppDataDir(), fmt.Sprintf("editor-draft-%d", d.id))
+	}
+	unspill := func(d *document) {
+		if d.spilled {
+			_ = os.Remove(spillPath(d))
+			d.spilled = false
+		}
+	}
+	// THE UNSAVED BUFFER RIDES THE DOCUMENT'S SCOPE (SR17), so a relaunch
+	// gives back what was typed, saved or not.
+	keep := func(d *document) {
+		scope := kaya.DocumentSession(d.id)
+		if !d.dirty() {
+			scope.Remove("draft")
+			scope.Remove("draft.file")
+			unspill(d)
+			return
+		}
+		body := d.body()
+		if len(body) <= draftBound {
+			scope.SetString("draft", body)
+			scope.Remove("draft.file")
+			unspill(d)
+			return
+		}
+		if err := os.WriteFile(spillPath(d), []byte(body), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "editor: the unsaved buffer could not be kept: %v\n", err)
+			return
+		}
+		d.spilled = true
+		scope.SetString("draft.file", spillPath(d))
+		scope.Remove("draft")
+	}
+
 	// THE MARK IS THE DOCUMENT'S, and so is the veto: a clean tab just closes.
 	mark := func(tx *kaya.Tx, d *document) {
 		tx.Document(d.id).Dirty(d.dirty()).InterceptClose(d.dirty())
+		keep(d)
 	}
 
 	// A declared set dies on the next edit (docs/ranges-plan.md D2).
@@ -393,6 +447,10 @@ func App() *kaya.App {
 	// up, no gutter, at the reading measure; a plain one the coding face, the
 	// document's gutter and zoom (docs/looks-plan.md §3.7, RD11).
 	wear := func(tx *kaya.Tx, d *document) {
+		scope := kaya.DocumentSession(d.id)
+		scope.SetI64("zoom", int64(d.zoom))
+		scope.SetBool("numbers", d.numbers)
+		scope.SetBool("rich", d.rich)
 		if d.rich {
 			tx.SetFamily(d.buffer, "")
 			tx.SetMonospaced(d.buffer, false)
@@ -423,11 +481,22 @@ func App() *kaya.App {
 	// The ONLY place a destination moves, and always from a posted
 	// transaction, so it needs no lock. The document's name is its tab's
 	// title, and the window's while it is in front.
+	var remember func(tx *kaya.Tx, name, token string)
 	retarget := func(tx *kaya.Tx, d *document, file *kaya.PickedFile, body string) {
 		d.dest = file
 		d.saved = body
 		d.renamed = false
 		tx.Document(d.id).Title(docName(d.dest))
+		// The file comes back at the next launch by its durable reference (SR11).
+		token, err := file.Reference()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "editor: %s has no durable reference: %v\n", file.Name, err)
+			return
+		}
+		scope := kaya.DocumentSession(d.id)
+		scope.SetString("file", token)
+		scope.SetString("name", file.Name)
+		remember(tx, file.Name, token)
 	}
 
 	// The documents in the app's order; a closed one leaves, and the window
@@ -443,6 +512,7 @@ func App() *kaya.App {
 			return
 		}
 		docs = append(docs[:at], docs[at+1:]...)
+		unspill(d)
 		if active == d && len(docs) > 0 {
 			next := docs[min(at, len(docs)-1)]
 			tx.SelectDocument(next.id)
@@ -511,6 +581,28 @@ func App() *kaya.App {
 		}()
 	}
 
+	// A .kdoc opens rich, anything else plain, read by its content so a
+	// picker's display name decides nothing (RD11).
+	fill := func(tx *kaya.Tx, d *document, file kaya.PickedFile, body string) {
+		kdoc, kerr := kaya.FromKdoc([]byte(body))
+		d.rich = kerr == nil
+		d.readOnly = ""
+		// A PROGRAMMATIC WRITE does not echo, so the fold is by hand;
+		// it also spends the field's native undo history.
+		if d.rich {
+			d.text = kdoc.Document.Text
+			d.readOnly = kdoc.ReadOnly
+			tx.SetDocument(d.buffer, kdoc.Document)
+		} else {
+			d.text = body
+			tx.SetText(d.buffer, body)
+		}
+		retarget(tx, d, &file, body)
+		wear(tx, d)
+		tx.Write(d.where, position(d.text, d.sel.Range))
+		tx.Write(d.words, wordCount(d.text))
+	}
+
 	// A file opens into the active tab while it is pristine, else into a
 	// tab of its own.
 	openFrom := func(file kaya.PickedFile) {
@@ -527,25 +619,7 @@ func App() *kaya.App {
 				if d == nil || !d.pristine() {
 					d = newDocument(tx)
 				}
-				// A .kdoc opens rich, anything else plain, read by its content so
-				// a picker's display name decides nothing (RD11).
-				kdoc, kerr := kaya.FromKdoc([]byte(body))
-				d.rich = kerr == nil
-				d.readOnly = ""
-				// A PROGRAMMATIC WRITE does not echo, so the fold is by hand;
-				// it also spends the field's native undo history.
-				if d.rich {
-					d.text = kdoc.Document.Text
-					d.readOnly = kdoc.ReadOnly
-					tx.SetDocument(d.buffer, kdoc.Document)
-				} else {
-					d.text = body
-					tx.SetText(d.buffer, body)
-				}
-				retarget(tx, d, &file, body)
-				wear(tx, d)
-				tx.Write(d.where, position(d.text, d.sel.Range))
-				tx.Write(d.words, wordCount(d.text))
+				fill(tx, d, file, body)
 				tx.Focus(d.buffer)
 				if d.readOnly != "" {
 					tx.Write(d.status, "read only: "+d.readOnly)
@@ -570,15 +644,25 @@ func App() *kaya.App {
 
 	// One tab: its buffer, its find bar and its status line, each widget's
 	// a11y id carrying the document's number so two tabs never share one.
-	newDocument = func(tx *kaya.Tx) *document {
-		made++
-		d := &document{id: uint64(made), n: made, zoom: 4, numbers: true, rich: writing, app: app}
+	// A restored tab keeps its id, so its widgets keep their a11y ids and
+	// kaya gives back each buffer's caret (SR2, SR9); it takes its scope back
+	// through Restore and is not focused in the transaction that mounts it,
+	// since a commanded focus is the app's own word over the caret (SR4).
+	makeDocument := func(tx *kaya.Tx, docID uint64, restoring bool) *document {
+		made = max(made, int(docID))
+		d := &document{id: docID, n: int(docID), zoom: 4, numbers: true, rich: writing, app: app}
 		docs = append(docs, d)
 		d.status = tx.Signal("new file")
 		d.where = tx.Signal(position("", kaya.TextRange{}))
 		d.count = tx.Signal("")
 		d.words = tx.Signal(wordCount(""))
-		tx.AddDocument(d.id).Title(untitled).Select().
+		add := tx.AddDocument(d.id).Title(untitled)
+		if restoring {
+			add = add.Restore(d.id)
+		} else {
+			add = add.Select()
+		}
+		add.
 			OnSelected(func(tx *kaya.Tx) { activate(tx, d) }).
 			OnCloseRequested(func(tx *kaya.Tx) { ask(tx, d, func(tx *kaya.Tx) { closeDoc(tx, d) }) }).
 			OnClosed(func(tx *kaya.Tx) { forget(tx, d) })
@@ -685,12 +769,78 @@ func App() *kaya.App {
 			}
 		})
 		wear(tx, d)
+		return d
+	}
+	newDocument = func(tx *kaya.Tx) *document {
+		d := makeDocument(tx, uint64(made+1), false)
 		active = d
 		tx.Focus(d.buffer)
 		return d
 	}
 
-	app.Build(func(tx *kaya.Tx) {
+	// A TAB THE LAST LAUNCH LEFT (SR17): its file by reference, read here on
+	// the app goroutine so the text is in the transaction that mounts the
+	// buffer and its caret comes back; then the unsaved buffer over it.
+	reopen := func(tx *kaya.Tx, id uint64) *document {
+		scope := kaya.DocumentSession(id)
+		// Read before the tab is made, whose wear writes the defaults back.
+		zoom := min(max(int(scope.GetI64("zoom", 4)), 0), len(zooms)-1)
+		numbers := scope.GetBool("numbers", true)
+		rich := scope.GetBool("rich", writing)
+		d := makeDocument(tx, id, true)
+		d.zoom, d.numbers, d.rich = zoom, numbers, rich
+		status := "restored"
+		if token := scope.GetString("file", ""); token != "" {
+			name := scope.GetString("name", "")
+			redeemed, err := kaya.Redeem(token)
+			body := ""
+			if err == nil {
+				body, err = readDoc(redeemed.File)
+			}
+			var refused *kaya.ReferenceError
+			switch {
+			case errors.As(err, &refused):
+				fmt.Fprintf(os.Stderr, "editor: %s\n", refused.Message)
+				status = "could not reopen " + name + ": " + refused.Refusal
+				scope.Remove("file")
+				scope.Remove("name")
+			case err != nil:
+				status = "could not reopen " + name + ": " + err.Error()
+			default:
+				fill(tx, d, redeemed.File, body)
+				status = fmt.Sprintf("reopened, %d bytes", len(body))
+			}
+		}
+		draft := scope.GetString("draft", "")
+		if spill := scope.GetString("draft.file", ""); spill != "" {
+			if b, err := os.ReadFile(spill); err == nil {
+				draft, d.spilled = string(b), true
+			}
+		}
+		if draft != "" {
+			if kdoc, err := kaya.FromKdoc([]byte(draft)); d.rich && err == nil {
+				d.text = kdoc.Document.Text
+				tx.SetDocument(d.buffer, kdoc.Document)
+			} else {
+				d.text = draft
+				tx.SetText(d.buffer, draft)
+			}
+			status = "restored unsaved changes"
+		}
+		if d.zoom != 4 {
+			status += fmt.Sprintf(", zoom %d%%", int(zooms[d.zoom]*100+0.5))
+		}
+		wear(tx, d)
+		tx.Write(d.where, position(d.text, d.sel.Range))
+		tx.Write(d.words, wordCount(d.text))
+		tx.Write(d.status, status)
+		mark(tx, d)
+		return d
+	}
+
+	// Posted: the session answers once the app runs (docs/traps.md, iOS's
+	// restoration token).
+	app.Post(func(tx *kaya.Tx) {
 		font = kaya.FontChoice{
 			Family: kaya.Prefs().GetString("font.family", ""),
 			Weight: int(kaya.Prefs().GetI64("font.weight", 400)),
@@ -770,6 +920,67 @@ func App() *kaya.App {
 			activate(tx, newDocument(tx))
 		})
 		file.Item("Open…").Shortcut("primary+o").OnActivate(openDoc)
+		// OPEN RECENT LISTS WHAT REDEEMED (SR17): each entry is redeemed at
+		// launch, a refused one is forgotten, and a file opened or saved since
+		// joins the end (a menu only grows: no item can be taken out).
+		recentMenu := file.Menu("Open Recent")
+		var recent []recentFile
+		_ = json.Unmarshal([]byte(kaya.Prefs().GetString("recent.files", "[]")), &recent)
+		listed := map[string]bool{}
+		listRecent := func(tx *kaya.Tx, name string) {
+			if listed[name] {
+				return
+			}
+			listed[name] = true
+			tx.Menu(recentMenu).Item(name).OnActivate(func(tx *kaya.Tx) {
+				for _, r := range recent {
+					if r.Name != name {
+						continue
+					}
+					redeemed, err := kaya.Redeem(r.Token)
+					var refused *kaya.ReferenceError
+					if errors.As(err, &refused) {
+						fmt.Fprintf(os.Stderr, "editor: %s\n", refused.Message)
+						tx.Write(active.status, "could not reopen "+name+": "+refused.Refusal)
+						return
+					}
+					openFrom(redeemed.File)
+					return
+				}
+			})
+		}
+		saveRecent := func() {
+			b, _ := json.Marshal(recent)
+			kaya.Prefs().SetString("recent.files", string(b))
+		}
+		remember = func(tx *kaya.Tx, name, token string) {
+			kept := []recentFile{{Name: name, Token: token}}
+			for _, r := range recent {
+				if r.Name != name {
+					kept = append(kept, r)
+				}
+			}
+			for _, r := range kept[min(len(kept), recentCap):] {
+				kaya.Forget(r.Token)
+			}
+			recent = kept[:min(len(kept), recentCap)]
+			saveRecent()
+			listRecent(tx, name)
+		}
+		var redeemable []recentFile
+		for _, r := range recent {
+			redeemed, err := kaya.Redeem(r.Token)
+			var refused *kaya.ReferenceError
+			if errors.As(err, &refused) {
+				fmt.Fprintf(os.Stderr, "editor: Open Recent drops %s: %s\n", r.Name, refused.Message)
+				kaya.Forget(r.Token)
+				continue
+			}
+			redeemable = append(redeemable, recentFile{Name: r.Name, Token: redeemed.Token})
+			listRecent(tx, r.Name)
+		}
+		recent = redeemable
+		saveRecent()
 		// The host promotes the first k primaries in catalog preorder.
 		file.Item("Save").Symbol(kaya.SymbolSave).Primary(true).
 			Shortcut("primary+s").OnActivate(save)
@@ -985,7 +1196,25 @@ func App() *kaya.App {
 			ask.Show()
 		})
 
-		newDocument(tx)
+		var shape *kaya.RestoredWindow
+		for _, w := range kaya.RestoredWindows() {
+			if w.ID == 0 && len(w.Documents) > 0 {
+				shape = &w
+			}
+		}
+		if shape == nil {
+			newDocument(tx)
+			return
+		}
+		for _, id := range shape.Documents {
+			d := reopen(tx, id)
+			if active == nil || id == shape.ActiveDocument {
+				active = d
+			}
+		}
+		tx.SelectDocument(active.id)
+		marks(tx, active)
+		app.Post(func(tx *kaya.Tx) { tx.Focus(active.buffer) })
 	})
 
 	return app

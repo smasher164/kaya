@@ -2858,6 +2858,11 @@ for proto in x11 wayland; do
     # Through a11y-leg.sh: almost every read it makes is an AT-SPI read.
     run "$proto" editor-go env KAYA_SELFTEST=editor \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    # The editor across a relaunch (docs/restoration-plan.md SR17), through
+    # persist-leg's resume door as the restore scenes are.
+    export RELAUNCH_DOOR_EDITORRESTORE=resume
+    run "$proto" editorrestore-go env KAYA_SELFTEST=editorrestore \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     # THE CHAT APP (docs/chat-plan.md): Go alone by R1. It posts
     # notifications (C3), so it runs on the portal's desktop, and it picks a
     # photo (C6), whose dialog is read over the accessibility bus. GDK keeps
@@ -2873,6 +2878,11 @@ for proto in x11 wayland; do
         GDK_DEBUG=no-portals \
         tools/linux/notify-leg.sh portal \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    # Chat across a relaunch (docs/restoration-plan.md SR17), through
+    # persist-leg's resume door.
+    export RELAUNCH_DOOR_CHATRESTORE=resume
+    run "$proto" chatrestore-go env KAYA_SELFTEST=chatrestore GDK_DEBUG=no-portals \
+        python3 tools/linux/persist-leg.py tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     # THE CHAT APP'S CALLS (docs/capture-plan.md §8): the capture leg's
     # PipeWire, devices and far end around the chat leg's notification
     # desktop, whose portal bus the camera then takes (granted there).

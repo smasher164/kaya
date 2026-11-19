@@ -299,6 +299,8 @@ LEGS = {
         "farend-go",
         "codesurface-go", "fontpick-go",
         "restore-go", "restoredocs-go", "references-go",
+        # The editor across the platform's continuation (docs/restoration-plan.md SR17).
+        "editorrestore-go", "chatrestore-go",
     ],
     "python": [
         "varied-python", "portfolio-python", "music_home-python", "music_playlist-python",
@@ -349,6 +351,7 @@ RELAUNCH_DOOR = {"tasks": "notify_tap", "taskspersist": "launch",
                  # THE CONTINUATION (docs/restoration-plan.md SR15): act one
                  # parks, HOME stops it, `am kill` ends it with its task kept.
                  "restore": "resume", "restoredocs": "resume", "references": "resume",
+                 "editorrestore": "resume", "chatrestore": "resume",
                  # The user's dismissal: act one leaves with its task removed,
                  # and the plain door's force-stop hands a null saved state.
                  "restorefresh": "fresh"}
@@ -585,7 +588,7 @@ MODS = {
 # verbs: the scenes that leave the app for DocumentsUI or read what an
 # assistive service is handed (the accessibility service), and the one
 # that opens a composing region (the helper IME).
-A11Y_SCENES = ["chat", "filedialog", "save", "saferestore", "editor", "media_picked", "toast", "references"]
+A11Y_SCENES = ["chat", "filedialog", "save", "saferestore", "editor", "editorrestore", "media_picked", "toast", "references"]
 IME_SCENES = ["ranges", "richtext"]
 
 # A scene is wired on this lane IF AND ONLY IF a suite lists it, or it

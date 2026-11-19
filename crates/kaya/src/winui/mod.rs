@@ -18855,6 +18855,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 .TextDocument()?
                 .Selection()?
                 .SetRange(range.start as i32, range.stop as i32)?;
+            caret_moved(id.0);
         }
         ApplyOp::SetColumnHeaders {
             id,
@@ -22350,6 +22351,14 @@ fn schedule_session_idle() {
     }
 }
 
+/// A selection kaya moved itself: ITextSelection::SetRange raises no
+/// SelectionChanged on the field (docs/traps.md, a programmatic selection on
+/// WinUI is not reported), so the report is queued here.
+fn caret_moved(id: u64) {
+    SESSION_CARETS.with_borrow_mut(|c| c.insert(id));
+    schedule_session_idle();
+}
+
 /// SR1's two facets as this backend sees them: each moved textarea's
 /// selection, and the top row of each named For inside a vertical scroll.
 fn report_session_facets(core: &mut CoreState) {
@@ -23006,7 +23015,15 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
     mirror_frame(&window)?;
 
     let closed = bindings::Windows::Foundation::TypedEventHandler::new(|_, _| {
-        // docs/restoration-plan.md SR5: a window close is a save point.
+        // docs/restoration-plan.md SR5: a window close is a save point, with
+        // the selections still queued for the next idle reported first.
+        CORE.with(|slot| {
+            if let Ok(mut core) = slot.try_borrow_mut() {
+                if let Some(core) = core.as_mut() {
+                    report_session_facets(core);
+                }
+            }
+        });
         crate::session::save_point();
         request_exit(0);
         Ok(())
@@ -26346,6 +26363,8 @@ impl crate::harness::Stage for WinUiStage {
                 return Ok(Err(format!("the textarea {why}")));
             }
             field.TextDocument()?.Selection()?.SetRange(a, b)?;
+            // A user's selection raises SelectionChanged; this one does not.
+            caret_moved(widget);
             core.scene.set_text_selection(WidgetId(widget), range.start, range.stop);
             send_scene_asks(core);
             Ok(Ok(()))

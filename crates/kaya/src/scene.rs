@@ -8445,6 +8445,9 @@ impl Scene {
             return FacetOutcome::Stale;
         }
         if commanded.contains(&widget) {
+            if crate::prefs::selftest() {
+                crate::session::say(&format!("KAYA_SESSION: widget {} keeps the app's own command over its saved facet", widget.0));
+            }
             return FacetOutcome::Applied;
         }
         match facet.saved.facet.clone() {
@@ -8462,6 +8465,12 @@ impl Scene {
                 };
                 let range = TextRange::new(clamp(start), clamp(stop));
                 let native = check_range(&text, widget, "restore", range);
+                if crate::prefs::selftest() {
+                    crate::session::say(&format!(
+                        "KAYA_SESSION: widget {} restored caret {}:{} (saved {start}:{stop}, {} bytes of text)",
+                        widget.0, range.start, range.stop, text.len()
+                    ));
+                }
                 out.push(ApplyOp::SelectRange { id: widget, range: native });
                 FacetOutcome::Applied
             }

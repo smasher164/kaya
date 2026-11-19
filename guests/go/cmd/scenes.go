@@ -36,10 +36,10 @@ import (
 	"dev.kaya/guests/go/gallery"
 	"dev.kaya/guests/go/grid"
 	"dev.kaya/guests/go/grounds"
-	"dev.kaya/guests/go/layers"
 	"dev.kaya/guests/go/grow"
 	"dev.kaya/guests/go/hiderows"
 	"dev.kaya/guests/go/identity"
+	"dev.kaya/guests/go/layers"
 	"dev.kaya/guests/go/layout"
 	"dev.kaya/guests/go/media"
 	"dev.kaya/guests/go/menus"
@@ -56,7 +56,10 @@ import (
 	"dev.kaya/guests/go/radio"
 	rangescene "dev.kaya/guests/go/range"
 	"dev.kaya/guests/go/ranges"
+	"dev.kaya/guests/go/references"
 	"dev.kaya/guests/go/reorder"
+	"dev.kaya/guests/go/restore"
+	"dev.kaya/guests/go/restoredocs"
 	"dev.kaya/guests/go/reveal"
 	"dev.kaya/guests/go/richdoc"
 	"dev.kaya/guests/go/richlabel"
@@ -66,9 +69,6 @@ import (
 	"dev.kaya/guests/go/safearea"
 	"dev.kaya/guests/go/save"
 	"dev.kaya/guests/go/scroll"
-	"dev.kaya/guests/go/references"
-	"dev.kaya/guests/go/restore"
-	"dev.kaya/guests/go/restoredocs"
 	"dev.kaya/guests/go/scrollto"
 	"dev.kaya/guests/go/search"
 	"dev.kaya/guests/go/sections"
@@ -189,8 +189,10 @@ var scenes = map[string]func() *kaya.App{
 	"scrollto":         scrollto.App,
 	"chat":             chat.App,
 	"chatcall":         chat.App,
+	"chatrestore":      chat.App,
 	"chatkeyboard":     chat.App,
 	"editorkeyboard":   editor.App,
+	"editorrestore":    editor.App,
 	"chatkeyboardland": chat.App,
 	"sections":         sections.App,
 	"search":           search.App,

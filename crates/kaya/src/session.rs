@@ -255,6 +255,25 @@ fn decode_facets(v: Option<&serde_json::Value>) -> Facets {
     out
 }
 
+fn facet_text(facet: &Facet) -> String {
+    match facet {
+        Facet::Caret { start, stop } => format!("caret {start}:{stop}"),
+        Facet::Row { key } => format!("row {key:?}"),
+    }
+}
+
+/// What a red leg's bundle needs to tell a facet saved wrong from one
+/// restored wrong: every saved facet, by scope and a11y id.
+fn facet_census(facets: &Facets) -> String {
+    let all: Vec<String> = facets
+        .iter()
+        .flat_map(|(scope, entries)| {
+            entries.iter().map(move |(id, saved)| format!("{scope}/{id} {}", facet_text(&saved.facet)))
+        })
+        .collect();
+    if all.is_empty() { "none".to_owned() } else { all.join(", ") }
+}
+
 fn encode_facets(facets: &Facets) -> serde_json::Value {
     let mut scopes = serde_json::Map::new();
     for (scope, entries) in facets {
@@ -562,7 +581,7 @@ fn mac_rule(token: Token) -> Token {
     token
 }
 
-fn say(line: &str) {
+pub(crate) fn say(line: &str) {
     use std::io::Write as _;
     let _ = std::io::stderr().write_all(format!("{line}\n").as_bytes());
 }
@@ -656,11 +675,12 @@ fn load_with(declared: Declared, token: Token, app_id: String, dir: Option<PathB
             .and_then(|t| t.elapsed().ok())
             .map_or("no file".to_owned(), |a| format!("written {} ms ago", a.as_millis()));
         say(&format!(
-            "KAYA_SESSION: pid {} loaded {:?} from {} ({} bytes there, {age}, token {token:?})",
+            "KAYA_SESSION: pid {} loaded {:?} from {} ({} bytes there, {age}, token {token:?}); facets {}",
             std::process::id(),
             swept.restored,
             dir.display(),
-            text.as_ref().map_or(0, String::len)
+            text.as_ref().map_or(0, String::len),
+            facet_census(&swept.facets)
         ));
     }
     if let Some(why) = &swept.why {
@@ -945,6 +965,10 @@ pub(crate) fn report_facet(scope: Scope, id: &str, saved: Saved) {
                 None => entries.remove(id),
             };
             return;
+        }
+        if crate::prefs::selftest() {
+            let now = s.facets.get(&scope.key()).and_then(|m| m.get(id)).map(|v| facet_text(&v.facet));
+            say(&format!("KAYA_SESSION: {}/{id} reported {}", scope.key(), now.unwrap_or_default()));
         }
         s.dirty = true;
     });

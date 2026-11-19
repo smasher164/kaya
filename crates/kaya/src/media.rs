@@ -1069,6 +1069,7 @@ fn visibility_band(shown: f64) -> u8 {
 /// snapped to the nearest device pixel at `scale` first: a scroll resting at
 /// its end left the WinUI feed's last row 0.2 px past the viewport, read as
 /// `in` (docs/traps.md, the feed's last row read `in`).
+#[cfg(any(target_os = "windows", test))]
 pub(crate) fn shown_in_device_pixels(
     view: (f64, f64, f64, f64),
     clips: &[(f64, f64, f64, f64)],

@@ -4,6 +4,36 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A selection kaya sets on WinUI raises no SelectionChanged (measured 2026-11-18)
+
+The windows editorrestore leg restored the buffer's caret as 0:0 after act
+one had read `expect_selection textarea@buffer-1 "2:7=saved"`. The session
+lines (`KAYA_SESSION: <scope>/<id> reported <facet>`, grown for this) showed
+the last report for buffer-1 was 0:0, from before the selection; a probe in
+the RichEditBox's SelectionChanged handler printed nothing for buffer-1 after
+`ITextSelection::SetRange`, only events on the other tab's buffer as focus
+moved. So a selection kaya sets itself (the app's `select_range`, the
+harness's `select_text`) never reached the caret report, which the backend
+queues from that event. `caret_moved` in crates/kaya/src/winui/mod.rs
+queues the report from the SelectRange apply arm and from the harness's
+select_text (standing in for the event a user's selection raises), and the
+window's Closed save point reports the queued selections before it saves.
+Guard: editorrestore_go on the windows lane, red without the fix, red in a
+pooled run with the apply arm's call alone (the harness's selection emits no
+SelectRange op), and red with the apply arm's call cut ("selection 0:0,
+wanted 2:7").
+
+## Compose collapses a field's selection when the field loses focus (measured 2026-11-18)
+
+The android editorrestore leg saved buffer-1's caret as 7:7 where act one had
+selected 2:7 and then opened a file into another tab: Compose's text field
+collapses its selection to the selection's end when focus leaves it, and that
+collapsed caret is what the app and kaya then see, so it is what the session
+saved (the load line's facet census read `window.0/buffer-1 caret 7:7`). The
+other lanes keep an unfocused field's range. Restoring 7:7 is faithful to what
+the platform held; the scene makes its selection last, with the buffer in
+front, so every lane saves the same range.
+
 ## The open panel's last directory in the real domain (measured 2026-11-18)
 
 Matrix #9 on 7d23cbf2 ended with the real-store wall naming

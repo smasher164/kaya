@@ -3740,11 +3740,17 @@ if SUITE in ("go", "all"):
     # The Format menu on the bar above the keyboard (docs/phone-format-plan.md §4).
     queue_scene_leg("go", "editorkeyboard", "editorkeyboard-go", app, "dev.kaya.editorgo",
                     "editorkeyboard", "editorkeyboard")
+    # The editor across the platform's continuation (docs/restoration-plan.md SR17).
+    queue_scene_leg("go", "editorrestore", "editorrestore-go", app, "dev.kaya.editorgo",
+                    "editorrestore", "editorrestore")
     # THE CHAT APP (docs/chat-plan.md): Go alone by R1.
     app = with_dylib(make_bundle("chatgo", "dev.kaya.chatgo",
                                  BUNDLES / "go-bin"))
     queue_scene_leg("go", "chat", "chat-go", app, "dev.kaya.chatgo",
                     "chat", "chat")
+    # Chat across the platform's continuation (docs/restoration-plan.md SR17).
+    queue_scene_leg("go", "chatrestore", "chatrestore-go", app, "dev.kaya.chatgo",
+                    "chatrestore", "chatrestore")
     # The same app's calls (docs/capture-plan.md §8).
     queue_scene_leg("go", "chatcall", "chatcall-go", app, "dev.kaya.chatgo",
                     "chatcall", "chatcall")

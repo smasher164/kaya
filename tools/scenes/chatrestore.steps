@@ -1,0 +1,17 @@
+# CHAT COMES BACK (docs/restoration-plan.md SR17): the open conversation and
+# its unsent draft ride the app's session store, and the thread's scroll is
+# kaya's own facet, which the restored thread does not override.
+expect_title "chat"
+expect_restored fresh
+click row@convo[maya]
+expect_scrolled_to column@thread m27
+click button@quote[m27]
+expect_scrolled_to column@thread m03
+set_text textarea@compose "half a thought"
+
+relaunch resume
+
+expect_restored resumed
+expect textarea@compose "half a thought"
+expect_scrolled_to column@thread m03
+expect label@unread[maya] ""

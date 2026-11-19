@@ -181,6 +181,7 @@ RELAUNCH_DOOR = {"tasks": "com-activator", "taskspersist": "launch",
                  # dismissal (docs/restoration-plan.md SR15): the plain door,
                  # through each leg's act2_<leg>.cmd (tools/lib/win_launchers.py).
                  "restore": "resume", "restoredocs": "resume", "references": "resume",
+                 "editorrestore": "resume", "chatrestore": "resume",
                  # No dismissal exists to drive: act2_<leg>.cmd sets the
                  # session knob KAYA_SESSION_TOKEN=absent.
                  "restorefresh": "fresh"}
@@ -215,7 +216,7 @@ def depth_scenes():
 # A guest that exists in Go and only Go BY DESIGN (docs/editor-plan.md
 # — an editor in Rust would be kaya testing itself). Joins the
 # taskkill sweep and nothing per-language.
-GO_ONLY_SCENES = ["editor", "chat", "chatcall"]
+GO_ONLY_SCENES = ["editor", "editorrestore", "chat", "chatrestore", "chatcall"]
 # Python BY DESIGN: the portfolio (docs/portfolio-plan.md) and the
 # variable-height scene (docs/virtualization-plan.md §5). They join
 # the .py ship and stamp, and no exe family.
@@ -891,10 +892,19 @@ ORDER = [
     [
      "editor_go",
     ],
+    # The editor across a relaunch (docs/restoration-plan.md SR17): editor's
+    # serial reasons.
+    [
+     "editorrestore_go",
+    ],
     # chat_go: OS-global `type` keystrokes into its compose field, the
     # submit legs' serial reason (docs/chat-plan.md).
     [
      "chat_go",
+    ],
+    # Chat across a relaunch (docs/restoration-plan.md SR17): chat's serial reason.
+    [
+     "chatrestore_go",
     ],
     # The chat app's calls (docs/capture-plan.md §8): the lane's virtual
     # camera and cable, so the capture legs' devices are up around it.

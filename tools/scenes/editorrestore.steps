@@ -1,0 +1,38 @@
+# THE EDITOR COMES BACK (docs/restoration-plan.md SR17): an untitled tab's
+# unsaved text and its zoom ride the document's session scope, a file
+# opened from the dialog comes back by its durable reference, the tab in
+# front stays in front, and the buffer's caret is kaya's own facet. Open
+# Recent lists the file it redeemed at launch.
+expect_restored fresh
+expect_documents "untitled"
+expect_title "untitled"
+set_text textarea@buffer-1 "unsaved words"
+menu_activate "View>Zoom In"
+expect label@status-1 "zoom 110%"
+file_dialog_goto $TMP/kaya-editor-$PID
+menu_activate "File>Open…"
+expect_file_dialog kaya-editor-$PID decoy essay notes
+file_choose essay
+expect_documents "untitled|essay"
+expect_document "essay"
+expect_menu "File>Open Recent>essay" enabled
+select_document "untitled"
+expect_document "untitled"
+# LAST, with the buffer in front: Compose collapses a field's selection to its
+# end when the field loses focus, so a selection made before the dialog would
+# be saved on Android as the caret it became.
+select_text textarea@buffer-1 2:7
+expect_selection textarea@buffer-1 "2:7=saved"
+
+relaunch resume
+
+expect_restored resumed
+expect_documents "untitled|essay"
+expect_document "untitled"
+expect textarea@buffer-1 "unsaved words"
+expect label@status-1 "restored unsaved changes, zoom 110%"
+expect_document_dirty "untitled" true
+expect_selection textarea@buffer-1 "2:7=saved"
+expect_runs textarea@buffer-2 "0:16 block=heading1|33:40 italic|67:80 block=heading2|81:173 list=bullet|114:144 indent=1|125:129 color=#016FEF|174:183 block=heading2|184:222 list=numbered|223:243 checked|223:243 color=#0D8501|223:256 list=check|257:298 block=quote"
+expect_document_dirty "essay" false
+expect_menu "File>Open Recent>essay" enabled
