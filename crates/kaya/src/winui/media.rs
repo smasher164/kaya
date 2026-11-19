@@ -805,6 +805,10 @@ const END_OVERRUN_MS: u64 = 500;
 /// How long an adaptive item's first frame may take to state its size.
 const SIZE_WAIT_MS: u64 = 3000;
 
+/// How long an http(s) edit-list read may hold the open (docs/traps.md, the
+/// edit-list read whose connection never connected).
+const SHIFT_WAIT_MS: u64 = 2000;
+
 fn size_settled(core: &mut CoreState, id: u64, generation: u64) {
     if live(core, id, generation) && core.media.players.get(&id).is_some_and(|p| p.awaiting_size) {
         finish_open(core, id, generation);
@@ -1000,8 +1004,9 @@ fn load(core: &mut CoreState, id: u64, url: &str) -> windows_core::Result<()> {
                 eprintln!(
                     "KAYA_DIAG winui player {id}: still opening after {OPEN_REPORT_MS} ms — MediaSource.State {state} \
                      (0 Initial, 1 Opening, 2 Opened, 3 Failed), session state {:?}; this process's TCP \
-                     connections to {endpoint} by local port: {connections}; unix ms {}",
+                     connections to {endpoint} by local port: {connections}; the edit-list read {}; unix ms {}",
                     session.as_ref().map(|s| s.0),
+                    if p.shift_pending { "is still holding the open" } else { "holds nothing" },
                     unix_ms()
                 );
                 p.trail.print(generation);
@@ -1064,6 +1069,11 @@ fn read_shift(core: &mut CoreState, id: u64, generation: u64, url: &str) {
         return;
     }
     p.shift_pending = true;
+    p.trail.note(generation, "edit-list read started".to_owned());
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(SHIFT_WAIT_MS));
+        post(move |core| shift_overdue(core, id, generation));
+    });
     let url = url.to_owned();
     std::thread::spawn(move || {
         // SAFETY: this thread's own apartment, ended with the thread.
@@ -1079,12 +1089,35 @@ fn read_shift(core: &mut CoreState, id: u64, generation: u64, url: &str) {
             }
             let Some(p) = core.media.players.get_mut(&id) else { return };
             p.shift_pending = false;
+            p.trail.note(generation, "edit-list read answered".to_owned());
             settle_shift(p, id, &url, read);
             if p.opened {
                 finish_open(core, id, generation);
             }
         });
     });
+}
+
+/// The edit-list read had not answered: the item opens with its clock unmoved,
+/// and a late answer moves the clock when it lands.
+fn shift_overdue(core: &mut CoreState, id: u64, generation: u64) {
+    if !live(core, id, generation) {
+        return;
+    }
+    let Some(p) = core.media.players.get_mut(&id) else { return };
+    if !p.shift_pending {
+        return;
+    }
+    p.shift_pending = false;
+    p.trail.note(generation, format!("edit-list read unanswered after {SHIFT_WAIT_MS} ms; opening without it"));
+    eprintln!(
+        "KAYA_DIAG winui player {id}: the edit-list read had not answered after {SHIFT_WAIT_MS} ms, so the \
+         item opens with its clock unmoved until it does; unix ms {}",
+        unix_ms()
+    );
+    if p.opened {
+        finish_open(core, id, generation);
+    }
 }
 
 fn settle_shift(p: &mut WinPlayer, id: u64, url: &str, read: Result<Option<crate::edit_list::Shift>, String>) {

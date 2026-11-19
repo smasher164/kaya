@@ -4867,6 +4867,14 @@ def winui_media_arms(media_src=None):
         bad.append("fn read_tracks reports a rebuilt item's default tracks while it reopens")
     if opened is None or "p.shift_pending" not in opened.split("return;", 1)[0]:
         bad.append("fn finish_open does not wait for an http(s) edit list still being read")
+    shift = rust_fn(code, "read_shift") or ""
+    overdue = rust_fn(code, "shift_overdue") or ""
+    if "post(move |core| shift_overdue(core, id, generation));" not in shift \
+            or "p.shift_pending = false;" not in overdue \
+            or "finish_open(core, id, generation);" not in overdue:
+        bad.append("fn read_shift holds the open on the edit-list read with no bound — a read "
+                   "whose connection never connects leaves the item loading (docs/traps.md, "
+                   "the edit-list read whose connection never connected)")
     shown = rust_fn(code, "shown_fraction")
     if shown is None or "crate::media::shown_in_device_pixels(view, &clips, scale)" not in shown \
             or re.search(r"/ \(?w \* h\)?", shown):
@@ -5016,6 +5024,8 @@ for pattern, repl, label, want in (
      r"p\.player\.StepBackwardOneFrame\(\)\)", "Pause()", "the paused seek's frame step cut", 1),
     (r"(\|p\| p\.loaded) \|\| p\.shift_pending\)", ")",
      "the open not waiting for the edit list", 1),
+    (r"(\n +)post\(move \|core\| shift_overdue\(core, id, generation\)\);", "",
+     "the edit-list hold without a bound", 1),
     (r"(\n +)Ok\(crate::media::shown_in_device_pixels\(view, &clips, scale\)\)",
      "Ok(clips.iter().fold(1.0, |f, _| f))",
      "the visibility fraction taken without the device-pixel snap", 1),

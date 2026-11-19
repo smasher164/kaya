@@ -4,6 +4,23 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The edit-list read whose connection never connected (measured 2026-11-19)
+
+The fcce6b1c matrix's windows media_delivery_rust stayed `loading` on its first
+item, h264_aac.mp4, though MediaOpened came at +509 ms: finish_open never ran,
+because the WinUI player holds the open until its http edit-list read answers
+(media.rs read_shift). At 5 s the process had two connections to the media
+server, WMF's ESTABLISHED one and 58040 in SYN_SENT; the server never logged
+58040, and the host's `netstat -s -p tcp` read 0 listen queue overflows since
+boot, so the SYN was lost before the server's accept queue (the host at load
+139, thermal pressure HEAVY). The hold now has a bound (SHIFT_WAIT_MS, 2 s): past
+it the item opens with its clock unmoved and a late answer moves the clock when
+it lands; the open trail notes the read's start, answer or overrun, and the
+still-opening line says whether the read is holding the open. Watched: the
+reader forced to sleep 20 s passed with the bound (29 s) and failed with it cut
+(41 s, the matrix's sentence, "the edit-list read is still holding the open").
+check-verbs holds the bound.
+
 ## The dnd witness wrote the Windows guest's real session store (measured 2026-11-19)
 
 `%LOCALAPPDATA%\dev.kaya.aurora.notes\kaya-session\session.v1` on the VM was
