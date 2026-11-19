@@ -101,15 +101,27 @@ def gtk_findings(source):
         out.append(f"{GTK}: the windowed arm parks inside the drain's borrow, where the park's "
                    f"main-loop spin dispatches sources that borrow the core (docs/traps.md, "
                    f"the GTK table's nested spin)")
-    if "park_table_row_begin(core, id, index)" not in (finish or ""):
+    if "park_table_row(id, index)" not in (finish or ""):
         out.append(f"{GTK}: the windowed arm does not take the harness's own park (§3)")
-    if "park_table_row_begin(core, id, index)" not in block_after(
-            src, "\nfn park_table_row(core: &mut CoreState, id: u64, index: usize)"):
+    if "slot.try_borrow_mut().is_err()" not in (finish or ""):
+        out.append(f"{GTK}: finish_parks runs whether or not the core is borrowed, so an idle "
+                   f"dispatched inside another step's spin parks inside that borrow "
+                   f"(docs/traps.md, the GTK table's nested spin)")
+    park = block_after(src, "\nfn park_table_row(id: u64, index: usize)")
+    if "park_table_row_begin(core, id, index)" not in park:
         out.append(f"{GTK}: park_table_row no longer starts with the command's park (§3)")
+    if ("CORE.with_borrow_mut(" not in park
+            or "\n    while glib::MainContext::default().iteration(false) {}\n" not in park):
+        out.append(f"{GTK}: park_table_row spins the loop inside a borrow of the core, or no "
+                   f"longer borrows it itself (docs/traps.md, the GTK table's nested spin)")
     harness = block_after(src, "fn scroll_to_row(&self, t: crate::harness::Target, key: &str)")
-    if "park_table_row(core, id, index)" not in harness:
+    if "park_table_row(id, index)" not in harness:
         out.append(f"{GTK}: the harness's scroll_to_row no longer shares park_table_row with the "
                    f"command — the two parks can drift by a correction cycle (§3)")
+    if "Self::on_main_free(" not in harness or "Self::on_main_mut(" in harness:
+        out.append(f"{GTK}: the harness's scroll_to_row parks inside on_main_mut's borrow, where "
+                   f"the park's spin dispatches sources that borrow the core (docs/traps.md, "
+                   f"the GTK table's nested spin)")
     if "adj.connect_changed(" not in fn:
         out.append(f"{GTK}: a request on content that has not laid out is dropped rather than "
                    f"held on the adjustment's `changed` (S4)")
@@ -268,16 +280,36 @@ n4 = gate.doctor("the gtk hold cut", REAL[GTK], r"let handler = adj\.connect_cha
                  "let handler = adj.connect_value_changed(")
 watched("a GTK request dropped before layout", {**REAL, GTK: n4}, "dropped rather than held")
 n5 = gate.doctor("the gtk harness park unshared", REAL[GTK],
-                 r"            park_table_row\(core, id, index\);\n            String::new\(\)\n",
-                 "            let _ = index;\n            String::new()\n")
+                 r"                    park_table_row\(id, index\);\n"
+                 r"                    String::new\(\)\n",
+                 "                    let _ = index;\n                    String::new()\n")
 watched("a GTK harness verb with its own park", {**REAL, GTK: n5},
         "no longer shares park_table_row")
 n5b = gate.doctor("the gtk park back inside the drain", REAL[GTK],
                   r"        PENDING_PARKS\.with_borrow_mut\(\|parks\| "
                   r"parks\.push\(\(id, index\)\)\);\n",
-                  "        park_table_row(core, id, index);\n")
+                  "        park_table_row(id, index);\n")
 watched("a GTK table park inside the drain's borrow", {**REAL, GTK: n5b},
         "parks inside the drain's borrow")
+n5c = gate.doctor("the gtk harness park back inside on_main_mut", REAL[GTK],
+                  r"Self::on_main_free\(move \|\| \{\n            let resolved",
+                  "Self::on_main_mut(move |core| {\n            let resolved")
+watched("a GTK harness park inside on_main_mut's borrow", {**REAL, GTK: n5c},
+        "parks inside on_main_mut's borrow")
+n5d = gate.doctor("the gtk park's spin moved inside its borrow", REAL[GTK],
+                  r"(            park_table_row_begin\(core, id, index\);\n        \}\n    \}\);\n)"
+                  r"    while glib::MainContext::default\(\)\.iteration\(false\) \{\}\n",
+                  "            park_table_row_begin(core, id, index);\n"
+                  "            while glib::MainContext::default().iteration(false) {}\n"
+                  "        }\n    });\n")
+watched("a GTK park that spins inside its own borrow", {**REAL, GTK: n5d},
+        "spins the loop inside a borrow")
+n5e = gate.doctor("the gtk finish_parks borrow check cut", REAL[GTK],
+                  r"    if CORE\.with\(\|slot\| slot\.try_borrow_mut\(\)\.is_err\(\)\) \{\n"
+                  r"        glib::timeout_add_local_once\(std::time::Duration::from_millis\(10\), "
+                  r"finish_parks\);\n        return;\n    \}\n", "")
+watched("a GTK finish_parks inside another step's borrow", {**REAL, GTK: n5e},
+        "whether or not the core is borrowed")
 n6 = gate.doctor("the gtk top write cut", REAL[GTK],
                  r"        adj\.set_value\(top\);\n",
                  "        let _ = top;\n")
@@ -345,7 +377,7 @@ n17 = gate.doctor("the compose park no longer moving the generation", REAL[COMPO
 watched("a Compose park that never moves the generation", {**REAL, COMPOSE: n17},
         "still the latest park")
 
-gate.negatives_ran(23)
+gate.negatives_ran(26)
 
 for line in census(REAL):
     gate.finding(line)

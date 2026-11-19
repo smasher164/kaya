@@ -109,9 +109,14 @@ inside a drain now queues the park (PENDING_PARKS) and `finish_parks` runs it
 from an idle with the main-loop spin OUTSIDE the borrow; GtkStage::on_main and
 on_main_mut also wait for CORE (`when_core_free`, a 10 ms re-arm, session_idle's
 shape: a ready idle source would keep the nested `while iteration` loop
-spinning forever). Still open: the harness's own scroll_to_row verb parks
-inside on_main_mut's borrow. Guard: music_restore-python on both linux
+spinning forever). Guard: music_restore-python on both linux
 protocols, red without it.
+The harness's own scroll_to_row verb parked inside on_main_mut's borrow the
+same way until 2026-11-19: park_table_row now takes no core and borrows it
+itself, before and after the spin, so a caller still holding it panics at once
+instead of only when a source happens to borrow it; the verb resolves and
+parks in one main-loop job with the core free (on_main_free), and finish_parks
+waits for a free core as the doorbell does. check-scroll-to holds all three.
 
 ## A runner found act two under the default app's id (measured 2026-11-18)
 

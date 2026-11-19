@@ -6300,12 +6300,23 @@ fn scroll_axis(core: &CoreState, t: crate::harness::Target) -> Option<Along> {
 
 /// Park a windowed table's band on `index` and scroll the row to the
 /// viewport's top: the harness's scroll_to_row and the app's
-/// (docs/scroll-to-plan.md §3) share it.
-fn park_table_row(core: &mut CoreState, id: u64, index: usize) {
-    park_table_row_begin(core, id, index);
+/// (docs/scroll-to-plan.md §3) share it. It borrows the core itself, so a
+/// caller already holding it panics at once: the spin between the two
+/// borrows dispatches sources that borrow the core (docs/traps.md, the GTK
+/// table's nested spin).
+fn park_table_row(id: u64, index: usize) {
+    CORE.with_borrow_mut(|core| {
+        if let Some(core) = core.as_mut() {
+            park_table_row_begin(core, id, index);
+        }
+    });
     while glib::MainContext::default().iteration(false) {}
-    window_report(core, id);
-    reflow_table(core, id);
+    CORE.with_borrow_mut(|core| {
+        if let Some(core) = core.as_mut() {
+            window_report(core, id);
+            reflow_table(core, id);
+        }
+    });
 }
 
 fn park_table_row_begin(core: &mut CoreState, id: u64, index: usize) {
@@ -6339,19 +6350,12 @@ thread_local! {
 /// released the core: the park spins the main loop, and a source that loop
 /// dispatches may borrow the core (docs/traps.md, the GTK table's nested spin).
 fn finish_parks() {
+    if CORE.with(|slot| slot.try_borrow_mut().is_err()) {
+        glib::timeout_add_local_once(std::time::Duration::from_millis(10), finish_parks);
+        return;
+    }
     for (id, index) in PENDING_PARKS.with_borrow_mut(std::mem::take) {
-        CORE.with_borrow_mut(|core| {
-            if let Some(core) = core.as_mut() {
-                park_table_row_begin(core, id, index);
-            }
-        });
-        while glib::MainContext::default().iteration(false) {}
-        CORE.with_borrow_mut(|core| {
-            if let Some(core) = core.as_mut() {
-                window_report(core, id);
-                reflow_table(core, id);
-            }
-        });
+        park_table_row(id, index);
     }
 }
 
@@ -23505,6 +23509,16 @@ impl GtkStage {
         Self::await_frames(2);
     }
 
+    /// On the main loop with the core free and NOT borrowed, for a step that
+    /// spins the loop between borrows of its own (park_table_row).
+    fn on_main_free<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = std::sync::mpsc::channel();
+        when_core_free(Box::new(move || {
+            let _ = tx.send(f());
+        }));
+        rx.recv().expect("the main context applied the step")
+    }
+
     fn on_main<T: Send + 'static>(
         f: impl FnOnce(&CoreState) -> T + Send + 'static,
     ) -> T {
@@ -27239,23 +27253,32 @@ impl crate::harness::Stage for GtkStage {
     /// answer here is a sentence about what stopped it.
     fn scroll_to_row(&self, t: crate::harness::Target, key: &str) -> String {
         let key = key.to_owned();
-        Self::on_main_mut(move |core| {
-            let Some(id) = for_container_id(core, t) else {
-                return "<no such target>".to_owned();
-            };
-            let Some(id) = id else {
-                return "this container declares no columns, so this tier gives it \
-                        no viewport to park a row in (docs/virtualization-plan.md §6.3)"
-                    .to_owned();
-            };
-            let scene = &mut core.scene;
-            let Some(index) = crate::fault::guard("resolving scroll_to_row", || {
-                scene.scroll_to_row(id, &crate::protocol::Value::Str(key.clone()))
-            }) else {
-                return format!("no row of this collection carries the key {key:?}");
-            };
-            park_table_row(core, id, index);
-            String::new()
+        Self::on_main_free(move || {
+            let resolved = CORE.with_borrow_mut(|core| {
+                let core = core.as_mut().expect("core state initialized");
+                let Some(id) = for_container_id(core, t) else {
+                    return Err("<no such target>".to_owned());
+                };
+                let Some(id) = id else {
+                    return Err("this container declares no columns, so this tier gives it \
+                                no viewport to park a row in (docs/virtualization-plan.md §6.3)"
+                        .to_owned());
+                };
+                let scene = &mut core.scene;
+                let Some(index) = crate::fault::guard("resolving scroll_to_row", || {
+                    scene.scroll_to_row(id, &crate::protocol::Value::Str(key.clone()))
+                }) else {
+                    return Err(format!("no row of this collection carries the key {key:?}"));
+                };
+                Ok((id, index))
+            });
+            match resolved {
+                Ok((id, index)) => {
+                    park_table_row(id, index);
+                    String::new()
+                }
+                Err(why) => why,
+            }
         })
     }
     /// THE DRAG VERB IS REAL INPUT ON THIS LANE (docs/dnd-plan.md D10): a

@@ -718,9 +718,11 @@ kayaTryScrollRow clears the scroll's kept offset, so a remounted copy's
 restore a turn later cannot undo the app's scroll; hiderows reads the
 restore, and nothing reads the race. AND GTK'S TABLE PARKS OUTSIDE THE
 DRAIN'S BORROW since 2026-11-18 (docs/traps.md, the GTK table's nested spin):
-the command queues the park and finish_parks spins the main loop with the
-core released, through the same park_table_row_begin the harness verb takes.
-23 watched negatives, counts printed)
+the command queues the park and finish_parks, once the core is free, runs
+the same park_table_row the harness verb runs, which borrows the core itself
+around its spin; the verb parks from a main-loop job holding no borrow
+(on_main_free), since 2026-11-19.
+26 watched negatives, counts printed)
 
 ## tools/check-search.py
 
