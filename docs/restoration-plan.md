@@ -1032,8 +1032,19 @@ binding-level semantics.
 - **Recorder.** The session load line names every facet the file brought,
   each changed facet report and each restored caret prints under a scene
   run, and `act one emptied <dir>` prints at each act one.
-- **Not settled here: the real stores on the Mac.** The chat leg's real
-  NSOpenPanel writes `NSOSPLastRootDirectory` into the app's real
-  preferences domain out of process (docs/traps.md, "The open panel's last
-  directory in the real domain"); the fix (a scratch bundle identity for
-  scene runs, or the runner writing the keys back) is the maintainer's.
+- **The real stores on the Mac: RULED A (the maintainer, 2026-11-18).** The
+  chat leg's real NSOpenPanel writes `NSOSPLastRootDirectory` into the app's
+  real preferences domain out of process (docs/traps.md, "The open panel's
+  last directory in the real domain"). Every bundle the mac lane builds now
+  carries the scratch identity `<id>.lane` (tools/lib/packaging/mac.py
+  `LANE_SUFFIX`, passed by the lane's three bundle calls), so AppKit's keys,
+  saved state and the notification grant land in that domain; the real-store
+  wall treats it as scratch, and `leg_argv` refuses a bundled leg under a
+  real identity, naming the leg. Only tools/package.py's shipped bundle keeps
+  the declared id; no leg is about the shipped identity (kaya's own stores and
+  the link scheme follow the manifest, not the bundle). Guards: check-app-
+  identity's C17 (a lane bundle call without the flag, leg_argv without the
+  refusal); chat-go with the real identity put back refused by run-leg naming
+  the leg, and the gate sweep refused it first. The scratch suites
+  `<id>.selftest.<hash>` and the unbundled legs' per-executable domains are
+  docs/deferred.md's entry.

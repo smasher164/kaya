@@ -17593,3 +17593,24 @@ KEY: expect_tint none, caption[t8], iOS dark tint read, 8D8D93, secondaryLabel
   tintsdark-swiftui ("tint success (ink 8D8D93; success 34C759, ...)", run
   20261105T104330Z-081707) and green after on all five lanes
   (`validate-all --only tints,tasks`, 40 legs).
+
+## OPEN — Mac scene runs leave preference domains behind (found 2026-11-18, the real-store ruling)
+
+KEY: selftest suite, .selftest.<hash>.plist, per-executable domain, kaya-go.plist, LANE_SUFFIX, scratch preference domain
+- The ruling (RULED A, docs/restoration-plan.md §9) keeps scene runs out of
+  the user's real domain, but two kinds of scratch still pile up in
+  ~/Library/Preferences: every act one makes a `<id>.selftest.<fnv of the
+  leg's state home>` suite (crates/kaya/src/prefs.rs `leg_tag`) that nothing
+  deletes (912 on the maintainer's Mac on 2026-11-18, 60 KB), and every
+  unbundled leg's AppKit domain is its executable's name (`kaya-go`,
+  `kaya-python`, `kaya-java`, `kaya-dotnet`, `kaya-node`, `restoredocs`,
+  `doctabs`, `sections`, `fullscreen`, `confirm` and `.exe` twins).
+- Not cheap on the same path: the suite's name is the core's hash of the
+  leg's state home, so deleting it from the runner is a second spelling of
+  that rule (or the core deletes its suite after the last act, which needs
+  the harness to know it is the last act on every platform); keeping bare
+  executables off ~/Library/Preferences needs each one wrapped in a lane
+  bundle or run under a scratch home.
+- Closing this means: whoever creates a suite deletes it (proven by a leg
+  that leaves none), and no unbundled leg writes a domain under its
+  executable's name. The files already there are the maintainer's to remove.

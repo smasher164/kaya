@@ -3,8 +3,8 @@ none of them (docs/traps.md, a gate wrote the user's real session store).
 
 Every root an app's own store lives under (prefs, data, session, reference
 ledger) on the host this runs on, filtered to `dev.kaya*` entries; a
-`.selftest` preference suite is the harness's scratch by name and is left
-out. A snapshot is {path: (kind, size, mtime_ns)}, a preference plist's by
+`.selftest` preference suite and a lane bundle's `.lane` domain are the
+harness's scratch by name and are left out. A snapshot is {path: (kind, size, mtime_ns)}, a preference plist's by
 its parsed content instead, since cfprefsd rewrites one whose content a run
 left as it found it (the mac lane's windowmem sentinel plants and removes a
 key by design; docs/traps.md, AppKit's frame autosave); `moved` names what a
@@ -52,12 +52,19 @@ def _entry(path):
     return (kind, 0 if kind == "dir" else st.st_size, 0 if kind == "dir" else st.st_mtime_ns)
 
 
+def scratch_bundle(name):
+    """A lane bundle's own domain (packaging/mac.py LANE_SUFFIX), scratch by name."""
+    from packaging.mac import LANE_SUFFIX
+    stem = name[:-len(".plist")] if name.endswith(".plist") else name
+    return stem.endswith(LANE_SUFFIX)
+
+
 def snapshot(under=None):
     seen = {}
     for root in roots() if under is None else under:
         try:
             tops = [p for p in root.iterdir() if p.name.startswith(PREFIX)
-                    and ".selftest" not in p.name]
+                    and ".selftest" not in p.name and not scratch_bundle(p.name)]
         except OSError:
             continue
         for top in tops:

@@ -1300,6 +1300,15 @@ def py_bundled(stem):
     return stem in app_identity.APPS
 
 
+def python_stems():
+    """Every stem a python leg of this lane runs: ORDER's and the dark legs'.
+    SCENES alone left the music app's bundle unstaged, so its legs ran
+    whatever bundle an older run had left."""
+    scenes = {e[0] for e in ORDER if len(e) == 2 and isinstance(e[1], tuple) and "python" in e[1]}
+    scenes |= {scene for _name, scene, lang in DARK_LEGS if lang == "python"}
+    return sorted({guest_stem(s) for s in scenes})
+
+
 def stage_python(root, stems):
     """Each bundled python app's .app, through the generator's mac arm with
     the app's own declaration; a fresh kaya-python copy every time."""
@@ -1314,7 +1323,8 @@ def stage_python(root, stems):
     for stem in stems:
         if py_bundled(stem):
             packaging_mac.bundle(root, pathlib.Path(python), staging, stem=stem,
-                                 accessory=True, manifest=app_identity.manifest_for(stem))
+                                 accessory=True, manifest=app_identity.manifest_for(stem),
+                                 lane=True)
 
 
 def rust_guest_path(stem):
@@ -1347,7 +1357,7 @@ def stage_rust(root, stems):
             shutil.copy2(built, dest)
             continue
         packaging_mac.bundle(root, built, staging, stem=stem,
-                             accessory=stem not in REGULAR_BUNDLES)
+                             accessory=stem not in REGULAR_BUNDLES, lane=True)
 CS_GUEST = "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 
 # THE SECOND ACT'S DOOR ON THIS LANE (docs/tasks-s9-plan.md R6a).
@@ -1710,11 +1720,30 @@ def act_one_ok(log_text):
     return "KAYA_SELFTEST: ACT 1 OK" in log_text
 
 
+def require_lane_bundle(argv, leg):
+    """A bundled leg runs under the scratch bundle identity, or AppKit writes
+    the user's real domain (packaging/mac.py LANE_SUFFIX)."""
+    from packaging.mac import LANE_SUFFIX
+    exe = pathlib.Path(argv[0])
+    if not (exe.parent.name == "MacOS" and exe.parent.parent.name == "Contents"):
+        return
+    path = exe if exe.is_absolute() else _ROOT / exe
+    if not (path.parent.parent / "Info.plist").is_file():
+        return
+    domain = standard_domain([str(path)])
+    if not domain.endswith(LANE_SUFFIX):
+        raise SystemExit(f"mac lane: {leg} would run {exe.parent.parent.parent.name} under the "
+                         f"bundle identity {domain}, the user's real domain; lane bundles are "
+                         f"built with packaging_mac.bundle(..., lane=True), which names it "
+                         f"{domain}{LANE_SUFFIX} (docs/restoration-plan.md §9)")
+
+
 def leg_argv(scene, lang, hs_bin):
     """The guest command for one leg, through require_modern's stamp wall;
     `hs_bin(stem)` resolves a Haskell binary (cabal list-bin)."""
     stem = guest_stem(scene)
     argv = require_modern(_guest_argv(scene, lang, hs_bin, stem), lang)
+    require_lane_bundle(argv, leg_name(scene, lang))
     if RELAUNCH_DOOR.get(scene) == "resume":
         # Both acts run as a user who keeps windows at a quit.
         argv = argv + ["-NSQuitAlwaysKeepsWindows", "YES"]
@@ -1880,7 +1909,7 @@ def build_go(root, log=None):
     for scene in sorted(BUNDLED_GO_SCENES):
         app = packaging_mac.bundle(root, root / GO_GUESTS / "kaya-go",
                                    root / GO_GUESTS, stem=scene,
-                                   accessory=True)
+                                   accessory=True, lane=True)
         # THE PLATFORM'S LAUNCH CARRIES NO KAYA_SELFTEST (docs/traps.md, the
         # cold notification reply of 2026-09-27): the bundle must name its
         # scene itself, asked here with that variable removed.

@@ -77,7 +77,15 @@ def url_types(declared):
             '  </dict></array>\n')
 
 
-def info_plist(declared, executable, accessory):
+# A SCENE RUN'S BUNDLE IDENTITY (docs/restoration-plan.md §9, RULED A
+# 2026-11-18): what AppKit and the system key by bundle id (the open panel's
+# NSOSP keys, saved state, notification grants) lands in `<id>.lane`, never
+# the user's real domain. tools/lib/real_stores.py treats it as scratch, and
+# the mac lane's leg_argv refuses a leg whose bundle lacks it.
+LANE_SUFFIX = ".lane"
+
+
+def info_plist(declared, executable, accessory, lane=False):
     """The plist, every value out of the declaration."""
     ui_element = ("  <key>LSUIElement</key><true/>\n" if accessory else "")
     return ('<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -85,7 +93,8 @@ def info_plist(declared, executable, accessory):
             '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
             '<plist version="1.0">\n<dict>\n'
             f'  <key>CFBundleExecutable</key><string>{executable}</string>\n'
-            f'  <key>CFBundleIdentifier</key><string>{declared.id}</string>\n'
+            f'  <key>CFBundleIdentifier</key>'
+            f'<string>{declared.id}{LANE_SUFFIX if lane else ""}</string>\n'
             f'  <key>CFBundleName</key><string>{declared.name}</string>\n'
             f'  <key>CFBundleDisplayName</key>'
             f'<string>{declared.name}</string>\n'
@@ -163,7 +172,7 @@ def write_entitlements(declared, app):
 
 
 def bundle(root, executable, out_dir, *, stem=None, accessory=False,
-           register=True, manifest=None, shipped=False):
+           register=True, manifest=None, shipped=False, lane=False):
     """Wrap `executable` in a .app under `out_dir` and return its path.
 
     A FRESH INODE EVERY TIME, or the kernel kills the guest at exec
@@ -191,7 +200,7 @@ def bundle(root, executable, out_dir, *, stem=None, accessory=False,
     write_icns(declared.icon_path.read_bytes(),
                resources / "AppIcon.icns", app / "Contents")
     (app / "Contents/Info.plist").write_text(
-        info_plist(declared, name, accessory), encoding="utf-8")
+        info_plist(declared, name, accessory, lane), encoding="utf-8")
     _run(["codesign", "--force", "--sign", "-", str(app)],
          f"ad-hoc signing {app.name}")
     write_entitlements(declared, app)

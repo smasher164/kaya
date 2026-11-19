@@ -201,7 +201,7 @@ RUST_GUESTS.mkdir(parents=True)
 lane.stage_rust(ROOT, [*lane.SCENES, *lane.DEPTH_SCENES])
 if lane.build_hosts(ROOT) != 0:
     die("validate-mac: the python, java, C# and JS hosts did not build (tools/mac/kaya-host.c)")
-lane.stage_python(ROOT, sorted({lane.guest_stem(s) for s in [*lane.SCENES, *lane.DEPTH_SCENES]}))
+lane.stage_python(ROOT, lane.python_stems())
 _staged = sum(1 for _ in RUST_GUESTS.iterdir()) + 1
 # The measurement above is ~10us an entry, so the cap guards against the
 # build directory, not against a scene more: 128 entries cost ~1ms.
@@ -1053,11 +1053,17 @@ for _entry in lane.ORDER:
             status = 1
     elif _kind == "dark_leg":
         for _name, _scene, _lang in lane.DARK_LEGS:
+            # Before the argv: an unwanted leg's bundle is not staged, and
+            # leg_argv refuses a stale one (tools/lib/lanes/mac.py require_lane_bundle).
+            if not only.wanted(_name):
+                continue
             queue_leg(_name, leg_argv(_scene, _lang),
                       leg_env(_scene, _lang, appearance="dark"), _scene)
     else:
         _scene, _langs = _entry
         for _lang in _langs:
+            if not only.wanted(lane.leg_name(_scene, _lang)):
+                continue
             queue_leg(lane.leg_name(_scene, _lang),
                       leg_argv(_scene, _lang), leg_env(_scene, _lang),
                       _scene)

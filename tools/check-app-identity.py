@@ -1121,6 +1121,30 @@ def check(root):
     global _web_tag
     _web_tag += 1
     bad += web_claims.check(root, g.scratch(), _web_tag)
+    bad += lane_bundle_findings(root)
+    return bad
+
+
+def lane_bundle_findings(root):
+    """C17: every bundle the mac lane builds carries the scratch identity and
+    every leg's argv is refused under a real one (RULED A, 2026-11-18,
+    docs/restoration-plan.md §9)."""
+    bad = []
+    lane = (root / "tools/lib/lanes/mac.py").read_text(encoding="utf-8")
+    calls = re.findall(r"packaging_mac\.bundle\((.*?)\)\n", lane, re.S)
+    if not calls or any("lane=True" not in c for c in calls):
+        bad.append(f"tools/lib/lanes/mac.py: {sum('lane=True' not in c for c in calls)} of "
+                   f"{len(calls)} packaging_mac.bundle calls build a bundle under the real "
+                   f"identity; pass lane=True")
+    start = lane.find("\ndef leg_argv(")
+    body = lane[start:lane.find("\ndef ", start + 1)] if start >= 0 else ""
+    if "require_lane_bundle(argv, leg_name(scene, lang))" not in body:
+        bad.append("tools/lib/lanes/mac.py: leg_argv no longer refuses a bundle under the real "
+                   "identity (require_lane_bundle)")
+    mac = (root / "tools/lib/packaging/mac.py").read_text(encoding="utf-8")
+    if '{declared.id}{LANE_SUFFIX if lane else ""}' not in mac:
+        bad.append("tools/lib/packaging/mac.py: the Info.plist's CFBundleIdentifier no longer "
+                   "takes LANE_SUFFIX for a lane bundle")
     return bad
 
 
@@ -1771,7 +1795,19 @@ for _tag, _rel, _pat, _repl, _want in (
     doctor_shadow(f"the {_tag} cut", s, _rel, _pat, _repl)
     g.negative(f"C16 with the {_tag} cut", lambda p=s: check(p), want=_want)
 
-g.negatives_ran(50)
+# N46-N47 — C17's own.
+for _tag, _rel, _pat, _repl, _want in (
+    ("realchat", "tools/lib/lanes/mac.py", r"stem=scene,\n( +)accessory=True, lane=True\)",
+     r"stem=scene,\n\1accessory=True)", "build a bundle under the real identity"),
+    ("norefuse", "tools/lib/lanes/mac.py",
+     r"    require_lane_bundle\(argv, leg_name\(scene, lang\)\)\n", "",
+     "leg_argv no longer refuses"),
+):
+    s = fresh(_tag)
+    doctor_shadow(f"the {_tag} cut", s, _rel, _pat, _repl)
+    g.negative(f"C17 with the {_tag} cut", lambda p=s: check(p), want=_want)
+
+g.negatives_ran(52)
 
 # The vacuity floor rule 5 asks for: the census below walks these six
 # roots, and a walk that found almost nothing agrees with everything.

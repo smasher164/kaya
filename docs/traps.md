@@ -114,11 +114,10 @@ refused `NSOSP*`/`NSNavPanel*` keys never fired and the domain changed
 anyway (the panel is an out-of-process service), so that refusal was
 removed rather than kept as a guard that holds nothing. So every full
 matrix whose mac lane runs chat-go writes the user's real panel memory,
-and the wall reds the verdict. Not fixed yet; the options: the mac runner
-saves the real domain's `NSOSP*`/`NSNavPanel*` values before a leg that
-drives an open panel and writes them back after (the windowmem sentinel's
-shape: the content ends unchanged); or scene runs on the Mac under a
-scratch bundle identity.
+and the wall reds the verdict. FIXED 2026-11-18 by the maintainer's ruling
+(option A): every mac lane bundle carries the scratch identity `<id>.lane`,
+so the panel's keys land there (docs/restoration-plan.md §9 has the guards).
+The two values already in the real domain were left for the maintainer.
 
 ## The previous source's position heard after a source change (measured 2026-11-18)
 
