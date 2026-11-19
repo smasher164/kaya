@@ -4518,22 +4518,7 @@ fn remeasure_when_loaded(child: WidgetId, element: &FrameworkElement) -> windows
 fn longest_word_width(block: &TextBlock) -> windows_core::Result<f64> {
     let text = block.Text()?.to_string();
     let mut widest: f64 = 0.0;
-    let probe = TextBlock::new()?;
-    probe.SetFontFamily(&block.FontFamily()?)?;
-    probe.SetFontSize(block.FontSize()?)?;
-    probe.SetFontWeight(block.FontWeight()?)?;
-    probe.SetFontStyle(block.FontStyle()?)?;
-    probe.SetFontStretch(block.FontStretch()?)?;
-    probe.SetTextWrapping(block.TextWrapping()?)?;
-    // An Arabic heading measured 67px in its own RightToLeft flow and 70px in
-    // the probe's LeftToRight one (the windows tasksrtl leg, 2026-11-04).
-    let flow: FrameworkElement = block.cast()?;
-    let probe_element: FrameworkElement = probe.cast()?;
-    probe_element.SetFlowDirection(flow.FlowDirection()?)?;
-    // AND ITS LANGUAGE: the ground carries the locale's tag, and a bold
-    // Arabic word shaped under ar-EG measured 67px where the probe's en-US
-    // shaping gave 70px.
-    probe_element.SetLanguage(&flow.Language()?)?;
+    let probe = word_probe(block)?;
     let ui: UIElement = probe.cast()?;
     for word in text.split_whitespace() {
         probe.SetText(&HSTRING::from(word))?;
@@ -4543,7 +4528,52 @@ fn longest_word_width(block: &TextBlock) -> windows_core::Result<f64> {
         })?;
         widest = widest.max(f64::from(ui.DesiredSize()?.Width));
     }
-    Ok(widest)
+    // NO WORD IS WIDER THAN THE BLOCK'S OWN ONE-LINE MEASURE, and the off-tree
+    // probe can shape wider than the block it copies (docs/traps.md, the
+    // tasksrtl heading: 70px against the label's 67px).
+    let (natural, _) = measured_widths(&block.cast()?)?;
+    Ok(if natural > 0.0 { widest.min(natural) } else { widest })
+}
+
+/// What the probe saw, for the clipping sentence: its measure of the label's
+/// WHOLE text beside the label's own, and the settings it shaped under
+/// (docs/traps.md, the tasksrtl heading).
+#[cfg(feature = "harness")]
+fn word_probe_report(block: &TextBlock, natural: f64) -> windows_core::Result<String> {
+    let probe = word_probe(block)?;
+    probe.SetText(&block.Text()?)?;
+    let ui: UIElement = probe.cast()?;
+    ui.Measure(bindings::Windows::Foundation::Size { Width: f32::INFINITY, Height: f32::INFINITY })?;
+    let whole = f64::from(ui.DesiredSize()?.Width);
+    let probe_element: FrameworkElement = probe.cast()?;
+    let element: FrameworkElement = block.cast()?;
+    let scale = element.XamlRoot().and_then(|r| r.RasterizationScale()).map_or("none".to_string(), |s| s.to_string());
+    Ok(format!(
+        "the probe measures the whole text at {whole}px where the label measures {natural}px \
+         (probe: language {:?}, flow {}, family {:?}; label: language {:?}, flow {}, \
+         character spacing {}, scale {scale})",
+        probe_element.Language()?.to_string(),
+        probe_element.FlowDirection()?.0,
+        probe.FontFamily()?.Source()?.to_string(),
+        element.Language()?.to_string(),
+        element.FlowDirection()?.0,
+        block.CharacterSpacing()?,
+    ))
+}
+
+fn word_probe(block: &TextBlock) -> windows_core::Result<TextBlock> {
+    let probe = TextBlock::new()?;
+    probe.SetFontFamily(&block.FontFamily()?)?;
+    probe.SetFontSize(block.FontSize()?)?;
+    probe.SetFontWeight(block.FontWeight()?)?;
+    probe.SetFontStyle(block.FontStyle()?)?;
+    probe.SetFontStretch(block.FontStretch()?)?;
+    probe.SetTextWrapping(block.TextWrapping()?)?;
+    let flow: FrameworkElement = block.cast()?;
+    let probe_element: FrameworkElement = probe.cast()?;
+    probe_element.SetFlowDirection(flow.FlowDirection()?)?;
+    probe_element.SetLanguage(&flow.Language()?)?;
+    Ok(probe)
 }
 
 fn measured_widths(element: &FrameworkElement) -> windows_core::Result<(f64, f64)> {
@@ -31188,18 +31218,20 @@ impl crate::harness::Stage for WinUiStage {
                 if let Some(past) = off_screen(&element, "label", &text, &ground)? {
                     return Ok(past);
                 }
+                // Read before the probe, whose own measure of the label resets it.
+                let desired = f64::from(element.DesiredSize()?.Width) - margin.Left - margin.Right;
                 let word = longest_word_width(label)?;
                 if presented(&element, &ground)? && word > width + 1.0 && !capped {
-                    let desired = f64::from(element.DesiredSize()?.Width) - margin.Left - margin.Right;
                     let (natural, _) = measured_widths(&element)?;
                     return Ok(format!(
                         "label {text:?} is {width}px wide, narrower than its longest word at {word}px \
                          (it asked for {desired}px, measures {natural}px unbounded, at {}pt weight {} of {:?}, \
-                         flow {})",
+                         flow {}); {}",
                         label.FontSize()?,
                         label.FontWeight()?.Weight,
                         label.FontFamily()?.Source()?.to_string(),
-                        element.FlowDirection()?.0
+                        element.FlowDirection()?.0,
+                        word_probe_report(label, natural)?
                     ));
                 }
             }

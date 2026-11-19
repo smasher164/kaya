@@ -20961,6 +20961,20 @@ host load 77 in a filtered matrix) read "asked for 67px, measures 67px
 unbounded" against the probe's 70px: the block measures its own word narrower
 than the probe does, so the stale-layout cause is out and the two measures
 disagree on shaping or fallback.
+SETTLED (2026-11-18): the sentence grew the probe's own view (its measure of
+the label's whole text, both languages and flows, the family, character
+spacing and the XamlRoot scale), and a forced print on a solo run read it
+back: "the probe measures the whole text at 70px where the label measures
+67px (probe: language \"ar-EG\", flow 1, family \"Segoe UI Variable\"; label:
+language \"ar-EG\", flow 1, character spacing 0, scale 1)". Every setting the
+probe copies agrees and the off-tree probe still shapes the bold 32pt word 3px
+wider (a 14pt multi-word label on the same page agreed at 91px); the cause
+inside WinUI is not known. The probe's answer is now bounded by the block's
+own unbounded measure (no word is wider than the one-line text), which is
+both the shrink floor's and the clipping check's longest word. The 66.18px
+the label got is under its 67px ask by less than the check's 1px slack. The
+copies of flow and language stay: each was the first hypothesis here, and
+neither moved the 70px.
 
 ## A fill read inside a WinUI ListView item (measured 2026-11-04)
 
