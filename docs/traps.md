@@ -27,6 +27,12 @@ kaya-handoffs/charges/prefs-cleanup-win-session); the same directory's
 witness's first start also registers the declared identity under
 HKCU\Software\Classes\AppUserModelId, as 552 WinUI legs of that matrix did; that key is
 not a kaya store and the wall does not read the registry.
+A LOOK COSTS ABOUT A SECOND UNDER A MATRIX: 19 looks took 7 s in all (the
+longest 0.6 s) on an otherwise idle host, and with the look inside each leg's
+clock and slot the 5317c107 matrix's windows legs' sum rose 488 s (+15%, 594
+legs, about 0.8 s each) and its suites phase 1713 -> 1858 s, 1832 s net against
+the 1900 s ceiling. So the look runs after the leg has released its slot and
+written its seconds, and deploy-win prints the wall's own total.
 
 ## Scratch suites and bare executables' domains piled up in ~/Library/Preferences (measured 2026-11-19)
 

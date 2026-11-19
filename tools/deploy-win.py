@@ -2532,7 +2532,6 @@ def _leg_worker_slot(name, grouped):
         leg_epoch = int(time.time())
         STORES.began(name)
         ok = run_one_suite(name, slot, log)
-        STORES.ended(name)
         refused = secure_refusals(name, log)
         for line in refused:
             print(f"{name}: {line}", file=log)
@@ -2540,6 +2539,8 @@ def _leg_worker_slot(name, grouped):
         secs = int(time.monotonic() - t0)
         (LEGS_DIR / f"{name}.secs").write_text(f"{secs}\n", encoding="utf-8")
         _release_slot(slot)
+        # Off the leg's clock and its slot (docs/traps.md, the dnd witness entry).
+        STORES.ended(name)
         verdict = "PASS" if ok else "FAIL"
         (LEGS_DIR / f"{name}.verdict").write_text(f"{verdict}\n",
                                                   encoding="utf-8")
@@ -3132,6 +3133,9 @@ if os.environ.get("KAYA_RECORD"):
 # complete one, which is how an ios run that reached no leg at all was
 # read as a pass (2026-08-29). tools/check-gates.py holds all five
 # runners to this.
+if STORES.read_secs:
+    print(f"deploy-win: the real-store wall read the guest {len(STORES.read_secs)} times, "
+          f"{sum(STORES.read_secs):.0f}s in all, the longest {max(STORES.read_secs):.1f}s")
 for sentence in STORES.refused:
     print(f"deploy-win: {sentence}", file=sys.stderr)
     status = 1

@@ -2581,10 +2581,10 @@ def drive():
                   [host_tick(PS, PS, VM_A, VM_B, 1.0, 1.0, "07:22:30")]))
     cases.append(("host tick no vm_stat", "vm_stat unreadable (no page size in its output)",
                   [host_tick(PS, PS, "", VM_B, 1.0, 1.0, "07:22:30")]))
-    clock = iter(f"07:22:{s:02d}" for s in range(60))
+    clock = iter(f"07:22:{s:02d}" for s in range(100000))
     tables = iter([(PS, None), (ps_next, None), ("", "ps did not answer within 30s")]
                   + [(PS, None)] * 1000)
-    timeline = HostTimeline(tick=0.01, cap=0.3, ps=lambda: next(tables),
+    timeline = HostTimeline(tick=0.005, cap=0.1, ps=lambda: next(tables),
                             vm=lambda: (VM_A, None), load=lambda: (2.0, 0, 0),
                             clock=lambda: next(clock))
     timeline.start()
@@ -2594,7 +2594,7 @@ def drive():
                   [timeline.at("07:22:01") or "no tick at 07:22:01"]))
     cases.append(("timeline unreadable", "07:22:02 process table unreadable (ps did not answer",
                   [timeline.at("07:22:02") or "no tick at 07:22:02"]))
-    cases.append(("timeline cap", "stopped: the 0.3s cap", text.splitlines()))
+    cases.append(("timeline cap", "stopped: the 0.1s cap", text.splitlines()))
     cases.append(("timeline past its end", "None", [repr(timeline.at("08:00:00"))]))
     cases.append(("timeline summary", "%, the busiest: 07:22:01 load1 2.0",
                   [timeline.summary()]))

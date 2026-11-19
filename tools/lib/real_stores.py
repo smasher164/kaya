@@ -18,6 +18,7 @@ import os
 import pathlib
 import plistlib
 import sys
+import time
 
 PREFIX = "dev.kaya"
 
@@ -146,6 +147,7 @@ class LegWatch:
         self.since = set()
         self.refused = []
         self.blind = []
+        self.read_secs = []
 
     def began(self, name):
         with self.lock:
@@ -156,8 +158,10 @@ class LegWatch:
         with self.lock:
             self.taken += 1
             mine = self.taken
+        t0 = time.monotonic()
         now = self.read()
         with self.lock:
+            self.read_secs.append(time.monotonic() - t0)
             self.running.discard(name)
             if now is None or self.snap is None:
                 if now is None:
