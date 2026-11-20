@@ -137,3 +137,15 @@ group inside it ends at +158 s, off its critical path.
 
 Nothing in this charge implements these; each is a change in kind that needs
 its own measurement first.
+
+## Mac, raised 2026-11-20 (the maintainer: "go ahead")
+
+The third cold matrix (ecdd6917, the PipeWire voice fix) read mac 1276 s net
+against 1250, every leg green on every lane. The per-leg sum over the 959
+common legs was flat across the three cold matrices (3209, 3307, 3265 s), and
+the lane's exit line read load 164.6/147.7/114.1 on 18 cores (the Windows VM's
+QEMULauncher 274%, pyhost 149%): the extra wall is contention from the other
+lanes' cold builds and runs, which is the worst-case loop the ruling measures.
+Cold readings 1162, 1189, 1276; mac moves 1250 -> 1350, about 1.06x over the
+highest. The pull that goes with it: the Windows VM's share of the host during
+the overlap (Windows item 1 above cuts its cold link and copy).

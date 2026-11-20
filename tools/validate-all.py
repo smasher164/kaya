@@ -135,7 +135,8 @@ BUDGETS = {
     # 1250 since 2026-11-18 (session restoration): 32 new legs (restore,
     # restoredocs, references in ten languages, auxquit, restorefresh) summing
     # 71s; matrix #7 read 1169 net, 1098 without them. 1250 is 1.07x over it.
-    "mac": 1250,
+    # 1350 since 2026-11-20: docs/measurements/lane-ceilings-2026-11-20.md.
+    "mac": 1350,
     # 600 since 2026-09-01: the ninth binding took the roster 604 -> 684
     # legs (one js leg per python leg on both protocols); the first
     # contended matrix after read 459s. 700 since 2026-09-04: the roster
