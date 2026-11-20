@@ -2159,14 +2159,6 @@ fn check_attr_name(widget: WidgetId, op: &str, name: &str) {
     );
 }
 
-fn check_block_value(widget: WidgetId, op: &str, value: &str) {
-    assert!(
-        crate::wire::BLOCK_KINDS.iter().any(|(_, n)| *n == value),
-        "kaya: {op} on {widget:?}: {value:?} is not a block kind — the vocabulary is {}",
-        vocabulary(crate::wire::BLOCK_KINDS)
-    );
-}
-
 /// The paragraphs a byte range touches, whole (docs/rich-text-plan.md §17:
 /// a ranged block act covers them as the widget's own act would).
 fn paragraph_bounds(text: &str, range: TextRange) -> TextRange {

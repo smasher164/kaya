@@ -360,6 +360,31 @@ def host_tick(ps_a, ps_b, vm_a, vm_b, secs, load1, at, labels=None, n=5):
             f"born: {busy or 'no process used CPU'}; {mem}")
 
 
+def emulator_rss_text(pids):
+    return _run(["ps", "-o", "pid=,rss=", "-p", ",".join(str(p) for p in sorted(pids))])
+
+
+def parse_rss(text):
+    out = {}
+    for line in (text or "").splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            out[int(parts[0])] = int(parts[1]) << 10
+    return out
+
+
+def emulator_resident(rss_a, rss_b, labels):
+    """Each emulator's resident set at the tick's end and its move across it (docs/traps.md,
+    the emulator's audio input: whether the leg's emulator faulted its memory back at the open)."""
+    a, b = parse_rss(rss_a), parse_rss(rss_b)
+    if not b:
+        return "emulators' resident sets unreadable"
+    said = [f"{labels.get(pid, pid)} {gb(size)} ({round((size - a[pid]) / (1 << 20)):+d} MB)"
+            if pid in a else f"{labels.get(pid, pid)} {gb(size)}"
+            for pid, size in sorted(b.items(), key=lambda kv: str(labels.get(kv[0], kv[0])))]
+    return "resident: " + ", ".join(said)
+
+
 # THE QUIET ROW WAITS FOR THE POOL (docs/traps.md, the emulator's audio input): the
 # row's own staging left the pool's emulators at up to 11 cores while its first
 # microphone leg opened its input; idle, the five sit near 45%.
@@ -415,9 +440,11 @@ class HostTimeline:
 
     def __init__(self, tick=HOST_TICK_S, cap=HOST_TIMELINE_CAP_S, ps=host_ps_text,
                  vm=lambda: _run(["vm_stat"]), load=os.getloadavg,
-                 clock=lambda: time.strftime("%H:%M:%S")):
+                 clock=lambda: time.strftime("%H:%M:%S"), args=host_args_text,
+                 rss=emulator_rss_text):
         self.tick, self.cap, self.ps, self.vm, self.load, self.clock = (
             tick, cap, ps, vm, load, clock)
+        self.args, self.rss = args, rss
         self.rows = []
         self.labels = {}
         self.head = ""
@@ -425,7 +452,7 @@ class HostTimeline:
         self._thread = None
 
     def start(self):
-        args, problem = host_args_text()
+        args, problem = self.args()
         self.labels = ({} if problem else
                        {pid: f"emulator-{port}" for port, pid in emulator_pids(args).items()})
         self.head = (f"host-timeline: every {self.tick:g}s from {self.clock()}, at most "
@@ -440,6 +467,7 @@ class HostTimeline:
     def _loop(self):
         ps_a, _ = self.ps()
         vm_a, _ = self.vm()
+        rss_a = self.rss(self.labels)[0] if self.labels else ""
         t_a = t0 = time.monotonic()
         while not self._stop.wait(self.tick):
             if time.monotonic() - t0 > self.cap:
@@ -447,14 +475,17 @@ class HostTimeline:
                 return
             ps_b, ps_problem = self.ps()
             vm_b, _ = self.vm()
+            rss_b = self.rss(self.labels)[0] if self.labels else ""
             t_b = time.monotonic()
             at = self.clock()
             if ps_problem:
                 self.rows.append((at, f"{at} process table unreadable ({ps_problem})"))
             else:
-                self.rows.append((at, host_tick(ps_a, ps_b, vm_a, vm_b, t_b - t_a,
-                                                self.load()[0], at, self.labels)))
-            ps_a, vm_a, t_a = ps_b, vm_b, t_b
+                row = host_tick(ps_a, ps_b, vm_a, vm_b, t_b - t_a, self.load()[0], at, self.labels)
+                if self.labels:
+                    row += "; " + emulator_resident(rss_a, rss_b, self.labels)
+                self.rows.append((at, row))
+            ps_a, vm_a, rss_a, t_a = ps_b, vm_b, rss_b, t_b
 
     def stop(self):
         self._stop.set()
@@ -2584,14 +2615,21 @@ def drive():
     clock = iter(f"07:22:{s:02d}" for s in range(100000))
     tables = iter([(PS, None), (ps_next, None), ("", "ps did not answer within 30s")]
                   + [(PS, None)] * 1000)
+    sizes = iter([("300 1048576\n", None)] + [("300 1572864\n", None)] * 1000)
     timeline = HostTimeline(tick=0.005, cap=0.1, ps=lambda: next(tables),
                             vm=lambda: (VM_A, None), load=lambda: (2.0, 0, 0),
-                            clock=lambda: next(clock))
+                            clock=lambda: next(clock),
+                            args=lambda: ("  300 /usr/bin/qemu-system-aarch64 -port 5554\n", None),
+                            rss=lambda pids: next(sizes))
     timeline.start()
     timeline._thread.join(timeout=10)
     text = timeline.stop()
     cases.append(("timeline tick", "07:22:01 load1 2.0; cpu ",
                   [timeline.at("07:22:01") or "no tick at 07:22:01"]))
+    cases.append(("timeline resident", "; resident: emulator-5554 1.5 GB (+512 MB)",
+                  [timeline.at("07:22:01") or "no tick at 07:22:01"]))
+    cases.append(("emulator resident unread", "emulators' resident sets unreadable",
+                  [emulator_resident("300 1\n", "", {300: "emulator-5554"})]))
     cases.append(("timeline unreadable", "07:22:02 process table unreadable (ps did not answer",
                   [timeline.at("07:22:02") or "no tick at 07:22:02"]))
     cases.append(("timeline cap", "stopped: the 0.1s cap", text.splitlines()))

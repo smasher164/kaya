@@ -347,7 +347,11 @@ collection keys. See DESIGN.md's transport section for the doctrine.
   `case`, and each one carries the measurement that set it). A lane
   that slows by this much changed in KIND — look for work added to every
   leg before assuming load. Raise a ceiling in validate-all.py only with
-  a reason.
+  a reason, and set it from a COLD reading: a matrix on a commit that
+  changes crates/kaya, so every lane rebuilds the core, never one whose
+  lanes were pre-warmed (the maintainer, 2026-11-20: the ceiling measures
+  the iteration loop in its worst case, which includes the rebuild;
+  docs/measurements/lane-ceilings-2026-11-20.md).
 - `DEPTH_SCENES` is the tier for a scene wired RUST-ONLY during a depth
   slice: it builds and runs the rust example without demanding the other
   languages' guests, which SCENES membership does. check-steps enforces

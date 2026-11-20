@@ -63,6 +63,12 @@ copy, sha equal). A real core change still compiles the binary cold, and the
 warm lane's 1830-1855 s net leaves that no room under 1900 s.
 Whether the ceiling should leave room for a cold build is for the maintainer.
 
+RULED 2026-11-20 (the maintainer): the ceiling is set from a cold reading, a
+core change included, not judged net of the build. The cold matrix on
+84fb1e98 read windows 2063 s net (build 220, deploy 89, package 10 against
+5, 34 and 17 warm) and the ceiling is 2200
+(docs/measurements/lane-ceilings-2026-11-20.md).
+
 ## The keyed target read off the main thread (measured 2026-11-19)
 
 The 62098299 matrix's mac portfolio-python-swiftui failed `expect_tint
@@ -15784,6 +15790,26 @@ emulator was faulting back memory the system had compressed while it sat
 idle through the matrix. So CPU starvation is not this sighting's premise;
 a memory stall of the emulator at the open is the one reading the timeline
 carries, and one sighting does not settle it.
+
+THE THIRD BREAK (2026-11-20, the matrix on 84fb1e98, bundle
+20261120T181622Z-017366 android-capture-compose) does not agree with the
+second on the pager. capture-compose, the row's first leg, broke at its first
+input's open (10:16:59, 146 failed reads) after the settle wait held (84%,
+46%, 44%). The tick of the first failed read: load1 6.4, cpu 244% (its own
+emulator 128%), 0.1 GB free, 27730 decompressions and 22396 compressions,
+the largest pager tick of the leg, with compressions at 0 from the next
+second and free memory back to 1.1 GB in ten. The second break had 1.3 GB
+free and no compressions at all, and an idle host reads 4 GB free with
+sporadic decompressions of up to 3800 a second, while the row's passing legs
+ran at 0.9 and 0.3 GB free. So neither free memory nor the pager's counts
+separate a break from a pass, and the reading that would (whether the leg's
+own emulator was faulting its guest memory back at the open) was not in the
+bundle. The recorder grew (2026-11-20): every host-timeline tick names each
+emulator's resident set and its move across the tick (lane_health.
+emulator_resident; check-flightrec LH32-LH33), read back on a forced red
+(an idle pool sits at 4.1-4.9 GB each, moving by a few MB a second). A guest
+whose idle memory the host compressed shows a low resident set that climbs
+at the open; the next break says whether that happened.
 
 ## The WinUI self-view colour: the platform's player over a camera's frame source decodes BT.601 as BT.709 (measured 2026-10-03)
 

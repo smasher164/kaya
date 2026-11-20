@@ -4217,6 +4217,12 @@ for label, rel, pattern, repl, want, check in (
         ("LH31 the pool called settled on its first quiet second", LANE_HEALTH,
          r"quiet = quiet \+ 1 if seen\[-1\] < bound else 0", "quiet = ticks",
          "branch `pool settled` did not print", lane_health_checks),
+        ("LH32 an emulator's resident move read off one reading", LANE_HEALTH,
+         r"round\(\(size - a\[pid\]\) / \(1 << 20\)\)", "round(size / (1 << 20))",
+         "branch `timeline resident` did not print", lane_health_checks),
+        ("LH33 the timeline's tick without the emulators' resident sets", LANE_HEALTH,
+         r'row \+= "; " \+ emulator_resident\(rss_a, rss_b, self\.labels\)', "pass",
+         "branch `timeline resident` did not print", lane_health_checks),
         ("LH16 a windows reading past cmd.exe's line", LANE_HEALTH,
          r'^(\"took=\"\+\$w\.ElapsedMilliseconds\n)', "\\1" + "#" + "x" * 2600 + "\n",
          "cmd.exe refuses", lane_health_checks)):
@@ -4423,6 +4429,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(328 + (5 if DRIVES else 0))
+gate.negatives_ran(330 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

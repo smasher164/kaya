@@ -199,7 +199,8 @@ BUDGETS = {
     # took the roster 473 -> 503 legs and the matrix at ee6b56b6 read 1771s
     # net with a cold build and deploy (285s against 47s); the warm matrix
     # before it read 1742. 1900 is about 1.07x over the reading.
-    "windows": 1900,
+    # 2200 since 2026-11-20: docs/measurements/lane-ceilings-2026-11-20.md.
+    "windows": 2200,
     # 600 since 2026-09-01: the lane ran 113 legs from 2026-08-31, five
     # accepted matrices measuring 452-491s. 600 is 1.22x over that band's
     # top. HELD at 600 on 2026-09-03 with the roster at 116 (the dnd leg
@@ -228,7 +229,8 @@ BUDGETS = {
     # (80s of it on the swift suite's device, the resume door's background
     # and settle included) and the picker press's provider settle, 13 waits
     # summing 77.5s on matrix #7, which read 1441 net. 1550 is 1.08x over it.
-    "ios": 1550,
+    # 1650 since 2026-11-20: docs/measurements/lane-ceilings-2026-11-20.md.
+    "ios": 1650,
     # 310 since 2026-08-20: the pool-degradation trap's remedy is a COLD
     # BOOT (docs/traps.md), and a reboot run carries ~60-90s of emulator
     # startup a warm-pool ceiling read as an anomaly; a measured cold-boot
