@@ -21,6 +21,11 @@ and whether kaya compiled or was fresh (tools/lib/unit_build.py). By hand, with
 crates/kaya/src/act2.rs touched, the same cargo command logged `stale: changed
 ".../crates"` (build.rs's `rerun-if-changed` on the whole directory) and
 compiled kaya in 158 s. check-flightrec holds the log and the sentence (NU1).
+The sentence's first version timed the build from its start to the phase's
+join and printed "took 106s; kaya was fresh" on the 6cbf53f0 matrix, where the
+binary was fresh and the 106 s was the deploy phases it overlaps; a waiter
+thread now stamps the build's own exit, and the sentence gives the build's run
+and the phase's wait apart.
 Whether the ceiling should leave room for a cold build is for the maintainer.
 
 ## The keyed target read off the main thread (measured 2026-11-19)

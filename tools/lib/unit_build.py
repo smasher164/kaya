@@ -4,9 +4,10 @@ the windows lane over its ceiling on a cold unit-test build)."""
 import json
 
 
-def said(json_text, seconds):
-    """One sentence from cargo's --message-format=json stream and the build's
-    wall time: whether the kaya library was compiled or fresh."""
+def said(json_text, ran, waited):
+    """One sentence from cargo's --message-format=json stream, how long the
+    build ran and how long the phase waited on it: whether kaya's test binary
+    was compiled or fresh."""
     fresh = None
     for line in json_text.splitlines():
         try:
@@ -18,10 +19,11 @@ def said(json_text, seconds):
                 and "rlib" in m.get("target", {}).get("kind", [])):
             fresh = m.get("fresh")
     if fresh is None:
-        state = "kaya's library reported no artifact"
+        state = "kaya's test binary reported no artifact"
     elif fresh:
-        state = "kaya was fresh"
+        state = "kaya's test binary was fresh"
     else:
-        state = ("kaya COMPILED; cargo's reason is the `fingerprint` lines above "
-                 "(stale: the changed path, dirty: the unit)")
-    return f"deploy-win: the unit test build took {seconds:.0f}s; {state}"
+        state = ("kaya's test binary COMPILED; cargo's reason is the `fingerprint` lines "
+                 "above (stale: the changed path, dirty: the unit)")
+    return (f"deploy-win: the unit test build ran {ran:.0f}s and the phase waited "
+            f"{waited:.0f}s on it; {state}")

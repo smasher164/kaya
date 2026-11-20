@@ -740,6 +740,10 @@ UNIT_BUILD = subprocess.Popen(
      "--lib", "--no-run", "--message-format=json"],
     cwd=ROOT, stdout=_unit_json, start_new_session=True,
     env=xwin_env(dict(os.environ, CARGO_LOG="cargo::core::compiler::fingerprint=info")))
+UNIT_BUILD_END = []
+UNIT_BUILD_WAITER = threading.Thread(
+    target=lambda: UNIT_BUILD_END.append((UNIT_BUILD.wait(), time.time())[1]), daemon=True)
+UNIT_BUILD_WAITER.start()
 
 
 def stop_unit_build():
@@ -1646,10 +1650,12 @@ def unit_tests_on_windows():
     print("== unit tests on the guest (aarch64-pc-windows-msvc) ==",
           flush=True)
     json_path = UNIT_JSON
+    joined = time.time()
     built = UNIT_BUILD.wait()
+    UNIT_BUILD_WAITER.join()
     _unit_json.close()
     print(unit_build.said(json_path.read_text(encoding="utf-8"),
-                          time.time() - UNIT_BUILD_START), flush=True)
+                          UNIT_BUILD_END[0] - UNIT_BUILD_START, time.time() - joined), flush=True)
     if built != 0:
         print("deploy-win: the unit test binary would not build for windows.",
               file=sys.stderr)
