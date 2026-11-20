@@ -172,6 +172,64 @@ mod tests {
     /// The nounwind chokepoints, each read from the file it lives in by
     /// `include_str!` — so this test cannot read a stale copy, and the
     /// Windows-only body is censused on every platform's `cargo test`.
+    /// Read at run time, never `include_str!`: an include puts the file in
+    /// the test binary's dep-info (docs/traps.md, the windows lane over its
+    /// ceiling on a cold unit-test build).
+    fn beside_the_core(rel: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").join(rel);
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("kaya: the census cannot read {}: {e}", path.display()))
+    }
+
+    /// The wall for the above: no core source includes a file from outside
+    /// the crate but WinUI's vendored font, which ships inside the dll.
+    #[test]
+    fn no_core_source_includes_a_file_outside_the_crate() {
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let crate_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).canonicalize().unwrap();
+        let mut stack = vec![src];
+        let (mut read, mut outside) = (0, Vec::new());
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|e| e != "rs") {
+                    continue;
+                }
+                read += 1;
+                let text = std::fs::read_to_string(&path).unwrap();
+                for macro_name in ["include_str!(", "include_bytes!("] {
+                    for (at, _) in text.match_indices(macro_name) {
+                        if text[..at].ends_with('"') {
+                            continue;
+                        }
+                        let rest = text[at + macro_name.len()..].trim_start();
+                        let Some(lit) = rest.strip_prefix('"').and_then(|r| r.split('"').next()) else {
+                            continue;
+                        };
+                        let target = path.parent().unwrap().join(lit);
+                        let inside = target.canonicalize().is_ok_and(|t| t.starts_with(&crate_dir));
+                        let font = path.ends_with("winui/mod.rs") && lit.ends_with(".ttf");
+                        if !inside && !font {
+                            outside.push(format!("{}: {macro_name}\"{lit}\")", path.display()));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(read > 20, "kaya: the include census read only {read} source file(s)");
+        assert!(
+            outside.is_empty(),
+            "kaya: {outside:?} put a file from outside crates/kaya into the core's dep-info, so \
+             every edit of it recompiles the core (the windows lane's unit-test build, rung 1); \
+             read it at run time with beside_the_core (docs/traps.md, the windows lane over its \
+             ceiling on a cold unit-test build)"
+        );
+    }
+
     const CAPI: &str = include_str!("capi.rs");
     const SCENE: &str = include_str!("scene.rs");
     const WINUI: &str = include_str!("winui/mod.rs");
@@ -433,9 +491,8 @@ mod tests {
     /// docs/measurements/choke-macos-2026-08-24.txt).
     #[test]
     fn no_pump_sizes_its_own_buffer() {
-        let swift = include_str!("../../../swift/KayaSwiftUI.swift");
-        let kotlin =
-            include_str!("../../../android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt");
+        let swift = &beside_the_core("swift/KayaSwiftUI.swift");
+        let kotlin = &beside_the_core("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt");
         for (src, opener, closer, names, file) in [
             (
                 swift,
@@ -513,9 +570,8 @@ mod tests {
     #[test]
     fn every_harness_runner_watches() {
         let rust = include_str!("harness.rs");
-        let swift = include_str!("../../../swift/KayaSwiftUI.swift");
-        let kotlin =
-            include_str!("../../../android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt");
+        let swift = &beside_the_core("swift/KayaSwiftUI.swift");
+        let kotlin = &beside_the_core("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt");
         for (src, opener, call, file) in [
             (rust, "fn run_with_log(", "crate::fault::watch();", "harness.rs"),
             (swift, "private func kayaRunScript(", "KayaHost.api.fault_watch()", "KayaSwiftUI.swift"),

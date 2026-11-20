@@ -30,8 +30,8 @@ net against 1900 s: every leg passed, the suites took 1783 s (1846 and 1753 on
 the two matrices before), and the unit-tests phase took 100 s where a warm one
 takes 5-7, waiting on the unit-test binary's compile (`Finished ... in 2m 38s`).
 The commit under it changed swift/ and tools/ only, and nothing under crates/
-was newer than the matrix before, so why cargo compiled kaya is not known: the
-lane's log carried no reason. The warm windows lane runs 1830-1855 s net (the
+was newer than the matrix before; the lane's log carried no reason (the cause
+is below). The warm windows lane runs 1830-1855 s net (the
 fcce6b1c, 62098299 and this matrix), so a cold unit-test or core build alone
 crosses the ceiling. The unit-test build now runs under cargo's fingerprint
 log (`CARGO_LOG=cargo::core::compiler::fingerprint=info`, its `stale:` and
@@ -45,6 +45,22 @@ join and printed "took 106s; kaya was fresh" on the 6cbf53f0 matrix, where the
 binary was fresh and the 106 s was the deploy phases it overlaps; a waiter
 thread now stamps the build's own exit, and the sentence gives the build's run
 and the phase's wait apart.
+CAUSE (measured 2026-11-19, second agent): the core's TEST binary included
+swift/KayaSwiftUI.swift and KayaCompose.kt with `include_str!` (fault.rs's
+two pump and runner censuses), so both sat in its dep-info and any edit of an
+interpreter recompiled it on the windows lane, while the dll, which has no
+`cfg(test)`, stayed fresh: the 6a94ee6d matrix's build phase took 9 s and its
+unit-tests phase 100 s, and 6a94ee6d changed KayaSwiftUI.swift. By hand after
+a KayaCompose.kt edit the fingerprint log read `stale: changed
+".../crates/kaya/src/../../../android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"`
+and kaya compiled (45 s on a quiet host). The censuses now read both files at
+run time (fault.rs beside_the_core; rung 1's build-id key already lists swift
+and android); with the two files touched afterwards the same build was fresh
+in 0 s. The wall: fault.rs's no_core_source_includes_a_file_outside_the_crate
+refuses any `include_str!`/`include_bytes!` reaching outside crates/kaya but
+the vendored font (watched red with one census put back, restored from a
+copy, sha equal). A real core change still compiles the binary cold, and the
+warm lane's 1830-1855 s net leaves that no room under 1900 s.
 Whether the ceiling should leave room for a cold build is for the maintainer.
 
 ## The keyed target read off the main thread (measured 2026-11-19)
