@@ -4,6 +4,24 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A windows example's cold cost was its compile, not its link (measured 2026-11-20)
+
+A core change made the windows lane relink 101 Rust examples, each carrying
+the whole core. On a quiet host the 101 took 18.8 s and about 300 CPU-s, and
+1189 MB went to the guest. The link was the obvious suspect and was not the
+cost: a wrapper around lld-link timed the 102 links at 38 CPU-s in all, the
+examples' PDBs (5.2 GB written, none ever shipped) at about 7% (281 CPU-s
+with `/DEBUG:NONE`), and `/OPT:NOICF` and `/threads:1` changed nothing. The
+rest is rustc compiling each example over again, the core's generics
+instantiated once per executable. Compiling the scenes together shares that:
+one host for all 101 took 63 CPU-s but 32 s of wall (one crate's front end),
+three hosts 13 s and 76 CPU-s, six 9.1 s and 92 CPU-s, twelve 8.6 s and 117
+CPU-s. Six hosts it is (tools/lib/lanes/win.py, HOSTS). The copy was never the
+bandwidth either: one scp of the 1189 MB took 9.4 s on a quiet host, six in
+parallel 7.4 s, and the guest copies one 11.5 MB exe to 101 names in 0.9 s
+(tools/guest/copy-same.ps1). The deploy phase the cold matrices read at
+89-102 s read 53 s cold on a quiet host.
+
 ## The runner's answer an earlier process left behind (measured 2026-11-19)
 
 The Compose harness asks the android runner for what no app may read itself
@@ -20099,8 +20117,8 @@ marker reads 0 (`tools/build-id.py --optimized`). Two things the markers
 needed: a Swift string literal of 15 bytes or fewer is an immediate small
 string that no byte scan finds, so the interpreter's marker is longer; and a
 `#[no_mangle]` static is dropped from an executable that links the core
-unless it is `#[used]` (KAYA_BUILD_ID_MARKER is absent from every Rust
-example binary for that reason). The highlight's answer is a pressed look
+unless it is `#[used]` (KAYA_BUILD_ID_MARKER was absent from every Rust
+example binary for that reason until it took `#[used]` on 2026-11-20). The highlight's answer is a pressed look
 from the pointer going down (docs/deferred.md, the mac interaction latency,
 1(a)): 4 to 12 ms to its frame on the sidebar's rows, while the selection
 still rides the screen's commit.

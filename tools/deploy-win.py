@@ -442,7 +442,14 @@ if _pooled_pointer:
               f"draws slot 0.", file=sys.stderr)
     sys.exit(1)
 
-SCENE_EXES = [TARGET / f"examples/{s}.exe" for s in SCENES + DEPTH_SCENES]
+_host_refusal = lane.host_refusal(ROOT)
+if _host_refusal:
+    die(f"deploy-win: the rust scenes' hosts disagree with the lane's scene lists: "
+        f"{_host_refusal} (tools/lib/lanes/win.py, HOSTS)")
+HOSTS = lane.hosts(ROOT)
+HOST_OF = {s: h for h, carried in HOSTS.items() for s in carried}
+SCENE_DIR = ROOT / "target/win-scenes"
+SCENE_EXES = [SCENE_DIR / f"{s}.exe" for s in SCENES + DEPTH_SCENES]
 SCENE_PYS = ([ROOT / f"guests/python/{s}.py" for s in SCENES]
              + [ROOT / f"guests/python/{s}.py" for s in PY_ONLY_SCENES])
 # The JS guests ship FLAT beside the python ones (C:\kaya\<scene>.ts) and
@@ -552,8 +559,8 @@ def vm_warm():
 # VM-ONLY, SO BESIDE THE CROSS BUILD (docs/measurements/windows-lane-2026-10-09.md).
 _vm_warm = beside("native-images", vm_warm)
 BUILD_EXAMPLES = []
-for _s in SCENES + DEPTH_SCENES:
-    BUILD_EXAMPLES += ["--example", _s]
+for _h in HOSTS:
+    BUILD_EXAMPLES += ["--example", _h]
 
 
 # ONE CAPTION WRITER, enforced before anything is built. The `dirty`
@@ -687,9 +694,14 @@ if content_fresh.nested(["cargo", "xwin", "build", "--locked", "--release",
     sys.exit(1)
 # Verify BEFORE the deploy: a stale dll that reaches the VM is a stale
 # dll on another machine, where nothing local can see it.
-if subprocess.run([str(ROOT / "tools/build-id.py"), "--verify",
-                   str(TARGET / "kaya.dll")], check=False).returncode != 0:
+_built = [TARGET / "kaya.dll"] + [TARGET / f"examples/{h}.exe" for h in HOSTS]
+if subprocess.run([str(ROOT / "tools/build-id.py"), "--verify", *map(str, _built)],
+                  check=False).returncode != 0:
     sys.exit(1)
+shutil.rmtree(SCENE_DIR, ignore_errors=True)
+SCENE_DIR.mkdir(parents=True)
+for _s, _h in HOST_OF.items():
+    os.link(TARGET / f"examples/{_h}.exe", SCENE_DIR / f"{_s}.exe")
 for gen in ("gen-header", "gen-bindings"):
     if subprocess.run([str(ROOT / f"tools/{gen}.py"), "--check"],
                       check=False).returncode != 0:
@@ -1359,7 +1371,8 @@ def deploy_artifacts():
                ROOT / "tools/guest/toast-probe.ps1",
                ROOT / "tools/guest/phantom-probe.ps1",
                ROOT / "tools/guest/dnd-witness.ps1",
-               ROOT / "tools/guest/capture-install.ps1"])
+               ROOT / "tools/guest/capture-install.ps1",
+               ROOT / "tools/guest/copy-same.ps1"])
 
 
 def deploy_stamp():
@@ -1385,10 +1398,20 @@ def deploy_stamp():
               + WITNESS_SOURCES)
     h = hashlib.sha256()
     for p in inputs:
-        body = p.read_bytes()
-        h.update(f"{p}\0{len(body)}\0".encode())
-        h.update(body)
+        h.update(f"{p}\0{file_sha(p)}\0".encode())
     return h.hexdigest()[:16]
+
+
+_SHAS = {}
+
+
+def file_sha(p):
+    """A file's sha256, read once per inode: a host's scenes are links to one file."""
+    st = p.stat()
+    key = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    if key not in _SHAS:
+        _SHAS[key] = hashlib.sha256(p.read_bytes()).hexdigest()
+    return _SHAS[key]
 
 
 def ship_flat_artifacts():
@@ -1415,15 +1438,24 @@ def ship_flat_artifacts():
         if name in want:
             die(f"deploy-win: two artifacts share the basename {name!r} — "
                 f"the manifest cannot key them")
-        want[name] = (hashlib.sha256(p.read_bytes()).hexdigest(), p)
+        want[name] = (file_sha(p), p)
     manifest = LEGS_DIR / "deploy.manifest"
     with open(manifest, "w", encoding="utf-8") as out:
         for name, (sha, _p) in sorted(want.items()):
             out.write(f"{sha} {name}\n")
-    ship = [p for name, (sha, p) in sorted(want.items())
-            if held.get(name) != sha]
-    print(f"artifacts: shipping {len(ship)} of {len(artifacts)} (the rest "
-          f"match the VM's manifest)")
+    # EQUAL BYTES RIDE THE WIRE ONCE: every scene of a host is the host's exe
+    # (lane.HOSTS), copied on the guest from the one that was shipped.
+    ship, copies, first = [], [], {}
+    for name, (sha, p) in sorted(want.items()):
+        if held.get(name) == sha:
+            continue
+        if sha in first:
+            copies.append((first[sha], name))
+        else:
+            first[sha] = name
+            ship.append(p)
+    print(f"artifacts: shipping {len(ship)} of {len(artifacts)}, {len(copies)} more copied on "
+          f"the guest from a shipped file of equal bytes (the rest match the VM's manifest)")
     if ship and scp_to(ship, "C:/kaya/") != 0:
         # WHAT TO DO NEXT, because scp's own message names neither the
         # cause nor the fix.
@@ -1442,6 +1474,18 @@ def ship_flat_artifacts():
         print(f"  reboot the VM (ssh {HOST} 'shutdown /r /t 0') and re-run.",
               file=sys.stderr)
         sys.exit(1)
+    if copies:
+        listing = LEGS_DIR / "copies.txt"
+        listing.write_text("".join(f"{a} {b}\n" for a, b in copies), encoding="utf-8")
+        if scp_to([listing], "C:/kaya/copies.txt") != 0:
+            die("deploy-win: could not ship the guest-side copy list")
+        said = run_ssh_out("powershell -NoProfile -ExecutionPolicy Bypass -File "
+                           "C:\\kaya\\copy-same.ps1") or ""
+        if f"copy-same: {len(copies)} of {len(copies)} hash-equal" not in said:
+            die(f"deploy-win: the guest-side copies of the shipped hosts did not all land "
+                f"({said.strip() or 'copy-same.ps1 failed with no output'}); a guest process "
+                f"from an earlier run holding one of the names is the usual cause, cleared by "
+                f"ssh {HOST} 'cmd /c \"taskkill /f /im wscript.exe & exit /b 0\"'")
     return manifest
 
 
@@ -1557,15 +1601,14 @@ def verify_deployed():
     and the suites then run against the previous deploy. Order is the
     contract: the remote list and the local list are compared
     line-by-line."""
-    locals_ = [TARGET / "kaya.dll"] + [
-        TARGET / f"examples/{s}.exe"
-        for s in ("milestone2", "entry", "gallery", "todos", "reorder",
-                  "feed", "grow", "align", "layout")]
-    remotes = ",".join(
-        ["C:\\kaya\\kaya.dll"]
-        + [f"C:\\kaya\\{s}.exe"
-           for s in ("milestone2", "entry", "gallery", "todos", "reorder",
-                     "feed", "grow", "align", "layout")])
+    # Each host's first scene is the copy that rode the wire and its last one
+    # a copy made on the guest (ship_flat_artifacts).
+    named = {}
+    for exe in SCENE_EXES:
+        named.setdefault(HOST_OF[exe.stem], []).append(exe)
+    sample = sorted({p for exes in named.values() for p in (exes[0], exes[-1])})
+    locals_ = [TARGET / "kaya.dll"] + sample
+    remotes = ",".join(["C:\\kaya\\kaya.dll"] + [f"C:\\kaya\\{p.name}" for p in sample])
     got = run_ssh_out(f'powershell -Command "(Get-FileHash {remotes} '
                       f'-Algorithm SHA256).Hash"')
     got_lines = [ln.strip().lower() for ln in
@@ -2104,7 +2147,7 @@ def package_rust_guests():
     # guest and act one read `entries 0, wanted 1` (2026-09-09). The lane
     # drives the UNPACKAGED door, so the package leaves the scheme alone. A
     # real kaya app ships ONE package with ONE entry point and names it here.
-    win_package.stage(ROOT, [TARGET / f"examples/{s}.exe" for s in scenes],
+    win_package.stage(ROOT, [SCENE_DIR / f"{s}.exe" for s in scenes],
                       staging, links_entry=None)
     must_ssh('cmd /c "if exist C:\\kaya\\pkgstage rmdir /s /q '
              'C:\\kaya\\pkgstage"')

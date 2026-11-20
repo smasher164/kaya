@@ -160,6 +160,12 @@ def check(root):
                      f"(SCENES with guests/js/{name}.ts) — the deploy "
                      f"never stages it")
 
+    # --- deploy-win: every rust scene in exactly one host (lanes/win.py, HOSTS)
+    refusal = win_lane.host_refusal(root)
+    if refusal:
+        fail(f"the windows lane's rust hosts disagree with its scene lists: {refusal}; a "
+             f"scene in no host has no executable on the guest")
+
     # --- every runner: a wired scene has its .steps, a python leg its
     # file
     runners = [
@@ -541,7 +547,8 @@ SHADOW_RELS = ["tools/deploy-win.py", "tools/lib/flightrec_lane.py",
                "tools/lib/lanes/win.py", "tools/lib/lanes/mac.py",
                "tools/lib/win_launchers.py",
                "tools/linux/run-suites.sh", "tools/ios/Info.plist.in",
-               "tools/scenes", "tools/guest", "guests/python", "tools/ios/pyhost.c",
+               "tools/scenes", "tools/guest", "guests/python", "guests/rust/winhost",
+               "tools/ios/pyhost.c",
                "android/pyhost/src/main/kotlin/dev/kaya/pyhost/MainActivity.kt",
                "crates/kaya/src/android.rs"]
 
@@ -790,6 +797,18 @@ negative(
     '$pidfile = Join-Path $dir "sample-none.pid"',
     "writes no pid file for its run",
     "N11 (a sampler no lane can tell from its neighbour)")
+
+negative(
+    "N12", "dropped a scene from its host", "guests/rust/winhost/winhost3.rs",
+    r'^    entry = "\.\./entry\.rs",\n', "",
+    "entry is in no host; add",
+    "N12 (a rust scene no host carries)")
+
+negative(
+    "N12b", "put a scene in two hosts", "guests/rust/winhost/winhost1.rs",
+    r'^host! \{$', 'host! {\n    entry = "../entry.rs",',
+    "entry is in both",
+    "N12b (a rust scene two hosts carry)")
 
 # --- the STAGED GUEST'S SPEC, every branch watched -------------------
 # A compiled guest carries the wire hash its binding was generated from

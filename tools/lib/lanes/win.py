@@ -21,7 +21,8 @@ import media_server
 
 # THE scene list: every mechanical per-scene surface derives from it
 # (cross-build examples, exe/python shipping, taskkill). Adding a
-# scene here is the ONE registration; ORDER stays explicit because
+# scene here is the ONE registration (its rust guest also joins a host,
+# HOSTS below, and the deploy names which); ORDER stays explicit because
 # it encodes per-language coverage decisions.
 SCENES = [
     "background", "stall", "milestone2", "entry", "gallery", "todos",
@@ -134,6 +135,49 @@ TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200, "codesurfacebig_
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext", "flexshrink",
                 "listrow", "stampbefore", "mountfocus", "tints", "icons", "badge", "emoji", "layersvideo",
                 "ownundo", "richlabel", "notes", "richrows", "richdoc"]
+
+# HOSTS: THE RUST SCENES BUILD AS SIX HOST EXECUTABLES, not one example each: a core
+# change relinked 101 examples that each carried the whole core, 300 CPU-s and
+# 1.19 GB to the guest, against 92 CPU-s and 80 MB for six hosts
+# (docs/measurements/lane-ceilings-2026-11-20.md, the windows pull). Each host
+# compiles its scenes once and runs the one its file is named after; the deploy
+# ships each host once and copies it to its scenes' names on the guest.
+HOST_DIR = "guests/rust/winhost"
+_HOST_LINE = re.compile(r'^\s*([a-z0-9_]+) = "\.\./([a-z0-9_]+)\.rs",\s*$', re.M)
+
+
+def hosts(root):
+    """{host example name: [scene, ...]} as the host sources declare them."""
+    out = {}
+    for p in sorted((pathlib.Path(root) / HOST_DIR).glob("winhost*.rs")):
+        out[p.stem] = [m.group(1) for m in _HOST_LINE.finditer(p.read_text(encoding="utf-8"))
+                       if m.group(1) == m.group(2)]
+    return out
+
+
+def host_refusal(root, scenes=None):
+    """None when every rust scene of this lane is in exactly one host and every
+    host scene is one of them; else the sentence that says what to add or cut."""
+    want = list(SCENES + DEPTH_SCENES) if scenes is None else list(scenes)
+    table = hosts(root)
+    if not table:
+        return f"no {HOST_DIR}/winhost*.rs, so no rust scene builds for this lane"
+    seen, bad = {}, []
+    for host, carried in table.items():
+        for scene in carried:
+            if scene in seen:
+                bad.append(f"{scene} is in both {seen[scene]} and {host}; cut one")
+            seen[scene] = host
+    smallest = min(table, key=lambda h: (len(table[h]), h))
+    for scene in want:
+        if scene not in seen:
+            bad.append(f'{scene} is in no host; add `{scene} = "../{scene}.rs",` to '
+                       f"{HOST_DIR}/{smallest}.rs")
+    for scene, host in seen.items():
+        if scene not in want:
+            bad.append(f"{host} carries {scene}, which is in neither SCENES nor DEPTH_SCENES; "
+                       f"cut it from {HOST_DIR}/{host}.rs")
+    return "; ".join(bad) or None
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
 # out of an installed MSIX instead of out of C:\kaya, because a kaya app is

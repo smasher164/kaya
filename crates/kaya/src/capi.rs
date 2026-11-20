@@ -626,8 +626,10 @@ pub extern "C" fn kaya_spec_hash() -> u64 {
 /// without loading anything: `tools/build-id.py --verify libkaya.so`.
 /// Fixed-size and `no_mangle` on purpose — an exported static of known
 /// length survives linking into every artifact shape (cdylib, staticlib,
-/// dll) and lands in rodata as findable bytes.
+/// dll) and lands in rodata as findable bytes; `#[used]` keeps it in an
+/// executable, where the windows lane verifies its host exes by it.
 #[unsafe(no_mangle)]
+#[used]
 pub static KAYA_BUILD_ID_MARKER: [u8; 30] = {
     let src = concat!("kaya-build-id:", env!("KAYA_BUILD_ID")).as_bytes();
     let mut marker = [0u8; 30];

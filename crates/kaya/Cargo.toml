@@ -293,6 +293,30 @@ log-panics = "2"
 # guests; explicit paths keep `cargo build --example <scene>` and the
 # target/…/examples layout unchanged.
 [[example]]
+name = "winhost0"
+path = "../../guests/rust/winhost/winhost0.rs"
+
+[[example]]
+name = "winhost1"
+path = "../../guests/rust/winhost/winhost1.rs"
+
+[[example]]
+name = "winhost2"
+path = "../../guests/rust/winhost/winhost2.rs"
+
+[[example]]
+name = "winhost3"
+path = "../../guests/rust/winhost/winhost3.rs"
+
+[[example]]
+name = "winhost4"
+path = "../../guests/rust/winhost/winhost4.rs"
+
+[[example]]
+name = "winhost5"
+path = "../../guests/rust/winhost/winhost5.rs"
+
+[[example]]
 name = "milestone2"
 path = "../../guests/rust/milestone2.rs"
 

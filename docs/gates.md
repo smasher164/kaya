@@ -1902,7 +1902,11 @@ python guest file is gone — each named with the list to extend. The
 measured instance: the windowed-rust mac leg was wired hand-queued
 and absent from the derivation, and the miss cost a full matrix to
 learn what this census says in seconds. Launchers are the artifact
-truth on windows — listdetail runs split.exe, two scenes one guest)
+truth on windows — listdetail runs split.exe, two scenes one guest.
+And every windows rust scene in exactly one host of
+guests/rust/winhost (tools/lib/lanes/win.py, HOSTS), the deploy's own
+refusal run here too; N12 cuts a scene from its host and N12b puts one
+in two, each watched)
 
 ## tools/check-c-ids.py
 

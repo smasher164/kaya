@@ -12,7 +12,6 @@ use super::{
 use crate::protocol::TextRun;
 
 pub(crate) const VERSION: u64 = 1;
-pub(crate) const MEDIA_TYPE: &str = "application/vnd.kaya.document+json";
 
 /// The inline marks in the order a file spells them; extensions follow by name.
 const INLINE_ORDER: &[&str] = &["bold", "italic", "underline", "strike", "code", "link", "color", "highlight"];
