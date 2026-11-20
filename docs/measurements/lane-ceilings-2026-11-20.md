@@ -149,3 +149,49 @@ lanes' cold builds and runs, which is the worst-case loop the ruling measures.
 Cold readings 1162, 1189, 1276; mac moves 1250 -> 1350, about 1.06x over the
 highest. The pull that goes with it: the Windows VM's share of the host during
 the overlap (Windows item 1 above cuts its cold link and copy).
+
+## Windows item 1 taken: six host executables (e50f8f7c)
+
+Measured on a quiet host before choosing (docs/traps.md, a windows example's
+cold cost was its compile). The 101 rust examples' rebuild after a core change
+took 18.8 s and about 300 CPU-s, and 1189 MB went to the guest. Of that, the
+102 links were 38 CPU-s, the PDBs (5.2 GB, never shipped) about 7%, and
+`/OPT:NOICF` or `/threads:1` changed nothing; the rest is each example
+compiling the core's generics again. The options, on the same quiet host:
+
+| option | build | CPU-s | to the guest |
+|---|---|---|---|
+| 101 examples (before) | 18.8 s | ~300 | 1189 MB, one scp 9.4 s |
+| examples without PDBs | 17.5 s | 281 | 1189 MB |
+| one host | 32.4 s | 63 | 22 MB |
+| three hosts | 13.0 s | 76 | 45 MB |
+| six hosts (chosen) | 9.1 s | 92 | 80 MB |
+| twelve hosts | 8.6 s | 117 | 150 MB |
+| tar, zstd -1, one ssh | | | 1189 MB in 3.6 s |
+
+A kaya dll the rust examples link instead would be a Rust `dylib`, which
+collides with the cdylib's kaya.dll and brings std's own dll; not taken. Six
+hosts compile their scenes once each, the guest copies a host to its scenes'
+names in under a second, and build-id --verify covers the six beside kaya.dll.
+A one-leg cold run on the quiet host went build 65 -> 55 s, deploy 53 -> 44 s.
+
+The fourth cold reading, e50f8f7c (the change itself and richdoc's unread
+MEDIA_TYPE moved the core; the mac lane's libkaya came from the gate sweep as
+before). Matrix wall 2281 s, ALL PASS.
+
+| lane | wall | waits | net | ceiling | net/ceiling | one-time phases (s) |
+|---|---|---|---|---|---|---|
+| mac | 1310 | 104 | 1206 | 1350 | 89% | core-build+gates 49, guest-builds 24 |
+| linux | 1459 | 340 | 1119 | 1250 | 90% | core-build 46, guest-builds 28 |
+| windows | 2114 | 68 | 2046 | 2200 | 93% | build 145, native-images 20, deploy 94, package 24, go-warm 14 |
+| ios | 1838 | 294 | 1544 | 1780 | 87% | swift 599, go 423, python 150, swiftui 467 |
+| android | 1332 | 324 | 1008 | 1200 | 84% | builds 40 + 19 + 33 + 55 |
+| gates | 550 | 0 | 550 | 660 | 83% | |
+
+The windows build read 145 s against 220, 188 and 193 on the three cold
+matrices before (the hosts' `Finished` in 26.5 s against 67 s), and the
+lane's net 2046 s against 2063, 2072 and 2088. The deploy did not move (94 s
+against 89, 99 and 102) though it ships 8 files and copies 95 on the guest:
+under a matrix the deploy is not the bytes, and the unit-test build beside it
+took 2m 25s. The package (24 s against 10-13) and go-warm (14 against 4) read
+higher on this one matrix. The suites took 1801 s (1743, 1811, 1796).
