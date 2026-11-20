@@ -1,6 +1,6 @@
-//! The voice output on GTK (docs/capture-plan.md §5): GStreamer beside GTK,
-//! an appsrc pulling the core's queue at the rate PipeWire consumes it, into
-//! pipewiresink as a `media.role=Phone` stream. The voice path is PipeWire's
+//! The voice output on GTK (docs/capture-plan.md §5): a PipeWire stream of
+//! kaya's own (gtk/voice_stream.c) whose process callback pulls the core's
+//! queue, as a `media.role=Phone` stream. The voice path is PipeWire's
 //! echo-cancel sink when the desktop loaded the module, which the stream then
 //! targets; kaya loads no module into a user's session, so without it the
 //! stream plays `plain` (the Linux carve-out, stated once in §5).
@@ -8,14 +8,37 @@
 use super::*;
 use crate::protocol::{VoiceId, VoiceRoute};
 use gstreamer as gst;
-use gstreamer::prelude::{DeviceExt, DeviceMonitorExt, DeviceMonitorExtManual, ElementExt, GstBinExtManual};
+use gstreamer::prelude::{DeviceExt, DeviceMonitorExt, DeviceMonitorExtManual};
+use std::ffi::{c_char, c_void, CStr, CString};
 
-/// The frames each pull asks for: 10 ms at 48 kHz, the core's chunk.
-const PULL: usize = 480;
+#[repr(C)]
+struct VoiceStream {
+    _opaque: [u8; 0],
+}
 
-struct Output {
-    pipeline: gst::Pipeline,
-    _watch: gst::bus::BusWatchGuard,
+type VoicePull = unsafe extern "C" fn(user: *mut c_void, out: *mut f32, frames: u32);
+type VoiceFailed = unsafe extern "C" fn(user: *mut c_void, why: *const c_char);
+
+unsafe extern "C" {
+    fn voice_stream_new(
+        target: *const c_char,
+        rate: u32,
+        pull: VoicePull,
+        failed: VoiceFailed,
+        user: *mut c_void,
+        why: *mut c_char,
+        why_len: usize,
+    ) -> *mut VoiceStream;
+    fn voice_stream_free(stream: *mut VoiceStream);
+}
+
+struct Output(*mut VoiceStream);
+
+impl Drop for Output {
+    fn drop(&mut self) {
+        // SAFETY: the pointer came from voice_stream_new and is freed once, here.
+        unsafe { voice_stream_free(self.0) }
+    }
 }
 
 thread_local! {
@@ -43,96 +66,63 @@ fn report(core: &mut CoreState, id: u64, route: VoiceRoute, detail: String) {
     }
 }
 
-fn fail_later(id: u64, detail: String) {
-    glib::idle_add_local_once(move || {
+unsafe extern "C" fn pull(user: *mut c_void, out: *mut f32, frames: u32) {
+    // SAFETY: voice_stream.c hands a mapped buffer of at least `frames` floats.
+    let out = unsafe { std::slice::from_raw_parts_mut(out, frames as usize) };
+    crate::farend::pull(VoiceId(user as u64), crate::capture::SAMPLE_RATE, 1, out);
+}
+
+unsafe extern "C" fn failed(user: *mut c_void, why: *const c_char) {
+    let id = user as u64;
+    // SAFETY: voice_stream.c passes a NUL-terminated message.
+    let why = unsafe { CStr::from_ptr(why) }.to_string_lossy().into_owned();
+    glib::MainContext::default().invoke(move || {
         CORE.with_borrow_mut(|core| {
             if let Some(core) = core.as_mut() {
-                report(core, id, VoiceRoute::Failed, detail);
+                report(core, id, VoiceRoute::Failed, format!("the voice stream failed: {why}"));
             }
         });
     });
 }
 
 pub(super) fn create(core: &mut CoreState, id: u64) {
-    let built = (|| -> Result<(gst::Pipeline, VoiceRoute, String), String> {
-        gst::init().map_err(|e| format!("GStreamer did not initialize: {e}"))?;
-        let make = |name: &str| gst::ElementFactory::make(name).build().map_err(|e| format!("no {name}: {e}"));
-        let src = gstreamer_app::AppSrc::builder()
-            .caps(
-                &gst::Caps::builder("audio/x-raw")
-                    .field("format", "F32LE")
-                    .field("layout", "interleaved")
-                    .field("rate", crate::capture::SAMPLE_RATE as i32)
-                    .field("channels", 1i32)
-                    .build(),
-            )
-            .format(gst::Format::Time)
-            .is_live(true)
-            .max_bytes((PULL * 4 * 4) as u64)
-            .build();
-        let pushed = std::cell::Cell::new(0u64);
-        src.set_callbacks(
-            gstreamer_app::AppSrcCallbacks::builder()
-                .need_data(move |src, _| {
-                    let mut chunk = vec![0f32; PULL];
-                    crate::farend::pull(VoiceId(id), crate::capture::SAMPLE_RATE, 1, &mut chunk);
-                    let bytes: Vec<u8> = chunk.iter().flat_map(|s| s.to_le_bytes()).collect();
-                    let mut buffer = gst::Buffer::from_mut_slice(bytes);
-                    let at = pushed.get();
-                    if let Some(b) = buffer.get_mut() {
-                        b.set_pts(gst::ClockTime::from_nseconds(at * 1_000_000_000 / u64::from(crate::capture::SAMPLE_RATE)));
-                        b.set_duration(gst::ClockTime::from_mseconds(10));
-                    }
-                    pushed.set(at + PULL as u64);
-                    let _ = src.push_buffer(buffer);
-                })
-                .build(),
-        );
-        let convert = make("audioconvert")?;
-        let resample = make("audioresample")?;
-        let sink = make("pipewiresink")?;
-        sink.set_property("stream-properties", gst::Structure::builder("props").field("media.role", "Phone").build());
-        let canceller = echo_cancel_sink();
-        let (route, detail) = match &canceller {
-            Some(node) => {
-                sink.set_property("target-object", node);
-                (VoiceRoute::Voice, format!("pipewiresink, media.role=Phone, into PipeWire's echo-cancel sink {node:?}"))
-            }
-            None => (
-                VoiceRoute::Plain,
-                "pipewiresink, media.role=Phone, on the default sink: PipeWire lists no echo-cancel sink, and kaya \
-                 loads no module into the session (docs/capture-plan.md §5)"
-                    .to_owned(),
-            ),
-        };
-        let pipeline = gst::Pipeline::new();
-        let src: gst::Element = src.upcast();
-        pipeline.add_many([&src, &convert, &resample, &sink]).map_err(|e| e.to_string())?;
-        gst::Element::link_many([&src, &convert, &resample, &sink]).map_err(|e| e.to_string())?;
-        Ok((pipeline, route, detail))
-    })();
-    let (pipeline, route, detail) = match built {
-        Ok(b) => b,
-        Err(why) => return report(core, id, VoiceRoute::Failed, format!("the voice pipeline would not build: {why}")),
-    };
-    let bus = pipeline.bus().expect("a pipeline has a bus");
-    let watch = bus
-        .add_watch_local(move |_, msg| {
-            if let gst::MessageView::Error(e) = msg.view() {
-                fail_later(id, format!("{} ({})", e.error(), e.debug().unwrap_or_default()));
-            }
-            glib::ControlFlow::Continue
-        })
-        .expect("one watch per bus");
-    if let Err(e) = pipeline.set_state(gst::State::Playing) {
-        return report(core, id, VoiceRoute::Failed, format!("the voice pipeline would not play: {e}"));
+    if let Err(e) = gst::init() {
+        return report(core, id, VoiceRoute::Failed, format!("GStreamer did not initialize: {e}"));
     }
-    OUTPUTS.with_borrow_mut(|o| o.insert(id, Output { pipeline, _watch: watch }));
+    let canceller = echo_cancel_sink();
+    let target = canceller.as_deref().map(|n| CString::new(n).expect("a node name holds no NUL"));
+    let mut why = [0 as c_char; 256];
+    // SAFETY: the callbacks are 'static; `user` is the voice id, not a pointer.
+    let stream = unsafe {
+        voice_stream_new(
+            target.as_ref().map_or(std::ptr::null(), |t| t.as_ptr()),
+            crate::capture::SAMPLE_RATE,
+            pull,
+            failed,
+            id as *mut c_void,
+            why.as_mut_ptr(),
+            why.len(),
+        )
+    };
+    if stream.is_null() {
+        // SAFETY: voice_stream.c wrote a NUL-terminated message into `why`.
+        let why = unsafe { CStr::from_ptr(why.as_ptr()) }.to_string_lossy().into_owned();
+        return report(core, id, VoiceRoute::Failed, format!("the voice stream would not start: {why}"));
+    }
+    OUTPUTS.with_borrow_mut(|o| o.insert(id, Output(stream)));
+    let (route, detail) = match canceller {
+        Some(node) => (VoiceRoute::Voice, format!("a PipeWire stream, media.role=Phone, into PipeWire's echo-cancel sink {node:?}")),
+        None => (
+            VoiceRoute::Plain,
+            "a PipeWire stream, media.role=Phone, on the default sink: PipeWire lists no echo-cancel sink, and kaya \
+             loads no module into the session (docs/capture-plan.md §5)"
+                .to_owned(),
+        ),
+    };
     report(core, id, route, detail);
 }
 
 pub(super) fn release(id: u64) {
-    if let Some(out) = OUTPUTS.with_borrow_mut(|o| o.remove(&id)) {
-        let _ = out.pipeline.set_state(gst::State::Null);
-    }
+    let out = OUTPUTS.with_borrow_mut(|o| o.remove(&id));
+    drop(out);
 }

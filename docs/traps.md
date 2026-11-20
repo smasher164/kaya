@@ -21123,9 +21123,25 @@ param reached the loop thread before the PAUSED state, so neither can move,
 and the timed wait cannot time out since it must take the loop's lock back.
 The GTK main thread then blocked in gst_base_sink_set_flushing (the voice's
 set_state at `click button#3`) on the stream lock setcaps holds, so the next
-step hit the 60 s ceiling. kaya's part: crates/kaya/src/gtk/voice.rs puts the
-voice on `pipewiresink`, and its state changes run on the UI thread. Ledger:
-docs/deferred.md, the GTK voice's pipewiresink deadlock.
+step hit the 60 s ceiling. kaya's part: crates/kaya/src/gtk/voice.rs put the
+voice on `pipewiresink`, and its state changes ran on the UI thread.
+
+FIXED 2026-11-20. No upstream issue or merge request names it (searched the
+PipeWire tracker; upstream master's sink differs from 1.6.9 only in set_caps's
+format checks). PAUSED comes from the proxy's bound event and the Format from
+the session manager's set_param, so either can come first; a pad probe could
+not force it, since pw_stream_connect and the wait are both inside setcaps.
+tools/linux/pwsynth/formatfirst.c, preloaded into every far-end guest by
+capture-leg.py, makes a media.role=Phone stream read CONNECTING while it is
+PAUSED, so the Format always arrives first: pipewiresink then hangs every time
+with the two stacks above (run 20261120T193519Z-000423, both protocols). The
+voice is now a pw_stream of kaya's own (crates/kaya/src/gtk/voice_stream.c on
+the real headers, built by build.rs on linux): PipeWire's process callback
+pulls the core's queue, and nothing waits under the loop's lock or on the UI
+thread. Under the preload all 16 farend legs pass, and a forced red read
+"the platform pulled 47872 frame(s) as 48000 Hz x1 ... into PipeWire's
+echo-cancel sink". Moving only the state change off the UI thread was not
+taken: it ends the hang and keeps the silence.
 
 ## The android leg with no verb trace (measured 2026-11-03)
 

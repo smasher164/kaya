@@ -83,6 +83,9 @@ ureq = "=3.4.2"
 syn = { version = "2", features = ["extra-traits", "visit-mut"] }
 # Emits msvc linker directives at build time; no-op for other targets.
 static_vcruntime = "2"
+# gtk/voice_stream.c, the GTK voice's PipeWire stream (build.rs).
+cc = "1"
+pkg-config = "0.3"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-core = "0.62"

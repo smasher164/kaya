@@ -882,7 +882,9 @@ build_pwsynth() {
     read -r -a pw_flags <<< "$(pkg-config --cflags --libs libpipewire-0.3)" || return 1
     mkdir -p /tmp/pwsynth \
         && cc -O2 -Wall -Wextra -Werror -o /tmp/pwsynth/pwsynth /work/tools/linux/pwsynth/pwsynth.c \
-            "${pw_flags[@]}" -lm
+            "${pw_flags[@]}" -lm \
+        && cc -O2 -Wall -Wextra -Werror -shared -fPIC -o /tmp/pwsynth/formatfirst.so \
+            /work/tools/linux/pwsynth/formatfirst.c "${pw_flags[@]}" -ldl
 }
 run_build pwsynth build_pwsynth
 

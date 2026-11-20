@@ -38,6 +38,7 @@ from collections import deque
 
 WORK = pathlib.Path("/work")
 PWSYNTH = os.environ.get("KAYA_PWSYNTH", "/tmp/pwsynth/pwsynth")
+FORMAT_FIRST = str(pathlib.Path(PWSYNTH).parent / "formatfirst.so")
 PORTAL_DIRS = "/opt/kaya-portal"
 DEVICES = (
     ("camera", "kaya-synthetic-camera-1", "kaya Synthetic Camera 1", "C83C1E"),
@@ -218,6 +219,10 @@ def main(argv):
     stack_env["KAYA_CAPTURE_LEG"] = marker
     far_end = bool(os.environ.get("KAYA_CAPTURE_FAR_END"))
     if far_end:
+        if not os.access(FORMAT_FIRST, os.R_OK):
+            say(f"no {FORMAT_FIRST} (run-suites.sh's build_pwsynth)")
+            return 1
+        env["LD_PRELOAD"] = FORMAT_FIRST
         drop_in = home / "config" / "pipewire" / "pipewire.conf.d"
         drop_in.mkdir(parents=True)
         (drop_in / "kaya-far-end.conf").write_text(FAR_END_CONF, encoding="utf-8")

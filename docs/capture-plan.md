@@ -216,8 +216,8 @@ and unbuilt. Two pieces close it:
 - **A voice output object** plays 48 kHz s16 mono chunks the app writes:
   `AVAudioSourceNode` on the engine the capture's voice processing uses,
   `AudioTrack` with `USAGE_VOICE_COMMUNICATION`, WASAPI render or
-  AudioGraph's frame input node in the Communications category, `appsrc`
-  into PipeWire with `media.role=Phone`.
+  AudioGraph's frame input node in the Communications category, a
+  PipeWire stream with `media.role=Phone`.
 
 Why kaya and not the app plays the peer: the platform's echo canceller
 needs the far-end signal as its reference, and only kaya can put playback
@@ -431,9 +431,10 @@ as written here and can change on a word:
    blocking writes on its own thread (the audio mode is left to the system:
    MODE_IN_COMMUNICATION needs MODIFY_AUDIO_SETTINGS); WinUI WASAPI shared
    render on the default eCommunications endpoint with
-   AudioCategory_Communications, event-driven on its own thread; GTK
-   pipewiresink with media.role=Phone, into PipeWire's echo-cancel sink when
-   one is listed.
+   AudioCategory_Communications, event-driven on its own thread; GTK a
+   pw_stream of kaya's own (gtk/voice_stream.c; pipewiresink deadlocks,
+   docs/traps.md) with media.role=Phone, into PipeWire's echo-cancel sink
+   when one is listed.
 9. **`expect_voice <n> "<f> Hz"|silent|none`** reads what the platform pulled
    in the last second (in 48 kHz, the capture's tone rule), and anything
    heard must ride a route that plays. The Linux lane loads PipeWire's

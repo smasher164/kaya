@@ -52,6 +52,7 @@ pub(crate) fn expands_at_end(name: &str) -> bool {
 /// The Format menu's eight colours (docs/rich-document-plan.md §11): each
 /// reads at 4.5:1 on the light page and, through brand::ink_for_dark, on
 /// the dark one (brand.rs's test holds both).
+#[cfg(test)]
 pub(crate) const COLOR_PRESETS: &[(&str, u32)] = &[
     ("red", 0xDD1F24),
     ("orange", 0xBA5600),

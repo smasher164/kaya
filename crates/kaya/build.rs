@@ -52,6 +52,24 @@ fn main() {
     println!("cargo::rustc-env=KAYA_OPT_LEVEL={opt}");
 
     refuse_a_stale_generator(&root);
+
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        let pipewire = pkg_config::Config::new()
+            .cargo_metadata(false)
+            .probe("libpipewire-0.3")
+            .expect("kaya build.rs: the GTK voice needs libpipewire-0.3's headers (Debian: libpipewire-0.3-dev)");
+        cc::Build::new()
+            .file("src/gtk/voice_stream.c")
+            .includes(&pipewire.include_paths)
+            .compile("kaya_voice_stream");
+        // After the static library: the linker resolves left to right.
+        for path in &pipewire.link_paths {
+            println!("cargo::rustc-link-search=native={}", path.display());
+        }
+        for lib in &pipewire.libs {
+            println!("cargo::rustc-link-lib={lib}");
+        }
+    }
 }
 
 /// Fail the BUILD when the binding generator has moved since the bindings it

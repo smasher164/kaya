@@ -1700,7 +1700,7 @@ dock title first, and whether the x11 and wayland twins of the scene share any
 state the python guest keeps between legs (a recently played order would move
 the cards).
 
-## DEFECT: the GTK voice's pipewiresink deadlocks when PipeWire sends the Format before the stream reaches PAUSED (seen twice: 2026-11-03 farend-java-x11, 2026-11-20 farend-rust-x11)
+## ~~DEFECT: the GTK voice's pipewiresink deadlocks when PipeWire sends the Format before the stream reaches PAUSED (seen twice: 2026-11-03 farend-java-x11, 2026-11-20 farend-rust-x11)~~ FIXED 2026-11-20: the voice is a PipeWire stream of kaya's own (crates/kaya/src/gtk/voice_stream.c), whose process callback pulls the core's queue and which waits on nothing, media.role=Phone and the echo-cancel target kept; every far-end leg preloads tools/linux/pwsynth/formatfirst.c, which holds the deadlocking ordering on every run (pipewiresink put back: farend-rust x11 and wayland hang at the step ceiling with the two stacks; the fix: all 16 farend legs pass, 47872 frames a second pulled) (docs/traps.md, the linux voice the graph never pulled)
 KEY: pipewiresink, on_param_changed, gst_pipewire_sink_setcaps, waiting for pool to become active, gtk/voice.rs, farend, voice 0 reads none, the platform pulled 0 frame(s)
 
 docs/traps.md, the linux voice the graph never pulled, CAUSE: an upstream
@@ -1758,7 +1758,7 @@ right after (mac 23, linux 42, ios 10, android 10 legs).
   app's voice node sat suspended and nothing was pulled; the graph is now read
   at the first refused voice step (docs/traps.md, the linux voice the graph
   never pulled). SEEN AGAIN and its cause read 2026-11-20: the DEFECT entry
-  on the GTK voice's pipewiresink deadlock.
+  on the GTK voice's pipewiresink deadlock, FIXED the same day.
 - iOS editor-go (a8af4b7d matrix, run 20261103T141450Z-076206): `type` refused
   with the caret line at y 406+22 against a frame ending at 427, the keyboard at
   456: one point below the field's frame.
