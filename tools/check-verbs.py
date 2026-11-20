@@ -4113,6 +4113,13 @@ def android_video_read(media_src=None, compose_src=None, runner_src=None):
                    "screencap through video_ink_reading")
     if not re.search(r"KAYA_REQUEST: video_ink .*\n.*\n.*\n.*\n.*answer_video_ink\(", runner):
         bad.append("run-emulator.py's leg poll does not answer KAYA_REQUEST: video_ink")
+    seq = kotlin_fun(compose, "kayaHostSeq") or ""
+    if compose.count("kayaHostRequests += 1") != 1 or "kayaHostRequests += 1" not in seq \
+            or not re.search(r'File\(activity\.filesDir, "kaya-host-\$kayaHostRequests\.txt"\)'
+                             r'\.delete\(\)', seq):
+        bad.append("a Compose host request takes its number without deleting the answer an "
+                   "earlier process left under it (kayaHostSeq) — reveal-compose read a stale "
+                   "screencap reading as its key's answer")
     tol = re.search(r"internal const val KAYA_VIDEO_INK_TOLERANCE = (\d+)", media)
     if not tol or int(tol.group(1)) != ANDROID_VIDEO_INK_RULED:
         bad.append(f"KayaMedia.kt KAYA_VIDEO_INK_TOLERANCE is "
@@ -4139,12 +4146,18 @@ if android_read_out:
     print("check-verbs: the Android video read broke a rule no scene can see:",
           file=sys.stderr)
     print("\n".join(android_read_out), file=sys.stderr)
-print("check-verbs: Android video read held (screencap, tolerance, renderer, picture)")
+print("check-verbs: Android video read held (screencap, tolerance, renderer, picture, "
+      "stale answers)")
 for pattern, repl, label, which in (
     (r"(Log\.i\(\"kaya\", \"KAYA_REQUEST: )video_ink( \$seq \$box)", r"\1video_frames\2",
      "the Compose arm not asking for the screencap", "compose"),
     (r'(\["timeout", "20", "adb", "-s", serial, "exec-out", )"screencap", "-p"\]',
      '"cat", "/dev/null"]', "the runner not taking the screencap", "runner"),
+    (r'(\n *)java\.io\.File\(activity\.filesDir, "kaya-host-\$kayaHostRequests\.txt"\)'
+     r'\.delete\(\)', "", "a stale answer left for the next request", "compose"),
+    (r"(\n *)val seq = kayaHostSeq\(activity\)\n(?= *Log\.i\(\"kaya\", \"KAYA_REQUEST: hold)",
+     "kayaHostRequests += 1\n                        val seq = kayaHostRequests\n",
+     "a request numbered past kayaHostSeq", "compose"),
     (r"(internal const val KAYA_VIDEO_INK_TOLERANCE = )14", "20",
      "the Android video ink tolerance widened", "media"),
     (r"(override fun codecNeedsSetOutputSurfaceWorkaround\(name: String\): Boolean = )true",

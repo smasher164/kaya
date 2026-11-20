@@ -307,8 +307,12 @@ def census_sheet_show(src):
         found.append("android: kaya's show no longer says what cancelled it")
     # docs/traps.md, the Android sheet left between anchors by the keyboard.
     for needle, what in (
-            ("val stranded = showBegan >= 0 && settles.count == showBegan",
+            ("var stranded = showBegan >= 0 && settles.count == showBegan",
              "no longer shows again a sheet that came to rest Hidden between anchors"),
+            ("stranded = state.currentValue == SheetValue.Hidden && "
+             "state.targetValue == SheetValue.Hidden &&\n                        "
+             "settles.count == began",
+             "no longer shows again a sheet its own show left Hidden between anchors"),
             ("showBegan = settles.count\n",
              "no longer judges Material's show from where it took over"),
             ("?.isActive == false) throw e", "dies with the show Material's own show cancelled")):
@@ -3326,10 +3330,15 @@ nss5 = doctored(COMPOSE, r"'s show cancelled by \$\{e\.javaClass\.simpleName\}",
                 "NSS5 the show's cancellation unnamed")
 gate.negative("NSS5 a cancelled show that does not say by what",
               lambda: census_sheet_show(nss5), want="what cancelled it")
-nss6 = doctored(COMPOSE, r"val stranded = showBegan >= 0 && settles\.count == showBegan",
-                "val stranded = false", "NSS6 the stranded sheet left where it rests")
+nss6 = doctored(COMPOSE, r"var stranded = showBegan >= 0 && settles\.count == showBegan",
+                "var stranded = false", "NSS6 the stranded sheet left where it rests")
 gate.negative("NSS6 a show left Hidden between anchors",
               lambda: census_sheet_show(nss6), want="between anchors")
+nss9 = doctored(COMPOSE, r"stranded = state\.currentValue == SheetValue\.Hidden && "
+                 r"state\.targetValue == SheetValue\.Hidden &&\n *settles\.count == began",
+                 "stranded = false", "NSS9 kaya's own show left where it rests")
+gate.negative("NSS9 kaya's own show left Hidden between anchors",
+              lambda: census_sheet_show(nss9), want="its own show left")
 nss7 = doctored(COMPOSE, r"\?\.isActive == false\) throw e", "?.isActive != null) throw e",
                 "NSS7 the watcher dying with its cancelled show")
 gate.negative("NSS7 kaya's watcher gone with the first show Material cancels",
@@ -4388,6 +4397,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(325 + (5 if DRIVES else 0))
+gate.negatives_ran(326 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

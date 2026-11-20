@@ -6916,6 +6916,15 @@ object KayaCompose {
      * the composed picture under a video view. */
     private var kayaHostRequests = 0
 
+    /** The next request's number, with any answer the runner left under it
+     * for an earlier process deleted first (docs/traps.md, the runner's
+     * answer an earlier process left behind). */
+    private fun kayaHostSeq(activity: ComponentActivity): Int {
+        kayaHostRequests += 1
+        java.io.File(activity.filesDir, "kaya-host-$kayaHostRequests.txt").delete()
+        return kayaHostRequests
+    }
+
     /** The runner's answer to request [seq], written into this app's files
      * directory with run-as; null when none came within 8 s. */
     private fun kayaHostAnswer(activity: ComponentActivity, seq: Int): String? {
@@ -7072,8 +7081,7 @@ object KayaCompose {
     /** `press tab|space` (docs/reveal-plan.md V10): the runner's `input keyevent`, since a key
      * the app dispatches itself leaves the window in touch mode, where no button takes focus. */
     private fun kayaPressKey(activity: ComponentActivity, code: Int): String? {
-        kayaHostRequests += 1
-        val seq = kayaHostRequests
+        val seq = kayaHostSeq(activity)
         Log.i("kaya", "KAYA_REQUEST: key $seq $code")
         val said = kayaHostAnswer(activity, seq) ?: return "the runner sent no key $code within 8 s"
         return if (said.startsWith("sent exit 0")) null else "the runner's key $code: $said"
@@ -13930,8 +13938,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             if (box == null) {
                                 failures.add("video ${parts[1]} has no box on screen to read; $frames")
                             } else {
-                                kayaHostRequests += 1
-                                val seq = kayaHostRequests
+                                val seq = kayaHostSeq(activity)
                                 Log.i("kaya", "KAYA_REQUEST: video_ink $seq $box")
                                 val said = kayaHostAnswer(activity, seq)
                                 val words = said?.split(' ') ?: emptyList()
@@ -14009,8 +14016,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             }
                             fun read(at: String?): String {
                                 if (at == null) return "<no box on screen>"
-                                kayaHostRequests += 1
-                                val seq = kayaHostRequests
+                                val seq = kayaHostSeq(activity)
                                 Log.i("kaya", "KAYA_REQUEST: video_ink $seq $at")
                                 val said = kayaHostAnswer(activity, seq) ?: return "<no screencap reading of $at within 8 s>"
                                 return said.split(' ').getOrElse(0) { "" }
@@ -14073,8 +14079,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         val answered = kayaBatches
                         val key = if (parts[1] == "toggle") "play-pause" else parts[1]
                         val before = KayaMediaSession.arrivals
-                        kayaHostRequests += 1
-                        val seq = kayaHostRequests
+                        val seq = kayaHostSeq(activity)
                         Log.i("kaya", "KAYA_REQUEST: media_key $seq $key")
                         val deadline = System.nanoTime() + 12_000_000_000L
                         while (KayaMediaSession.arrivals == before && System.nanoTime() < deadline) Thread.sleep(20)
@@ -14134,8 +14139,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         // runner reads `dumpsys window`'s mHoldScreenWindow and
                         // writes it back (no app may dump the window manager).
                         val want = parts[1] == "yes"
-                        kayaHostRequests += 1
-                        val seq = kayaHostRequests
+                        val seq = kayaHostSeq(activity)
                         Log.i("kaya", "KAYA_REQUEST: hold_screen $seq")
                         val said = kayaHostAnswer(activity, seq)
                         if (said == null) {
@@ -30034,27 +30038,33 @@ fun kayaShowSheetWhenAnchored(verb: String, state: androidx.compose.material3.Sh
             Triple(state.hasExpandedState, state.currentValue, state.targetValue)
         }.collect { (anchored, now, to) ->
             if (now == SheetValue.Hidden && to != SheetValue.Hidden) showBegan = settles.count
-            if (!anchored || now != SheetValue.Hidden || to != SheetValue.Hidden || tries >= 4) return@collect
-            val stranded = showBegan >= 0 && settles.count == showBegan
-            val early = tries == 0 && System.nanoTime() - composedAt < 2_000_000_000L
-            if (!stranded && !early) return@collect
-            tries += 1
-            showBegan = -1
-            KayaVTrace.note("sheet_show", if (stranded) "$verb's show came to rest Hidden between anchors, " +
-                "${kayaSheetPlace(state)}: kaya shows it again (try $tries)"
-                else "anchored and still Hidden: kaya shows it (try $tries)")
-            if (stranded) android.util.Log.w("kaya", "KAYA_SHEET: $verb stranded between anchors, shown again")
-            try {
-                state.show()
-                KayaVTrace.note("sheet_show", "show ended ${state.currentValue} going to ${state.targetValue}")
+            if (!anchored || now != SheetValue.Hidden || to != SheetValue.Hidden) return@collect
+            var stranded = showBegan >= 0 && settles.count == showBegan
+            var early = tries == 0 && System.nanoTime() - composedAt < 2_000_000_000L
+            while ((stranded || early) && tries < 4) {
+                tries += 1
                 showBegan = -1
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                KayaVTrace.note("sheet_show", "$verb's show cancelled by ${e.javaClass.simpleName}" +
-                    "${e.message?.let { ": $it" } ?: ""}${e.cause?.let { ", cause $it" } ?: ""}; " +
-                    "${state.currentValue} going to ${state.targetValue}, ${kayaSheetPlace(state)}")
-                if (kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.isActive == false) throw e
-                // Material's own show took over: its end is judged from here.
-                showBegan = settles.count
+                KayaVTrace.note("sheet_show", if (stranded) "$verb's show came to rest Hidden between anchors, " +
+                    "${kayaSheetPlace(state)}: kaya shows it again (try $tries)"
+                    else "anchored and still Hidden: kaya shows it (try $tries)")
+                if (stranded) android.util.Log.w("kaya", "KAYA_SHEET: $verb stranded between anchors, shown again")
+                early = false
+                val began = settles.count
+                try {
+                    state.show()
+                    KayaVTrace.note("sheet_show", "show ended ${state.currentValue} going to ${state.targetValue}")
+                    // No later emission wakes this watcher for kaya's own show (docs/traps.md, the Android sheet left between anchors by the keyboard).
+                    stranded = state.currentValue == SheetValue.Hidden && state.targetValue == SheetValue.Hidden &&
+                        settles.count == began
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    KayaVTrace.note("sheet_show", "$verb's show cancelled by ${e.javaClass.simpleName}" +
+                        "${e.message?.let { ": $it" } ?: ""}${e.cause?.let { ", cause $it" } ?: ""}; " +
+                        "${state.currentValue} going to ${state.targetValue}, ${kayaSheetPlace(state)}")
+                    if (kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.isActive == false) throw e
+                    // Material's own show took over: its end is judged from here.
+                    showBegan = settles.count
+                    stranded = false
+                }
             }
         }
     }

@@ -4,6 +4,25 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The runner's answer an earlier process left behind (measured 2026-11-19)
+
+The Compose harness asks the android runner for what no app may read itself
+(a key through `input keyevent`, a screencap reading, `dumpsys window`) with a
+`KAYA_REQUEST: <verb> <n>` line, and the runner writes its answer to
+`files/kaya-host-<n>.txt` in the app's data directory, where it survives the
+process. The count restarts at 1 in every process, and an answer the runner
+wrote after its app stopped waiting (8 s, or the app gone) stayed for the next
+process of that package. On the 6cbf53f0 matrix reveal-compose asked for key 61
+as request 1 and failed 30 ms later reading "000000 FEF7FF at 180,132 ... the
+box 16,40-344,225 is 85% 000000", a video ink reading no key answers with, left
+by an earlier video leg of dev.kaya.rusthost (flight recorder run
+20261120T012737Z-025270). Afterwards the pool held such files on four of five
+devices. Planted ("STALE PLANT") in every dev.kaya package, the reveal legs read
+"the runner's key 61: STALE PLANT from an earlier process" on compose and go;
+kayaHostSeq now numbers each request and deletes any answer under that number
+first, the shape kayaAwaitShadeHand already had. check-verbs holds it (two
+cuts watched: the delete, and a request numbered past kayaHostSeq).
+
 ## The windows lane over its ceiling on a cold unit-test build (measured 2026-11-19)
 
 The 6a94ee6d matrix failed only on the windows lane's DURATION ANOMALY, 1916 s
@@ -20923,10 +20942,17 @@ nothing else: kayaShowSheetWhenAnchored shows such a sheet again (traced
 version never did: Material's own show cancels kaya's on the sheet's first
 frame, and the cancellation ended kaya's watcher too (368 "kaya shows it"
 lines across the bundles, no "show ended", no "try 2"). The watcher now
-outlives a show Material cancelled. One more trap on the way: Material keys
+outlives a show Material cancelled. And kaya's OWN show can end the same way
+(the 6cbf53f0 matrix, editorrestore-go, run 20261120T012737Z-025270: try 2
+began at 552 in a 525 px room, the room became 800, and "show ended Hidden
+going to Hidden" at offset 301 with no confirm since it began); the watcher
+reset its mark after its own show, and since the state was Hidden/Hidden
+before and after, snapshotFlow never emitted again and select_document's 5 s
+ran out with the list up on screen. The watcher now judges its own show's end
+where it returns and shows again (NSS9). One more trap on the way: Material keys
 the sheet's state on the `confirmValueChange` function's identity, so a
 confirm function built anew in each composition builds a new state each
-time; it is remembered. check-flightrec NSS1 to NSS8 (android sheet show).
+time; it is remembered. check-flightrec NSS1 to NSS9 (android sheet show).
 
 ## The GTK surface mipmap stall (measured 2026-11-03)
 
