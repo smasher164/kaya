@@ -49,6 +49,7 @@ from lanes import win as lane
 from packaging import identity as app_identity
 from packaging import windows as win_package
 import content_fresh
+import unit_build
 import exclusive
 import verdict as verdict_reader
 import only  # noqa: E402
@@ -732,11 +733,13 @@ if not _vm_warm():
 # Joined in unit_tests_on_windows(), before any leg runs.
 UNIT_JSON = ROOT / "target/win-unit-tests.json"
 _unit_json = open(UNIT_JSON, "w", encoding="utf-8")
+UNIT_BUILD_START = time.time()
 UNIT_BUILD = subprocess.Popen(
     ["cargo", "xwin", "test", "--locked", "--features", "harness",
      "--release", "--target", "aarch64-pc-windows-msvc", "-p", "kaya",
      "--lib", "--no-run", "--message-format=json"],
-    cwd=ROOT, stdout=_unit_json, start_new_session=True, env=xwin_env(dict(os.environ)))
+    cwd=ROOT, stdout=_unit_json, start_new_session=True,
+    env=xwin_env(dict(os.environ, CARGO_LOG="cargo::core::compiler::fingerprint=info")))
 
 
 def stop_unit_build():
@@ -1645,6 +1648,8 @@ def unit_tests_on_windows():
     json_path = UNIT_JSON
     built = UNIT_BUILD.wait()
     _unit_json.close()
+    print(unit_build.said(json_path.read_text(encoding="utf-8"),
+                          time.time() - UNIT_BUILD_START), flush=True)
     if built != 0:
         print("deploy-win: the unit test binary would not build for windows.",
               file=sys.stderr)

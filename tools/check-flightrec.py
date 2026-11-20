@@ -1780,6 +1780,21 @@ def rust_fn(text, header):
     return ""
 
 
+def census_win_unit_build(src):
+    """docs/traps.md, the windows lane over its ceiling on a cold unit-test
+    build: the lane says how long the build took, whether kaya compiled, and
+    cargo's reason when it did."""
+    win = src[WIN]
+    found = []
+    if 'CARGO_LOG="cargo::core::compiler::fingerprint=info"' not in win:
+        found.append("windows: the unit-test build runs without cargo's fingerprint log, so "
+                     "a compile of kaya leaves no reason")
+    if "print(unit_build.said(json_path.read_text(" not in py_block(win, "unit_tests_on_windows"):
+        found.append("windows: unit_tests_on_windows does not say how long the unit-test build "
+                     "took or whether kaya compiled")
+    return found
+
+
 def census_wedge_capture(src):
     """The linux harness's stacks at the ceiling (docs/traps.md, the wedged
     media_feed leg): eu-stack's ~360 KB blocked on a pipe read only after
@@ -3052,7 +3067,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("linux step cpu", census_linux_step_cpu),
             ("GTK failed-step picture", census_gtk_failshot),
             ("SwiftUI routed session answer", census_session_answer),
-            ("iOS gutter context", census_gutter_context))
+            ("iOS gutter context", census_gutter_context),
+            ("windows unit-test build", census_win_unit_build))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -3199,6 +3215,11 @@ na12 = doctored(ACT2_RS,
                 "", "NA12 act two no longer adopting act one's recorder")
 gate.negative("NA12 a tapped act two that leaves no picture of itself",
               lambda: census_android_app_shot(na12), want="does not adopt the recorder settings")
+nu1 = doctored(WIN,
+               r"^    print\(unit_build\.said\(json_path\.read_text\(encoding=\"utf-8\"\),\n.*\n",
+               "", "NU1 the unit-test build's sentence cut")
+gate.negative("NU1 a cold unit-test build that says nothing",
+              lambda: census_win_unit_build(nu1), want="does not say how long")
 na3 = doctored(ANDROID, r"^ *app_shot\(serial, package, name, log\)\n", "",
                "NA3 cut the pull of the app's picture")
 gate.negative("NA3 a red leg's picture never pulled",
@@ -4367,6 +4388,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(324 + (5 if DRIVES else 0))
+gate.negatives_ran(325 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

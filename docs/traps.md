@@ -4,6 +4,25 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The windows lane over its ceiling on a cold unit-test build (measured 2026-11-19)
+
+The 6a94ee6d matrix failed only on the windows lane's DURATION ANOMALY, 1916 s
+net against 1900 s: every leg passed, the suites took 1783 s (1846 and 1753 on
+the two matrices before), and the unit-tests phase took 100 s where a warm one
+takes 5-7, waiting on the unit-test binary's compile (`Finished ... in 2m 38s`).
+The commit under it changed swift/ and tools/ only, and nothing under crates/
+was newer than the matrix before, so why cargo compiled kaya is not known: the
+lane's log carried no reason. The warm windows lane runs 1830-1855 s net (the
+fcce6b1c, 62098299 and this matrix), so a cold unit-test or core build alone
+crosses the ceiling. The unit-test build now runs under cargo's fingerprint
+log (`CARGO_LOG=cargo::core::compiler::fingerprint=info`, its `stale:` and
+`dirty:` lines in the lane log) and the phase prints how long the build took
+and whether kaya compiled or was fresh (tools/lib/unit_build.py). By hand, with
+crates/kaya/src/act2.rs touched, the same cargo command logged `stale: changed
+".../crates"` (build.rs's `rerun-if-changed` on the whole directory) and
+compiled kaya in 158 s. check-flightrec holds the log and the sentence (NU1).
+Whether the ceiling should leave room for a cold build is for the maintainer.
+
 ## The keyed target read off the main thread (measured 2026-11-19)
 
 The 62098299 matrix's mac portfolio-python-swiftui failed `expect_tint
