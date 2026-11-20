@@ -1627,6 +1627,20 @@ because no purge could be made on demand, so the fix is not proven by a
 reproduction: a third sighting with the wait's 3 s sentence in the leg log
 says the premise is wrong.
 
+THIRD SIGHTING 2026-11-19, run 20261120T030003Z-062709 (the 3e7041e8
+matrix): the wait's 3 s sentence is in the leg log ("idle with no purge in
+flight for 3.7s, after 13.8s") and the empty pick came 5.6 s after the purge
+ended, so the purge premise is wrong, as the paragraph above said it would
+be. Both sightings with the picker's Info lines put the empty pick 80-115 ms
+after the DOCCopyOperation finished, with its DOCSetTagsOperation still in
+flight (docs/traps.md, the same entry's third-sighting paragraph). kaya's
+bridge files in Documents were ruled out by a 20 Hz churn of the same shape
+(4 of 4 legs green). No change inside kaya found that would not hide the
+platform's failure; the bundle's system-log summary now names the empty
+pick, its distance from a purge and the operations in flight
+(flightrec_lane.ios_empty_pick). Open for the next sighting's reading.
+KEY: DOCSetTagsOperation, did Pick URLs [], ios_empty_pick
+
 ## ~~WATCH — iOS numberfield-swiftui and numberfieldde-swiftui: `press return` found kaya's focus nowhere and no first responder (seen once, both legs of the 0b8e8e42 matrix, 2026-11-03)~~ FIXED 2026-11-16: not the focus. Both bundles (red/20261103T222534Z-016040) read XCTest IN PROGRESS 15 s into the `type_b64`: the driver sat in XCTest's 60 s animations-idle wait on a `CASpringAnimation position 0.3833` added through `_UIViewAdditiveAnimationAction` to the keyboard's InputAccessoryHost layer, which was deallocated before its stop came, and the focus reading came after the wait. The iOS harness now delivers a stop UIKit never sent for a deallocated layer (the INVESTIGATE "XCTest waits 60 s for animations idle" entry below; docs/traps.md, the stop UIKit loses with its layer). GUARD: check-flightrec NH24 to NH27.
 KEY: numberfield-swiftui, numberfieldde-swiftui, press return, the simdrive watcher did not answer, focus is node nowhere, the first responder is nothing, keyboard_done
 

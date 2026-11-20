@@ -1092,7 +1092,7 @@ def drag_waits(winui_text):
     start = body.find("fn inject_drag(aim: DragAim) {")
     if start < 0:
         return [f"{WINUI}: inject_drag is gone — the windows drag moved"]
-    drag = body[start:start + 4000]
+    drag = body[start:body.find("\n}\n", start)]
     for needle, why in (
         ("await_answers(&DRAGS_STARTED, starts, 1, STARTING_BOUND_MS)",
          "the drag no longer waits for the source's own DragStarting"),
@@ -1124,6 +1124,20 @@ def drag_waits(winui_text):
                 bad.append(f"{WINUI}: await_hover_by no longer holds {needle!r} — a hover "
                            "answered on the way, by another widget or at another point, "
                            "satisfies the wait and the release rides it")
+    # docs/traps.md, the windows drag that ended before its release: the
+    # system's mouse events through the drag, injected apart from not, and
+    # the button state and the drive's phase when the session ended.
+    for needle, why in (
+        ("let watch = drag_input_start();",
+         "inject_drag no longer watches the system's mouse events"),
+        ("drag_input_stop(watch)", "inject_drag no longer reports the mouse events it watched"),
+        ('drag_input_phase("pressed");', "inject_drag no longer stamps its press"),
+    ):
+        if needle not in drag:
+            bad.append(f"{WINUI}: {why} ({needle!r} missing from inject_drag)")
+    if "info.flags & INJECTED != 0" not in body:
+        bad.append(f"{WINUI}: the drag's mouse hook no longer tells kaya's injected events "
+                   "from any other source's")
     # WHAT THE WAITS SAW, on every drag: the drag's own line is the only
     # record of a blind gesture, and a red drop is read from it first.
     for part in ("{start_wait}ms", "hover by the destination widget {onto} at the",
@@ -1148,7 +1162,8 @@ def drag_waits(winui_text):
         ('"<- drop on widget {id} answers {} at ({:.0}, {:.0}), offered kinds',
          "xaml_drag_event's drop"),
         ('"<- drop read {}, reported {}"', "finish_drop_now"),
-        ("\"<- widget {id}'s drag completed: {}\"", "DropCompleted"),
+        ("\"<- widget {id}'s drag completed: {}; {}\"", "DropCompleted"),
+        ("op_word(operation),\n                    drag_input_at_end()", "DropCompleted"),
         ('"-> release: the newest hover widget {widget} answering {} at ({:.1}, {:.1}), the '
          'release point', "inject_drag"),
         ("cursor {}; foreground pid {front_pid} (this process {})", "inject_drag's release"),
@@ -1166,7 +1181,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 155
+DECLARED = 158
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1243,6 +1258,13 @@ for label, pattern, repl, want in (
      r"\n    hover_answered\(id, verdict, \(point\.X, point\.Y\)\);", "", 1),
     ("the report no longer saying how long it waited",
      r"release point in \{nudge_wait\}ms", "release point", 1),
+    ("the drag's input watch never started",
+     r"let watch = drag_input_start\(\);", "let watch = None;", 1),
+    ("the session end's button state dropped from DropCompleted",
+     r"op_word\(operation\),\n                    drag_input_at_end\(\)",
+     "op_word(operation),\n                    String::new()", 1),
+    ("the hook no longer telling kaya's events from another source's",
+     r"info\.flags & INJECTED != 0", "true", 1),
     ("the drop's verb-trace record deleted",
      r'"<- drop on widget \{id\} answers', '"<- drop answers', 1),
 ):

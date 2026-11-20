@@ -582,6 +582,28 @@ with no fix. GUARD: check-steps' ios_provider (the purge count and the settle,
 each cut and watched red) and its self-test, which drives every branch of the
 wait with a fake clock.
 
+THE PURGE IS NOT THE PREMISE (third sighting, 2026-11-19, the 3e7041e8
+matrix, bundle 20261120T030003Z-062709 ios-editor-go): the provider wait
+printed "idle with no purge in flight for 3.7s, after 13.8s", the purge had
+ended at 19:15:31.364, and the empty pick still came at 19:15:36.980, 5.6 s
+later. What the two sightings that kept the picker's Info lines share is
+narrower: the service's `did Pick URLs []` lands 80-115 ms after its
+DOCCopyOperation finished, with the DOCSetTagsOperation it started 5 ms after
+the copy still in flight (00:19:00.032 / .037 / .146 on 2026-11-18; 36.899 /
+.902 / .980 here), which is where "A live iOS FileProvider can have a stale
+LocalStorage item index" below saw FP -1005 and an out-of-sync index. The
+picker gives up tagging the item it has just written; a purge is one way its
+index lags, not the only one. Ruled out by measurement: kaya's bridge files
+in Documents (request, response and the doing account, each written aside
+and renamed beside the export's directory): a host loop doing the same
+create/rename/unlink at 20 Hz in every live leg's Documents through
+editor-go, save-go, save-swift and save-swiftui left all four green. A red
+bundle's system-log summary now says it in one sentence (flightrec_lane's
+ios_empty_pick: the empty pick's time, how long after the last purge or
+during one, when the copy finished, and which picker operations were still
+in flight), which printed the sentences above from both bundles. GUARD:
+check-flightrec's iOS hang record census, NH28 and NH29 watched red.
+
 ## SwiftUI reopens an aux window after a quit (measured 2026-11-17)
 
 On macOS 26.6 a kaya app whose user keeps windows at a quit
@@ -10616,6 +10638,32 @@ DropCompleted operation. tools/check-universal-props.py's drag_waits holds
 the wait's shape and the records, with the shipped any-hover count among its
 watched negatives.
 
+## The windows drag that ended before its release (seen 2026-11-19)
+
+The 3e7041e8 matrix's tasks_rust (bundle 20261120T025926Z-060041
+windows-tasks_rust) failed `drag label@ptitle[t6] to label@ptitle[t5]
+before`: the source's DragStarting came 165 ms after the press, its
+DropCompleted said `none` 437 ms after that and 345 ms BEFORE kaya's release,
+and no widget answered a single hover during the whole drag. The bundle could
+not say why the session ended: nothing recorded the mouse events the system
+saw or the button state at the end. Pointer legs run alone on the VM, and the
+lane sampler's foreground stayed the guest throughout.
+
+The recorder grew. `inject_drag` now holds a low-level mouse hook
+(WH_MOUSE_LL, on a thread of its own that pumps messages) for the drag's
+length and prints every mouse event the system saw, kaya's injected ones
+apart from any other source's (`the drag's input, N mouse event(s): ...`), and
+DropCompleted's record carries the asynchronous left-button and Escape state
+and where the drive was, in ms after its press. A forced red (an extra
+injected left-up after the travel's third step, 1 substitution, run
+20261120T035611Z-043200) reproduced the matrix's signature exactly, no hover
+at all and `none` before the release, and read back `left button UP, escape
+up; the drive was travelling to the destination, 253 ms after its press` and
+`+365 left up (kaya) at (319, 202)` before the drive's own `+1046 left up`.
+The next sighting says whether a release came first and whose it was.
+GUARD: check-universal-props' drag_waits holds the watch, its report, the
+injected test and the record, three cuts watched red.
+
 ## A MIME-shaped custom id registers verbatim on iOS, and no private mapping is needed — the opposite of the same string on macOS (measured 2026-09-03)
 
 macOS refuses `dev.kaya/note` at ITEM level and only a board-level write
@@ -15721,6 +15769,21 @@ break was that aftermath, the matrix's leftover memory pressure (swap 2.6 of
 The next break carries its own. Guards: check-flightrec's Android history
 census and its cuts of the sampler, the sidecar, the first-failed-read tick
 and the settle wait, and lane-health LH29-LH31.
+
+THE NEXT BREAK, READ FROM ITS HOST TIMELINE (2026-11-19, the matrix on
+3e7041e8, bundle 20261120T033212Z-027908 android-capture-go): the
+android-quiet row's capture-go broke at its first input's open (19:33:50,
+191 failed reads, about 10 a second with the rest padded), and its camera
+frames arrived. The settle wait held: the pool's five emulators read 58%,
+53% and 58% for the 3 s before the leg. The host at the first failed read
+was not starved of CPU: load1 6.9 on 18 cores, 492% in all of which the
+leg's own emulator took 351% and the other four 21-34% each, no swap-outs,
+1.3 GB free. What moved was the pager: 769 decompressions and 176 page-ins
+in that tick, 692 in the next, 23 in the third, then a few each second; the
+emulator was faulting back memory the system had compressed while it sat
+idle through the matrix. So CPU starvation is not this sighting's premise;
+a memory stall of the emulator at the open is the one reading the timeline
+carries, and one sighting does not settle it.
 
 ## The WinUI self-view colour: the platform's player over a camera's frame source decodes BT.601 as BT.709 (measured 2026-10-03)
 

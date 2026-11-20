@@ -399,6 +399,7 @@ def ios_system_log(text, pid):
     said.append(f"{len(lost)} line(s) say lost connection or unable to monitor"
                 + (f", the first: {lost[0][:200]}" if lost else ""))
     said.append(ios_provider_purges(lines))
+    said.append(ios_empty_pick(lines))
     return "; ".join(said)
 
 
@@ -421,6 +422,47 @@ def ios_provider_purges(lines):
         return "the LocalStorage provider purged no Spotlight index in this slice"
     return (f"the LocalStorage provider purged its Spotlight index {len(spans)} time(s): "
             + ", ".join(spans))
+
+def ios_empty_pick(lines):
+    """docs/traps.md, the iOS export the picker handed back empty."""
+    picks = [line for line in lines
+             if "DocumentManager.Service[" in line and "did Pick URLs []" in line]
+    if not picks:
+        return "the picker handed the app no empty pick in this slice"
+    pick = picks[0]
+    at = _log_time(pick)
+    spans, open_at, ops, copied = [], None, {}, None
+    for line in lines:
+        when = _log_time(line)
+        if when is None or at is None or when > at:
+            continue
+        if "LocalStorageFileProvider[" in line and "deleting all searchable items" in line:
+            if "done deleting" in line:
+                spans.append((open_at, when))
+                open_at = None
+            else:
+                open_at = when
+        op = re.search(r"\[INFO\] (Starting|finishing) <(?:\w+\.)?(\w+Operation): (0x[0-9a-f]+)",
+                       line)
+        if op and op.group(1) == "Starting":
+            ops[op.group(3)] = (op.group(2), line[11:23])
+        elif op:
+            ops.pop(op.group(3), None)
+            if op.group(2) == "DOCCopyOperation":
+                copied = line[11:23]
+    if open_at is not None:
+        purge = f"DURING a purge that began at {open_at:%H:%M:%S.%f}"[:-3]
+    elif spans:
+        purge = (f"{(at - spans[-1][1]).total_seconds():.1f} s after the last purge ended "
+                 f"({len(spans)} purge(s) before it in the slice)")
+    else:
+        purge = "with no purge before it in the slice"
+    flight = ", ".join(f"{name} since {since}" for name, since in ops.values()) or "none"
+    return (f"the picker handed the app an EMPTY pick at {pick[11:23]} (UIKit delivers it as "
+            f"a cancel: the export was not materialized), {purge}; "
+            + (f"its DOCCopyOperation finished at {copied}" if copied
+               else "no DOCCopyOperation finished before it")
+            + f"; picker operations still in flight: {flight}")
 
 
 def ios_crash_reports(directory, pid, since):

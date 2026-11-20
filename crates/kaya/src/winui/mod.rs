@@ -11990,7 +11990,11 @@ fn wire_dnd(core: &mut CoreState, id: u64) -> windows_core::Result<()> {
             // AppKit's session-ended operation.
             let operation = drag_ops_of(args.DropResult()?);
             dnd_note(
-                format_args!("<- widget {id}'s drag completed: {}", op_word(operation)),
+                format_args!(
+                    "<- widget {id}'s drag completed: {}; {}",
+                    op_word(operation),
+                    drag_input_at_end()
+                ),
             );
             HOVER_SAID.set(None);
             hide_drop_line();
@@ -25332,18 +25336,22 @@ fn inject_drag(aim: DragAim) {
     };
     let nap = |ms: u64| std::thread::sleep(std::time::Duration::from_millis(ms));
     use std::sync::atomic::Ordering::Relaxed;
+    let watch = drag_input_start();
     let began = std::time::Instant::now();
     let starts = DRAGS_STARTED.load(Relaxed);
     move_to(from.0, from.1);
     nap(SETTLE_MS);
     unsafe { mouse_event(LEFTDOWN, 0, 0, 0, 0) };
+    drag_input_phase("pressed");
     nap(PRESS_MS);
     for step in 1..=6 {
         move_to(from.0 + step * 3, from.1 + step * 2);
         nap(STEP_MS);
     }
+    drag_input_phase("was waiting for its DragStarting");
     let (started, start_wait) =
         await_answers(&DRAGS_STARTED, starts, 1, STARTING_BOUND_MS);
+    drag_input_phase("was travelling to the destination");
     for step in 1..=TRAVEL_STEPS {
         let at = f64::from(step) / f64::from(TRAVEL_STEPS);
         move_to(
@@ -25362,6 +25370,7 @@ fn inject_drag(aim: DragAim) {
     // and it is the position the button comes up at.
     let hovers = HOVERS_ANSWERED.load(Relaxed);
     move_to(to.0 + DRAG_NUDGE.0, to.1 + DRAG_NUDGE.1);
+    drag_input_phase("was waiting for the destination's hover at the release point");
     let (nudged, nudge_wait, widget, verdict, point) = await_hover_by(aim, hovers, NUDGED_BOUND_MS);
     let mut cursor = Point32 { x: 0, y: 0 };
     // SAFETY: a stack POINT.
@@ -25383,6 +25392,7 @@ fn inject_drag(aim: DragAim) {
         ),
     );
     unsafe { mouse_event(LEFTUP, 0, 0, 0, 0) };
+    drag_input_phase("had released");
     // WHAT EACH WAIT SAW, never what it hoped for: a destination that is
     // no drop target of kaya's answers no hover at all, and the drop that
     // follows then fails for a reason this line is the only record of.
@@ -25405,6 +25415,170 @@ fn inject_drag(aim: DragAim) {
     );
     crate::vtrace::note("drag", format_args!("<- {saw}"));
     eprintln!("kaya: winui drag {saw}");
+    crate::vtrace::note("drag", format_args!("<- {}", drag_input_stop(watch)));
+}
+
+/// docs/traps.md, the windows drag that ended before its release.
+#[cfg(feature = "harness")]
+unsafe extern "system" {
+    fn UnhookWindowsHookEx(hook: isize) -> i32;
+    fn GetMessageW(msg: *mut Msg, hwnd: isize, min: u32, max: u32) -> i32;
+    fn PostThreadMessageW(thread: u32, msg: u32, wparam: usize, lparam: isize) -> i32;
+    fn GetAsyncKeyState(vkey: i32) -> i16;
+}
+
+#[cfg(feature = "harness")]
+#[repr(C)]
+struct MouseLl {
+    pt: Point32,
+    data: u32,
+    flags: u32,
+    time: u32,
+    extra: usize,
+}
+
+#[cfg(feature = "harness")]
+struct DragInput {
+    began: std::time::Instant,
+    pressed_ms: Option<u64>,
+    phase: &'static str,
+    events: Vec<(u64, u32, i32, i32, bool)>,
+}
+
+#[cfg(feature = "harness")]
+static DRAG_INPUT: std::sync::Mutex<Option<DragInput>> = std::sync::Mutex::new(None);
+
+#[cfg(feature = "harness")]
+unsafe extern "system" fn drag_input_hook(code: i32, wparam: usize, lparam: isize) -> isize {
+    const INJECTED: u32 = 0x1;
+    if code >= 0 && lparam != 0 {
+        // SAFETY: WH_MOUSE_LL's lparam is an MSLLHOOKSTRUCT for code >= 0.
+        let info = unsafe { &*(lparam as *const MouseLl) };
+        if let Ok(mut slot) = DRAG_INPUT.try_lock() {
+            if let Some(input) = slot.as_mut() {
+                if input.events.len() < 512 {
+                    let at = input.began.elapsed().as_millis() as u64;
+                    input.events.push((at, wparam as u32, info.pt.x, info.pt.y, info.flags & INJECTED != 0));
+                }
+            }
+        }
+    }
+    unsafe { CallNextHookEx(0, code, wparam, lparam) }
+}
+
+#[cfg(feature = "harness")]
+fn drag_input_phase(phase: &'static str) {
+    if let Ok(mut slot) = DRAG_INPUT.lock() {
+        if let Some(input) = slot.as_mut() {
+            input.phase = phase;
+            if phase == "pressed" {
+                input.pressed_ms = Some(input.began.elapsed().as_millis() as u64);
+            }
+        }
+    }
+}
+
+#[cfg(feature = "harness")]
+fn drag_input_start() -> Option<(std::thread::JoinHandle<()>, u32)> {
+    *DRAG_INPUT.lock().ok()? =
+        Some(DragInput { began: std::time::Instant::now(), pressed_ms: None, phase: "settling", events: Vec::new() });
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        const WH_MOUSE_LL: i32 = 14;
+        // SAFETY: a module handle for this image, and a hook proc that only
+        // copies the event and chains.
+        let hook = unsafe {
+            SetWindowsHookExW(WH_MOUSE_LL, drag_input_hook, GetModuleHandleW(std::ptr::null()), 0)
+        };
+        let _ = tx.send((hook != 0).then(|| unsafe { GetCurrentThreadId() }));
+        if hook == 0 {
+            return;
+        }
+        let mut msg = Msg { hwnd: 0, message: 0, wparam: 0, lparam: 0, time: 0, pt_x: 0, pt_y: 0 };
+        // SAFETY: a stack MSG; WM_QUIT from drag_input_stop ends the loop.
+        while unsafe { GetMessageW(&mut msg, 0, 0, 0) } > 0 {}
+        unsafe { UnhookWindowsHookEx(hook) };
+    });
+    match rx.recv_timeout(std::time::Duration::from_millis(500)) {
+        Ok(Some(thread)) => Some((worker, thread)),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "harness")]
+fn drag_input_stop(watch: Option<(std::thread::JoinHandle<()>, u32)>) -> String {
+    const WM_QUIT: u32 = 0x0012;
+    let hooked = watch.is_some();
+    if let Some((worker, thread)) = watch {
+        unsafe { PostThreadMessageW(thread, WM_QUIT, 0, 0) };
+        let _ = worker.join();
+    }
+    let Some(input) = DRAG_INPUT.lock().ok().and_then(|mut slot| slot.take()) else {
+        return "the drag's input: no record".to_owned();
+    };
+    if !hooked {
+        return "the drag's input: the low-level mouse hook could not be installed, so no event was seen"
+            .to_owned();
+    }
+    drag_input_said(&input.events)
+}
+
+#[cfg(feature = "harness")]
+fn drag_input_said(events: &[(u64, u32, i32, i32, bool)]) -> String {
+    let name = |msg: u32| match msg {
+        0x200 => "move",
+        0x201 => "left down",
+        0x202 => "left up",
+        0x204 => "right down",
+        0x205 => "right up",
+        0x20A => "wheel",
+        _ => "other",
+    };
+    let who = |injected: bool| if injected { "kaya" } else { "NOT INJECTED" };
+    let mut parts: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < events.len() {
+        let (at, msg, x, y, injected) = events[i];
+        let mut j = i + 1;
+        if msg == 0x200 {
+            while j < events.len() && events[j].1 == 0x200 && events[j].4 == injected {
+                j += 1;
+            }
+        }
+        if j - i > 1 {
+            let (end, _, ex, ey, _) = events[j - 1];
+            parts.push(format!("+{at}..{end} {} moves ({}) ({x}, {y})->({ex}, {ey})", j - i, who(injected)));
+        } else {
+            parts.push(format!("+{at} {} ({}) at ({x}, {y})", name(msg), who(injected)));
+        }
+        i = j;
+    }
+    format!("the drag's input, {} mouse event(s): {}", events.len(), if parts.is_empty() { "none".to_owned() } else { parts.join("; ") })
+}
+
+#[cfg(feature = "harness")]
+fn drag_input_at_end() -> String {
+    let down = |vkey: i32| (unsafe { GetAsyncKeyState(vkey) } as u16 & 0x8000) != 0;
+    let state = format!(
+        "left button {}, escape {}",
+        if down(0x01) { "down" } else { "UP" },
+        if down(0x1B) { "DOWN" } else { "up" }
+    );
+    match DRAG_INPUT.lock().ok().and_then(|slot| slot.as_ref().map(|i| (i.began.elapsed().as_millis() as u64, i.pressed_ms, i.phase))) {
+        Some((now, pressed, phase)) => format!(
+            "{state}; the drive {phase}, {}",
+            match pressed {
+                Some(p) => format!("{} ms after its press", now.saturating_sub(p)),
+                None => "before its press".to_owned(),
+            }
+        ),
+        None => format!("{state}; no harness drag in flight"),
+    }
+}
+
+#[cfg(not(feature = "harness"))]
+fn drag_input_at_end() -> String {
+    String::new()
 }
 
 /// Both centres in SCREEN pixels, or the sentence naming what stopped

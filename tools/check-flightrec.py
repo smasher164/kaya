@@ -2170,8 +2170,8 @@ def census_ios_hang_record(src):
 
 def ios_hang_record_checks(src, echo=False):
     scope = {"re": re, "pathlib": pathlib, "json": json, "datetime": datetime}
-    for name in ("ios_animation_reading", "_log_time", "ios_provider_purges", "ios_system_log",
-                 "ios_crash_reports"):
+    for name in ("ios_animation_reading", "_log_time", "ios_provider_purges", "ios_empty_pick",
+                 "ios_system_log", "ios_crash_reports"):
         body = py_block(src[LANE_PY], name)
         if not body:
             return [f"ios: missing hang reader {name}"]
@@ -2220,6 +2220,19 @@ def ios_hang_record_checks(src, echo=False):
     said["held on"] = system(rows[3], 53460)
     said["empty"] = system("Timestamp\n", 53460)
     said["no pid"] = system("\n".join(rows), None)
+    svc = "com.apple.DocumentManager.Service[99419:1] [com.apple.FileProvider:default] [INFO]"
+    lsp = "LocalStorageFileProvider[5:1] [spotlight]"
+    pick = [f"{t}2:40.000 I  {lsp} deleting all searchable items because x",
+            f"{t}2:41.500 I  {lsp} done deleting all searchable items in 1.5s",
+            f"{t}2:47.000 I  {svc} Starting <DocumentManagerExecutables.DOCCopyOperation: "
+            f"0x1, 1 bounce:0 lud:2 idle>",
+            f"{t}2:47.080 I  {svc} finishing <DocumentManagerExecutables.DOCCopyOperation: "
+            f"0x1, 1 bounce:0 lud:2 executing>",
+            f"{t}2:47.083 I  {svc} Starting <DOCSetTagsOperation: 0x2,  multiple providers idle>",
+            f"{t}2:47.160 I  com.apple.DocumentManager.Service[99419:1] [x:DocumentManager] "
+            f"DOCServiceDocumentBrowserViewController did Pick URLs []"]
+    said["empty pick"] = system("\n".join(rows + pick), 53460)
+    said["pick in purge"] = system("\n".join(rows + pick[:1] + pick[2:]), 53460)
     with tempfile.TemporaryDirectory(prefix="kaya-crash-") as d:
         root = pathlib.Path(d)
         doc = {"pid": 53460, "exception": {"type": "EXC_BAD_ACCESS", "signal": "SIGSEGV"},
@@ -2257,6 +2270,13 @@ def ios_hang_record_checks(src, echo=False):
             ("held on", "testmanagerd never ended its session with pid 53460"),
             ("empty", "holds no lines at all"),
             ("no pid", "no line here can be tied to the app"),
+            ("let go", "the picker handed the app no empty pick in this slice"),
+            ("empty pick", "an EMPTY pick at 15:22:47.160 (UIKit delivers it as a cancel: the "
+                           "export was not materialized), 5.7 s after the last purge ended "
+                           "(1 purge(s) before it in the slice); its DOCCopyOperation finished "
+                           "at 15:22:47.080; picker operations still in flight: "
+                           "DOCSetTagsOperation since 15:22:47.083"),
+            ("pick in purge", "DURING a purge that began at 15:22:40.000"),
             ("crash", "names pid 53460: exception EXC_BAD_ACCESS SIGSEGV, termination "
                       "SIGNAL Segmentation fault: 11"),
             ("crash", "1 could not be read: torn.ips"),
@@ -3973,6 +3993,12 @@ for label, rel, pattern, repl, want, check in (
         ("NH11 a session ended before the exit read as the exit", LANE_PY,
          r"if lead > 1 else", "if lead > 1e9 else", "let go reading lost",
          ios_hang_record_checks),
+        ("NH28 the system summary without the picker's empty pick", LANE_PY,
+         r"\n    said\.append\(ios_empty_pick\(lines\)\)", "", "empty pick reading lost",
+         ios_hang_record_checks),
+        ("NH29 the empty pick without the operations in flight", LANE_PY,
+         r"ops\[op\.group\(3\)\] = \(op\.group\(2\), line\[11:23\]\)", "pass",
+         "empty pick reading lost", ios_hang_record_checks),
         ("NH12 a crash report never matched to its pid", LANE_PY,
          r'doc\.get\("pid"\) == pid', "False", "crash reading lost",
          ios_hang_record_checks),
@@ -4397,6 +4423,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(326 + (5 if DRIVES else 0))
+gate.negatives_ran(328 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

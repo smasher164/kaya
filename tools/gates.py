@@ -383,7 +383,7 @@ AFTER = {"js-app-checks": "js-typecheck"}
 LAST = ("check-targets",)
 WEIGHT = {
     "check-table-tier": 77, "check-abort": 71, "check-sugar-surface": 70,
-    "check-app-identity": 65, "check-verbs": 57, "check-universal-props": 43,
+    "check-app-identity": 65, "check-verbs": 57, "check-universal-props": 90,
     "check-winui-bindings": 42, "check-empty-child": 39, "java-typecheck": 37,
     "check-assets": 31, "swift-typecheck": 31, "check-flightrec": 52,
     "check-exclusive": 26, "check-window-memory": 25, "check-canvas-blit": 19,
