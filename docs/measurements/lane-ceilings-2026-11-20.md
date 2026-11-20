@@ -55,9 +55,33 @@ A lane over its ceiling or within 3% of it is set at about 1.05-1.08x over
 the cold reading; the others keep theirs.
 
 - windows 1900 -> 2200: 2063 s net, 1.07x.
-- ios 1550 -> 1650: 1539 s net, 99% of the old ceiling; 1.07x.
+- ios 1550 -> 1650: 1539 s net, 99% of the old ceiling; 1.07x. Then 1780
+  after the second cold reading below.
 - mac (93%), linux (85%), android (85%) and the gates (79%) keep 1250, 1250,
   1200 and 660.
+
+## The second cold reading (9a982b38)
+
+9a982b38 removed scene.rs's check_block_value, which had no caller, so every
+lane but mac rebuilt the core cold again (the mac lane's libkaya came from the
+gate sweep before the commit, as before). Matrix wall 2309 s.
+
+| lane | wall | waits | net | ceiling | net/ceiling | one-time phases (s) |
+|---|---|---|---|---|---|---|
+| mac | 1315 | 126 | 1189 | 1250 | 95% | core-build+gates 46, guest-builds 25 |
+| linux | 1616 | 442 | 1174 | 1250 | 94% | core-build 37, guest-builds 25 |
+| windows | 2146 | 74 | 2072 | 2200 | 94% | build 188, native-images 18, deploy 99, package 13 |
+| ios | 1899 | 229 | 1670 | 1650 | 101% | swift 613, go 447, python 151, swiftui 494 (built and queued) |
+| android | 1334 | 327 | 1007 | 1200 | 84% | builds 41 + 16 + 69 + 31 |
+| gates | 583 | 0 | 583 | 660 | 88% | |
+
+Windows read within 0.5% of its first cold reading. iOS read 1670 against
+1539, every phase longer (swift 613 against 535, swiftui 494 against 457), the
+lane's spread between two cold matrices on one day being 8%; 1780 is 1.07x
+over the higher reading. mac (95%) and linux (94%) sit just outside the 3%
+band and keep 1250; they are the next to read. The one red leg, linux
+farend-rust-x11, is a deadlock inside PipeWire's GStreamer sink (docs/traps.md,
+the linux voice the graph never pulled, CAUSE; docs/deferred.md).
 
 ## The pull: the largest wins left
 

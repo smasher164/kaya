@@ -1700,6 +1700,22 @@ dock title first, and whether the x11 and wayland twins of the scene share any
 state the python guest keeps between legs (a recently played order would move
 the cards).
 
+## DEFECT: the GTK voice's pipewiresink deadlocks when PipeWire sends the Format before the stream reaches PAUSED (seen twice: 2026-11-03 farend-java-x11, 2026-11-20 farend-rust-x11)
+KEY: pipewiresink, on_param_changed, gst_pipewire_sink_setcaps, waiting for pool to become active, gtk/voice.rs, farend, voice 0 reads none, the platform pulled 0 frame(s)
+
+docs/traps.md, the linux voice the graph never pulled, CAUSE: an upstream
+deadlock in gstpipewiresink.c (PipeWire 1.6.9, unchanged on master) between
+the loop thread's on_param_changed and the streaming thread's setcaps; the
+GTK main thread then blocks in the voice's state change. Open: what kaya does
+about it. Candidates, none measured yet: the voice's state changes off the UI
+thread with a bound (stops the hang, not the silence); a sink that does not
+wait under the loop's lock (pulsesink through pipewire-pulse, keeping
+media.role=Phone and the echo-cancel target, or an appsrc-free pw_stream of
+kaya's own); and the deadlock reported upstream with the two stacks. Forcing
+it: hold the streaming thread before setcaps's wait (a pad probe) so the
+Format arrives first. A binding-free change in crates/kaya/src/gtk/voice.rs;
+the wall is the farend legs on both protocols.
+
 ## WATCH — linux chatcall-go-x11: the app's capture read "frames none, samples none" with both synthetic devices offered (seen once, the 06e197ac matrix, 2026-11-03); the graph is read at a refused capture step now
 KEY: chatcall-go-x11, capture 0 reads frames none, 0 samples arrived in the last 1000 ms, pwsynth, kaya-synthetic-camera-1, step-failed capture
 
@@ -1741,7 +1757,8 @@ right after (mac 23, linux 42, ios 10, android 10 legs).
 - linux farend-java-x11 (a8af4b7d matrix, run 20261103T141338Z-008402): the
   app's voice node sat suspended and nothing was pulled; the graph is now read
   at the first refused voice step (docs/traps.md, the linux voice the graph
-  never pulled).
+  never pulled). SEEN AGAIN and its cause read 2026-11-20: the DEFECT entry
+  on the GTK voice's pipewiresink deadlock.
 - iOS editor-go (a8af4b7d matrix, run 20261103T141450Z-076206): `type` refused
   with the caret line at y 406+22 against a frame ending at 427, the keyboard at
   456: one point below the field's frame.

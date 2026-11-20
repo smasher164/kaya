@@ -21108,6 +21108,25 @@ capture-leg now reads `pw-link --links --id` and `pw-cli ls Node` at the first
 refused voice step (forced red read back: "java:output_FL" linked into
 echo-cancel-sink:playback_FL). check-flightrec NV1.
 
+CAUSE (read 2026-11-20, the second sighting: farend-rust-x11 in the 9a982b38
+matrix, bundle 20261120T184230Z-008992): a deadlock inside PipeWire's own
+GStreamer sink, gstpipewiresink.c of PipeWire 1.6.9 and unchanged on master.
+The links section showed farend:output_FL/FR linked into echo-cancel-sink,
+yet pw-top read the app's node `S` (suspended) in every sample, and the stacks
+at the step ceiling name the three threads. The PipeWire loop thread sits in
+on_param_changed (line 841), which runs under the thread loop's lock and waits
+on the pool's condition for the buffer pool to become active. The streaming
+thread sits in gst_pipewire_sink_setcaps (line 961) in
+pw_thread_loop_timed_wait_full, waiting for the stream to reach PAUSED, and
+only after that wait does setcaps configure and activate the pool. The Format
+param reached the loop thread before the PAUSED state, so neither can move,
+and the timed wait cannot time out since it must take the loop's lock back.
+The GTK main thread then blocked in gst_base_sink_set_flushing (the voice's
+set_state at `click button#3`) on the stream lock setcaps holds, so the next
+step hit the 60 s ceiling. kaya's part: crates/kaya/src/gtk/voice.rs puts the
+voice on `pipewiresink`, and its state changes run on the UI thread. Ledger:
+docs/deferred.md, the GTK voice's pipewiresink deadlock.
+
 ## The android leg with no verb trace (measured 2026-11-03)
 
 The Compose harness dumped its verb trace only at the verdict and at its own

@@ -229,8 +229,8 @@ BUDGETS = {
     # (80s of it on the swift suite's device, the resume door's background
     # and settle included) and the picker press's provider settle, 13 waits
     # summing 77.5s on matrix #7, which read 1441 net. 1550 is 1.08x over it.
-    # 1650 since 2026-11-20: docs/measurements/lane-ceilings-2026-11-20.md.
-    "ios": 1650,
+    # 1780 since 2026-11-20: docs/measurements/lane-ceilings-2026-11-20.md.
+    "ios": 1780,
     # 310 since 2026-08-20: the pool-degradation trap's remedy is a COLD
     # BOOT (docs/traps.md), and a reboot run carries ~60-90s of emulator
     # startup a warm-pool ceiling read as an anomaly; a measured cold-boot
