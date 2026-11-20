@@ -116,18 +116,13 @@ pub(crate) enum Commit {
     Moved(f64),
 }
 
-pub(crate) fn commit(text: &str, committed: f64, min: f64, max: f64, step: f64) -> Commit {
-    let Some(read) = fmt::parse_number(text.trim()) else { return Commit::Revert };
-    settle(read, committed, min, max, step)
-}
-
 /// A step (§3 rule 6): `steps` of them from the committed value, ten for
 /// a page key, clamped, as a commit.
 pub(crate) fn stepped(committed: f64, steps: i32, min: f64, max: f64, step: f64) -> Commit {
     settle(committed + f64::from(steps) * step, committed, min, max, step)
 }
 
-/// A value a control already read, settled as `commit` settles text: GTK's
+/// A value a control already read, settled as `commit_for` settles text: GTK's
 /// spin button moves its adjustment before `value-changed` reports it, and
 /// the WinUI arm's NumberBox reads through kaya's formatter itself.
 pub(crate) fn settle(read: f64, committed: f64, min: f64, max: f64, step: f64) -> Commit {
@@ -210,11 +205,12 @@ mod tests {
     #[test]
     fn a_commit_reads_the_text_through_the_door() {
         let shown = text(12.5, 0.5);
-        assert_eq!(commit(&shown, 0.0, 0.0, 100.0, 0.5), Commit::Moved(12.5));
-        assert_eq!(commit(&format!(" {shown} "), 12.5, 0.0, 100.0, 0.5), Commit::Unchanged);
-        assert_eq!(commit("abc", 12.5, 0.0, 100.0, 0.5), Commit::Revert);
-        assert_eq!(commit("", 12.5, 0.0, 100.0, 0.5), Commit::Revert);
-        assert_eq!(commit(&format!("{shown}abc"), 12.5, 0.0, 100.0, 0.5), Commit::Revert);
+        let commit = |t: &str, committed| commit_for(t, committed, 0.0, 100.0, 0.5, NumberFormat::Number);
+        assert_eq!(commit(&shown, 0.0), Commit::Moved(12.5));
+        assert_eq!(commit(&format!(" {shown} "), 12.5), Commit::Unchanged);
+        assert_eq!(commit("abc", 12.5), Commit::Revert);
+        assert_eq!(commit("", 12.5), Commit::Revert);
+        assert_eq!(commit(&format!("{shown}abc"), 12.5), Commit::Revert);
     }
 }
 
