@@ -4,6 +4,26 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The keyed target read off the main thread (measured 2026-11-19)
+
+The 62098299 matrix's mac portfolio-python-swiftui failed `expect_tint
+label@side[t15000]` for 15 s while its picture drew all eight `recent` rows:
+the target registry's live set held only five `side` labels, the five rows
+older than the tick's three. The miss sentence printed tag sizes only, so it
+grew the copies' keys, a fresh uncached walk's count and the live set's
+generation, and kayaLiveIds took `dispatchPrecondition(.onQueue(.main))`.
+The first run with the wall crashed at once: expect_column_edges asks
+kayaTableColumnsReach for the table's scroll reach, and kayaTableHorizontal
+(and kayaTableTrailing) resolved the target on the HARNESS thread. A read
+there, racing a batch on the main thread, memoized a partial tree under the
+current generation, which stays until the next batch, and the portfolio's
+Transactions screen sends none while it is read. Both helpers resolve through
+kayaOnMain now. With the wall in place the whole mac lane passed (no other
+off-main reader), and a forced miss read back "8 carrying id side, keys
+t14995,...,t15002; the tree walked afresh holds 0 copy(ies) of that key, the
+live set is from generation 14 of 14". check-steps holds the wall and the
+helpers' hop.
+
 ## The edit-list read whose connection never connected (measured 2026-11-19)
 
 The fcce6b1c matrix's windows media_delivery_rust stayed `loading` on its first

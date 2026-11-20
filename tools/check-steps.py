@@ -405,6 +405,18 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
             not in starget):
         fail("swift/KayaSwiftUI.swift keyed targets answer from an "
              "unpresented root")
+    # THE LIVE SET IS THE MAIN THREAD'S (docs/traps.md, the keyed target read
+    # off the main thread): a read off it, racing a batch, memoized a partial tree.
+    slive = section(swift, "private func kayaLiveIds(", "\n}\n", TARGET_SWIFT)
+    if slive is not None and \
+            "dispatchPrecondition(condition: .onQueue(.main))" not in slive:
+        fail("swift/KayaSwiftUI.swift reads the live set off the main thread")
+    for helper in ("kayaTableHorizontal", "kayaTableTrailing"):
+        body = section(swift, f"func {helper}(", "\n}\n", TARGET_SWIFT)
+        if body is not None and \
+                'kayaOnMain({ kayaTarget(spec, "column", kayaScene.columns) })' not in body:
+            fail(f"swift/KayaSwiftUI.swift {helper} resolves its target off the "
+                 f"main thread")
 
     sany = section(swift, "private func kayaAnyTarget(",
                    "/// Cut one script LINE", TARGET_SWIFT)
@@ -805,6 +817,22 @@ if not target_out:
         'switch String(spec.split(separator: "#").first ?? "")',
         "check-steps: swift/KayaSwiftUI.swift target kind extraction "
         "does not stop at the earliest #/@")
+    target_watch(
+        "Swift live set read off the main thread", 1, "swift", S,
+        "off the main thread).\n    dispatchPrecondition(condition: .onQueue(.main))\n",
+        "off the main thread).\n",
+        "check-steps: swift/KayaSwiftUI.swift reads the live set off the "
+        "main thread")
+    target_watch(
+        "Swift table reach resolved off the main thread", 1, "swift", S,
+        "func kayaTableHorizontal(_ spec: Substring) -> (content: Double, "
+        "viewport: Double)? {\n    guard let node = kayaOnMain({ kayaTarget(spec, "
+        "\"column\", kayaScene.columns) })",
+        "func kayaTableHorizontal(_ spec: Substring) -> (content: Double, "
+        "viewport: Double)? {\n    guard let node = kayaTarget(spec, \"column\", "
+        "kayaScene.columns)",
+        "check-steps: swift/KayaSwiftUI.swift kayaTableHorizontal resolves its "
+        "target off the main thread")
     target_watch(
         "Swift direct startup admission", 1, "swift", S,
         '            kayaStartPumpOnce("the primary root")',

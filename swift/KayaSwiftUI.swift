@@ -10766,8 +10766,11 @@ private var kayaLiveCache: (generation: UInt64, ids: Set<UInt64>) = (UInt64.max,
 /// — once per apply batch. The registries are append-only and a popped
 /// entry's subtree stays in `nodes`, so a re-pushed screen's keyed target
 /// answered from the popped one (docs/traps.md).
-private func kayaLiveIds() -> Set<UInt64> {
-    if kayaLiveCache.generation == kayaApplyGeneration { return kayaLiveCache.ids }
+private func kayaLiveIds(cached: Bool = true) -> Set<UInt64> {
+    // The live set is the main thread's: one read off it, racing a batch, cached
+    // a partial tree for good (docs/traps.md, the keyed target read off the main thread).
+    dispatchPrecondition(condition: .onQueue(.main))
+    if cached && kayaLiveCache.generation == kayaApplyGeneration { return kayaLiveCache.ids }
     var ids = Set<UInt64>()
     var stack: [KayaNode] = []
     for window in kayaScene.windows.values { if let root = window.root { stack.append(root) } }
@@ -10786,7 +10789,7 @@ private func kayaLiveIds() -> Set<UInt64> {
         if !ids.insert(node.id).inserted { continue }
         stack.append(contentsOf: node.children)
     }
-    kayaLiveCache = (kayaApplyGeneration, ids)
+    if cached { kayaLiveCache = (kayaApplyGeneration, ids) }
     return ids
 }
 
@@ -10852,10 +10855,16 @@ private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode
             // The miss says what the registry held: a keyed target that
             // resolves nothing is otherwise one sentence for every cause.
             let withId = live.filter { $0.a11yId == id }
+            let fresh = kayaLiveIds(cached: false)
+            let walked = registry.filter {
+                kayaScene.nodes[$0.id] === $0 && fresh.contains($0.id) && $0.a11yId == id && stampOf($0)?.keys == keys
+            }
             kayaDiag(
-                "keyed target \(text) \(hits.isEmpty ? "unresolved" : "ambiguous (\(hits.count) copies)"): \(live.count) live \(kind)s, \(withId.count) carrying id \(id), tags "
-                    + withId.map { "\($0.tag.count)b" }.joined(separator: ",") + "; ids "
-                    + Set(live.map { $0.a11yId }).sorted().joined(separator: ","))
+                "keyed target \(text) \(hits.isEmpty ? "unresolved" : "ambiguous (\(hits.count) copies)"): \(live.count) live \(kind)s, \(withId.count) carrying id \(id), keys "
+                    + withId.map { (stampOf($0)?.keys ?? []).joined(separator: ".") }.joined(separator: ",") + "; ids "
+                    + Set(live.map { $0.a11yId }).sorted().joined(separator: ",")
+                    + "; the tree walked afresh holds \(walked.count) copy(ies) of that key, the live set is from "
+                    + "generation \(kayaLiveCache.generation) of \(kayaApplyGeneration)")
             return nil
         }
         return hits[0]
@@ -22098,7 +22107,7 @@ func kayaOnMain<T>(_ body: () -> T) -> T {
 /// the fan-out, and until it lands the verbs say that rather than claiming
 /// the target does not exist.
 func kayaTableHorizontal(_ spec: Substring) -> (content: Double, viewport: Double)? {
-    guard let node = kayaTarget(spec, "column", kayaScene.columns) else { return nil }
+    guard let node = kayaOnMain({ kayaTarget(spec, "column", kayaScene.columns) }) else { return nil }
     #if os(macOS)
         // ON THE MAIN THREAD: `NSTableView.frame` re-tiles a dirty table
         // inside the read, and a tile from the harness thread is an
@@ -22126,7 +22135,7 @@ func kayaTableColumnsReach(_ spec: Substring) -> CGFloat {
 }
 
 func kayaTableTrailing(_ spec: Substring) -> (Double, Double)? {
-    guard let node = kayaTarget(spec, "column", kayaScene.columns) else { return nil }
+    guard let node = kayaOnMain({ kayaTarget(spec, "column", kayaScene.columns) }) else { return nil }
     #if os(macOS)
         if let driver = kayaOnMain({ kayaTableDrivers[node.id] }) {
             // The same main-thread rule as kayaTableHorizontal's read.

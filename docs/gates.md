@@ -77,7 +77,10 @@ missing-handle cases, with three counted removal negatives; and every
 script's `expect_title` on its primary window beside the core's wall,
 which refuses a primary mounted untitled under the harness, since an
 untitled window shows the executable's name (docs/traps.md, the untitled
-primary); one script and three wall cuts watched)
+primary); one script and three wall cuts watched. AND THE SwiftUI LIVE SET
+IS READ ON THE MAIN THREAD since 2026-11-19 (docs/traps.md, the keyed target
+read off the main thread): kayaLiveIds' precondition and the table helpers'
+hop, two cuts watched)
 
 ## tools/check-shell.py
 
